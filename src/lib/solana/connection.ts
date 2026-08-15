@@ -44,12 +44,9 @@ export const NETWORK_LABEL: string =
 export const IS_MAINNET: boolean = SOLANA_NETWORK === "mainnet-beta";
 
 /**
- * RPC endpoint for the active network.
- *
- * Uses the public Solana endpoints by default. For production you would
- * override this with a dedicated RPC (Helius, QuickNode, Triton, etc.) via
- * NEXT_PUBLIC_RPC_ENDPOINT, but for devnet development the public endpoint is
- * fine and keeps the project free to run.
+ * Public Solana endpoints, used by default for every network. The mainnet
+ * build can be pointed at a dedicated RPC instead; see MAINNET_RPC_ENDPOINT
+ * below.
  */
 const PUBLIC_ENDPOINTS: Record<SolanaNetwork, string> = {
   // Local test validator (solana-test-validator). For development only.
@@ -59,7 +56,16 @@ const PUBLIC_ENDPOINTS: Record<SolanaNetwork, string> = {
   testnet: "https://api.testnet.solana.com",
 };
 
-// TODO: point mainnet builds at a dedicated RPC before launch, not the
-// public endpoint.
+/**
+ * Optional dedicated RPC endpoint for the mainnet build. The public
+ * mainnet endpoint is rate limited per IP and flaky under load, so
+ * production points at a provider endpoint (set via Vercel env vars)
+ * instead. Devnet and localhost always use the public endpoints: this
+ * override can never redirect a devnet build at mainnet.
+ */
+const MAINNET_RPC_ENDPOINT = process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT;
+
 export const RPC_ENDPOINT: string =
-  process.env.NEXT_PUBLIC_RPC_ENDPOINT || PUBLIC_ENDPOINTS[SOLANA_NETWORK];
+  IS_MAINNET && MAINNET_RPC_ENDPOINT
+    ? MAINNET_RPC_ENDPOINT
+    : PUBLIC_ENDPOINTS[SOLANA_NETWORK];
