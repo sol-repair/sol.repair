@@ -104,8 +104,7 @@ it is at your own risk.
 
 ## Status
 
-Live at https://sol.repair on Solana devnet (test funds only) and still
-under development. Not on mainnet yet. There is a 1% success fee on
-recovered SOL, taken as a transfer inside the repair transaction, so it is
-always visible in your wallet before you approve. Details in the Terms of
-Service on the site.
+Live at https://sol.repair on Solana mainnet. There is a 1% success fee
+on recovered SOL, taken as a transfer inside the repair transaction, so
+it is always visible in your wallet before you approve. Details in the
+Terms of Service on the site.
