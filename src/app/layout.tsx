@@ -16,15 +16,42 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SOL.repair | Solana Wallet Repair",
+  metadataBase: new URL("https://sol.repair"),
+  title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
   description:
     "Find unused Solana token accounts and recover the SOL locked inside them as account rent. Non-custodial.",
+  alternates: { canonical: "/" },
+  openGraph: {
+    title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
+    description:
+      "Empty token accounts lock ~0.002 SOL each as rent. Close them in a few transactions you sign yourself. Non-custodial, 1% success fee.",
+    url: "https://sol.repair",
+    siteName: "SOL.repair",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
+    description:
+      "Empty token accounts lock ~0.002 SOL each as rent. Close them in a few transactions you sign yourself.",
+  },
   // Hidden from search engines everywhere except mainnet. Gated on the same
   // env var as the network itself, so the mainnet launch can't forget to
   // lift it, and a misconfigured build fails hidden rather than exposed.
   robots: IS_MAINNET
     ? { index: true, follow: true }
     : { index: false, follow: false },
+};
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  name: "SOL.repair",
+  url: "https://sol.repair",
+  applicationCategory: "FinanceApplication",
+  operatingSystem: "Web",
+  description:
+    "Finds empty Solana token accounts and closes them, returning the locked account rent to the user's own wallet. Non-custodial.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -35,6 +62,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-full flex flex-col bg-black text-zinc-100">
         <SolanaProvider>{children}</SolanaProvider>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+        />
         {/* Privacy-friendly aggregate visit counting. No cookies, no
             cross-site tracking (see /privacy). */}
         <Analytics />

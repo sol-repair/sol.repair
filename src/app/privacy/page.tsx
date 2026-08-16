@@ -3,6 +3,9 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Privacy Policy | SOL.repair",
+  description:
+    "Privacy policy for SOL.repair: no accounts, no tracking cookies, scanning happens in your browser.",
+  alternates: { canonical: "/privacy" },
 };
 
 export default function PrivacyPage() {

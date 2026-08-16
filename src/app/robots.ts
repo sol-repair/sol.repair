@@ -11,6 +11,7 @@ export default function robots(): MetadataRoute.Robots {
   if (IS_MAINNET) {
     return {
       rules: { userAgent: "*", allow: "/" },
+      sitemap: "https://sol.repair/sitemap.xml",
     };
   }
   return {

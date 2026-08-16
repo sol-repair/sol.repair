@@ -3,6 +3,9 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Terms of Service | SOL.repair",
+  description:
+    "Terms of service for SOL.repair: non-custodial use, the 1% success fee, network fees, and liability.",
+  alternates: { canonical: "/terms" },
 };
 
 export default function TermsPage() {
