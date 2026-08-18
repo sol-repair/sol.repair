@@ -44,8 +44,10 @@ Token accounts (classic SPL Token and Token-2022) that pass all of these:
    alone. The app enforces this and so does the Solana program, so it's
    checked twice.
 2. Not actively delegated.
-3. Not wrapped SOL.
-4. In the "initialized" state.
+3. Close authority still with your wallet. Some accounts created by other
+   programs can only be closed by those programs, so they are skipped.
+4. Not wrapped SOL.
+5. In the "initialized" state.
 
 Fail any one of those and the account is skipped, no exceptions. NFTs and
 any account holding tokens are protected by the zero-balance rule.

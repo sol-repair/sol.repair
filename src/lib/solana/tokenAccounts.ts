@@ -1,7 +1,7 @@
 /**
  * Wallet scanning and account eligibility classification.
  *
- * This is the safety-critical core of SOL.repair. The four eligibility checks
+ * This is the safety-critical core of SOL.repair. The five eligibility checks
  * encoded here decide which accounts are safe to close. Getting this right is
  * everything: if we wrongly mark a funded account as closeable, a user could
  * lose tokens.
@@ -46,6 +46,8 @@ interface TokenAccountInfo {
     uiAmountString: string;
   };
   delegate: string | null;
+  /** Omitted by the parsed RPC response when no close authority is set. */
+  closeAuthority?: string | null;
   state: "initialized" | "uninitialized" | "frozen";
   isNative: boolean;
 }
@@ -77,7 +79,7 @@ export interface SkippedAccount {
 export interface ScanResult {
   /** Total SPL token accounts found, including non-eligible ones. */
   totalAccounts: number;
-  /** Accounts that passed all four eligibility checks. */
+  /** Accounts that passed all five eligibility checks. */
   eligibleAccounts: ClosableAccount[];
   /** Total lamports recoverable by closing all eligible accounts. */
   recoverableLamports: bigint;
@@ -115,7 +117,7 @@ export async function getClosableAccounts(
       const info = (account.data as { parsed: { info: TokenAccountInfo } })
         .parsed.info;
 
-      // --- The four eligibility checks ---
+      // --- The five eligibility checks ---
       //
       // These are stricter than the protocol minimum. The on-chain program
       // only enforces check #1 (zero balance). We add the rest defensively
@@ -152,7 +154,24 @@ export async function getClosableAccounts(
         continue;
       }
 
-      // 3. Not wrapped SOL. Native accounts have special closing semantics
+      // 3. Close authority still with the owner.
+      //    Accounts created by other programs (DeFi auxiliaries, spam
+      //    infrastructure) can carry a close authority that is not the
+      //    wallet owner. Only the close authority can sign a closeAccount,
+      //    so offering these would build a transaction that always fails.
+      //    Same Boolean() pattern as the delegate check: the parsed
+      //    response omits the field entirely when it is unset.
+      if (info.closeAuthority && info.closeAuthority !== owner.toString()) {
+        skippedAccounts.push({
+          pubkey: pubkey.toString(),
+          mint: info.mint,
+          reason: "close authority belongs to another address",
+          program: tag,
+        });
+        continue;
+      }
+
+      // 4. Not wrapped SOL. Native accounts have special closing semantics
       //    that are out of scope for v1.
       const isNative = info.isNative !== false;
       if (isNative) {
@@ -165,7 +184,7 @@ export async function getClosableAccounts(
         continue;
       }
 
-      // 4. Initialized state. Frozen and uninitialized accounts need special
+      // 5. Initialized state. Frozen and uninitialized accounts need special
       //    handling and are skipped in v1.
       if (info.state !== "initialized") {
         skippedAccounts.push({
@@ -177,7 +196,7 @@ export async function getClosableAccounts(
         continue;
       }
 
-      // All four checks passed. This account is safe to close.
+      // All five checks passed. This account is safe to close.
       eligibleAccounts.push({
         pubkey: pubkey.toString(),
         mint: info.mint,

@@ -7,7 +7,7 @@
  * Safety properties enforced here:
  *   - The destination for recovered SOL is ALWAYS the user's own wallet.
  *     Never any other address. This is the whole point of the tool.
- *   - We only build instructions for accounts that already passed the four
+ *   - We only build instructions for accounts that already passed the five
  *     eligibility checks in tokenAccounts.ts. Defense in depth: even though
  *     the scan already validated these, we re-derive from the ClosableAccount
  *     list which only contains eligible accounts.
