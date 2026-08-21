@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * WalletButton: custom connect button.
+ * WalletButton: custom connect button and wallet picker.
  *
- * The stock WalletMultiButton has hardcoded labels ("Select Wallet",
- * "Connect"), and the word "Connect" alone doesn't say what the connection
- * is FOR. Every label here states the purpose: read-only scanning. The
- * label itself builds trust.
+ * The stock WalletMultiButton and WalletModal had hardcoded labels
+ * ("Select Wallet", "Connect") and rendered as a glitchy blank panel
+ * on some mobile browsers, so both got replaced with our own. Every
+ * label here states the purpose: read-only scanning. The label itself
+ * builds trust.
  *
  * useSyncExternalStore gives us a hydration-safe "are we on the client
  * yet" value: the server snapshot is false, the client snapshot is true,
@@ -15,7 +16,6 @@
 
 import { useSyncExternalStore, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 
 const emptySubscribe = () => () => {};
 
@@ -31,6 +31,67 @@ const NO_WALLET_MESSAGE =
 const CONNECT_FAILED_MESSAGE =
   "Couldn't connect to this wallet. If it keeps failing, open sol.repair inside your wallet's own browser and try again.";
 
+/**
+ * The wallet picker. Picking a wallet only selects it; the green
+ * connect button does the connecting, so the user always taps a
+ * button that says what the tap does.
+ */
+function WalletPicker({
+  onClose,
+}: {
+  onClose: () => void;
+}) {
+  const { wallets, select } = useWallet();
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose a wallet"
+    >
+      <div
+        className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-950 p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+          Choose a wallet
+        </p>
+        <div className="mt-3 space-y-1">
+          {wallets.map((wallet) => (
+            <button
+              key={wallet.adapter.name}
+              onClick={() => {
+                select(wallet.adapter.name);
+                onClose();
+              }}
+              className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left transition-colors hover:bg-zinc-900"
+            >
+              {/* Wallet icons are remote URLs provided by each adapter. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={wallet.adapter.icon}
+                alt=""
+                className="h-6 w-6"
+              />
+              <span className="text-sm text-zinc-200">
+                {wallet.adapter.name}
+              </span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={onClose}
+          className="mt-3 w-full rounded-md border border-zinc-800 px-3 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function WalletButton() {
   const isClient = useSyncExternalStore(
     emptySubscribe,
@@ -39,8 +100,8 @@ export function WalletButton() {
   );
   const { wallet, wallets, connect, connected, connecting, disconnect, publicKey } =
     useWallet();
-  const modal = useWalletModal();
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   if (!isClient) {
     // Placeholder that reserves roughly the button's space so the layout
@@ -103,13 +164,14 @@ export function WalletButton() {
             setWalletError(NO_WALLET_MESSAGE);
             return;
           }
-          modal.setVisible(true);
+          setPickerOpen(true);
         }}
         className={`${base} bg-[#14F195] text-black hover:bg-[#0fd584]`}
       >
         Select Wallet
       </button>
       {errorLine}
+      {pickerOpen && <WalletPicker onClose={() => setPickerOpen(false)} />}
     </>
   );
 }

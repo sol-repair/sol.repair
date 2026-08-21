@@ -11,12 +11,7 @@
  */
 
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { useMemo, type ReactNode } from "react";
-
-// Default styling for the wallet adapter modal. This import is required for
-// the prebuilt WalletMultiButton and modal to render correctly.
-import "@solana/wallet-adapter-react-ui/styles.css";
 
 import { RPC_ENDPOINT } from "@/lib/solana/connection";
 
@@ -29,14 +24,13 @@ export function SolanaProvider({ children }: { children: ReactNode }) {
     <ConnectionProvider endpoint={endpoint}>
       {/* wallets={[]} uses Wallet Standard auto-discovery: Phantom, Solflare,
           Backpack, etc. are detected in the browser without bundling legacy
-          wallet-specific adapters.
+          wallet-specific adapters. The connect button and wallet picker are
+          our own components; the stock modal UI is not used.
 
           autoConnect is off on purpose. A wallet silently reconnecting on
           page load reads like the opening move of a drainer flow. Returning
           users click connect once. */}
-      <WalletProvider wallets={[]}>
-        <WalletModalProvider>{children}</WalletModalProvider>
-      </WalletProvider>
+      <WalletProvider wallets={[]}>{children}</WalletProvider>
     </ConnectionProvider>
   );
 }

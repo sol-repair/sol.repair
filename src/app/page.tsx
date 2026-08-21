@@ -349,7 +349,7 @@ export default function Home() {
 
         <div className="mb-8">
           <WalletButton />
-          <p className="mt-3 text-center text-xs leading-relaxed text-zinc-600">
+          <p className="mt-3 text-center text-xs leading-relaxed text-zinc-500">
             Read-only connection. Powered by @solana/wallet-adapter.
           </p>
         </div>
@@ -359,10 +359,10 @@ export default function Home() {
             className="mb-8 rounded-lg border border-zinc-800 bg-zinc-950 p-4"
             aria-hidden="true"
           >
-            <p className="text-[11px] uppercase tracking-wider text-zinc-600">
+            <p className="text-[11px] uppercase tracking-wider text-zinc-400">
               Example scan. Your accounts appear here
             </p>
-            <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-500">
+            <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
               <div className="flex items-baseline justify-between gap-3">
                 <span className="flex items-start gap-2">
                   <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
@@ -504,7 +504,7 @@ export default function Home() {
               )}
 
               {result.skippedAccounts.length > 0 && (
-                <details className="mt-2">
+                <details className="mt-4">
                   <summary className="cursor-pointer text-xs text-zinc-500 transition-colors hover:text-zinc-300">
                     {result.skippedAccounts.length} skipped, kept safe, with
                     reasons
@@ -536,14 +536,14 @@ export default function Home() {
 
             {result.eligibleAccounts.length === 0 &&
               result.totalAccounts > 0 && (
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-zinc-400">
                   Your wallet has token accounts, but none are eligible for
                   closing right now.
                 </p>
               )}
 
             {result.totalAccounts === 0 && (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-400">
                 No token accounts found. This wallet is already clean.
               </p>
             )}
