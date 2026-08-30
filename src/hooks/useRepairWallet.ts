@@ -12,6 +12,13 @@
  * exactly how much was already repaired, verified on-chain - never an
  * all-or-nothing error when money already moved.
  *
+ * Only one repair runs at a time: a synchronous in-flight flag makes a
+ * second repair() call a no-op until the first finishes (including when it
+ * fails - the flag is released in a finally). The wallet identity is also
+ * pinned when the run starts; if the connected wallet changes mid-run the
+ * repair stops before the next batch and reports it, instead of silently
+ * building the remaining transactions for a different wallet.
+ *
  * Flow per batch:
  *   1. buildTransaction() assembles the unsigned transaction (lib layer,
  *      fresh blockhash every attempt)
@@ -35,7 +42,7 @@
  * the wallet adapter, which hands it to Phantom for the user to approve.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 
@@ -43,7 +50,7 @@ import {
   buildCloseAccountInstructions,
   verifyAccountsClosed,
 } from "@/lib/solana/closeAccounts";
-import { buildFeeTransfer, feeAccountReady } from "@/lib/solana/fees";
+import { buildFeeTransfer } from "@/lib/solana/fees";
 import {
   buildTransaction,
   chunkInstructions,
@@ -110,214 +117,239 @@ export function useRepairWallet() {
 
   const [state, setState] = useState<RepairState>(INITIAL_STATE);
 
+  // Synchronous in-flight flag (a ref, not state): set before the first
+  // await so a second repair() call in the same tick is already a no-op,
+  // and released in a finally so a failed or cancelled run never bricks
+  // future repairs.
+  const repairInFlight = useRef(false);
+
   const repair = useCallback(
-    async (accounts: ClosableAccount[]) => {
-      if (!wallet.publicKey || !wallet.signTransaction) {
-        setState({
-          ...INITIAL_STATE,
-          status: "error",
-          error: "Wallet not connected or does not support signing.",
-        });
-        return;
-      }
-
-      // Rent per account pubkey, for computing recovered amounts from the
-      // set of accounts the chain says are actually closed.
-      const lamportsOf = new Map(accounts.map((a) => [a.pubkey, a.lamports]));
-      const recoveredOf = (pubkeys: Iterable<string>): bigint => {
-        let sum = 0n;
-        for (const p of pubkeys) sum += BigInt(lamportsOf.get(p) ?? 0);
-        return sum;
-      };
-
-      const confirmed: string[] = [];
-      const closedSoFar = new Set<string>();
-      const batches = chunkInstructions(accounts);
-
-      // Fees need the fee account to exist on-chain (it does not until its
-      // first deposit). Check once and skip the fee if it is not there yet.
-      // The repair itself never depends on the fee.
-      let feeReady = false;
+    async (accounts: ClosableAccount[], feeReady: boolean) => {
+      if (repairInFlight.current) return;
+      repairInFlight.current = true;
       try {
-        feeReady = await feeAccountReady(connection);
-      } catch {
-        feeReady = false;
-      }
+        if (!wallet.publicKey || !wallet.signTransaction) {
+          setState({
+            ...INITIAL_STATE,
+            status: "error",
+            error: "Wallet not connected or does not support signing.",
+          });
+          return;
+        }
 
-      const setRunState = (patch: Partial<RepairState>) =>
-        setState((prev) => ({ ...prev, ...patch }));
+        // Pin the wallet identity for the whole run. Instructions, fee
+        // payer, and signing all use these captured values, so the repair
+        // can never drift onto a wallet the user connected mid-run. The
+        // live wallet is compared before each batch below.
+        const repairOwner = wallet.publicKey;
+        const signer = wallet.signTransaction;
+        let walletChanged = false;
 
-      try {
-        setRunState({
-          ...INITIAL_STATE,
-          status: "building",
-          totalToClose: accounts.length,
-          progress: { current: 1, total: batches.length },
-        });
+        // Rent per account pubkey, for computing recovered amounts from the
+        // set of accounts the chain says are actually closed.
+        const lamportsOf = new Map(accounts.map((a) => [a.pubkey, a.lamports]));
+        const recoveredOf = (pubkeys: Iterable<string>): bigint => {
+          let sum = 0n;
+          for (const p of pubkeys) sum += BigInt(lamportsOf.get(p) ?? 0);
+          return sum;
+        };
 
-        for (let b = 0; b < batches.length; b++) {
-          const batch = batches[b];
-          const instructions = buildCloseAccountInstructions(
-            batch,
-            wallet.publicKey
-          );
-          // The 1% fee rides in the same transaction, AFTER the closes, so
-          // the rent they just returned covers it. It shows up in the wallet
-          // as a plain transfer before the user approves.
-          const fee = feeReady
-            ? buildFeeTransfer(wallet.publicKey, batch)
-            : null;
-          if (fee) instructions.push(fee);
-          const progress = { current: b + 1, total: batches.length };
-          let batchLanded = false;
+        const confirmed: string[] = [];
+        const closedSoFar = new Set<string>();
+        const batches = chunkInstructions(accounts);
 
-          for (let attempt = 1; attempt <= MAX_ATTEMPTS && !batchLanded; attempt++) {
-            // 1. Assemble the unsigned transaction (fresh blockhash each
-            //    attempt - this is the whole point of the retry).
-            setRunState({ status: "building", progress });
-            const transaction = await buildTransaction(
-              connection,
-              wallet.publicKey,
-              instructions
-            );
+        // feeReady is decided once by the page (does the fee account exist
+        // on-chain?) and passed in, so the preview, the confirmation copy,
+        // and this transaction can never disagree about the fee.
 
-            // 2. Hand the unsigned transaction to the wallet for signing.
-            //    This is where Phantom pops up and the user clicks Approve.
-            //    Nothing is signed until the user explicitly approves.
-            setRunState({ status: "awaiting-signature", progress });
-            const signed = await wallet.signTransaction(transaction);
+        const setRunState = (patch: Partial<RepairState>) =>
+          setState((prev) => ({ ...prev, ...patch }));
 
-            // The signature is derived from the signed payload itself, so it
-            // identifies this exact transaction no matter who submits it -
-            // our app or the wallet's own submission.
-            const signatureBytes = signed.signatures[0]?.signature;
-            if (!signatureBytes) {
+        try {
+          setRunState({
+            ...INITIAL_STATE,
+            status: "building",
+            totalToClose: accounts.length,
+            progress: { current: 1, total: batches.length },
+          });
+
+          for (let b = 0; b < batches.length; b++) {
+            const batch = batches[b];
+            // If the connected wallet changed since the run started, stop
+            // BEFORE building the next transaction. Never sign for a
+            // different identity than the one the user started with.
+            const livePublicKey = wallet.publicKey;
+            if (!livePublicKey || !livePublicKey.equals(repairOwner)) {
+              walletChanged = true;
               throw new Error(
-                "Wallet returned a transaction without a signature. Nothing was sent."
+                "The connected wallet changed during the repair. Stopped before signing anything else. Reconnect the original wallet and run the repair again for the remaining accounts."
               );
             }
-            const signature = bs58.encode(signatureBytes);
-            setRunState({
-              status: "sending",
-              signature: confirmed[0] ?? signature,
-              signatures: [...confirmed],
-            });
+            const instructions = buildCloseAccountInstructions(
+              batch,
+              repairOwner
+            );
+            // The 1% fee rides in the same transaction, AFTER the closes, so
+            // the rent they just returned covers it. It shows up in the wallet
+            // as a plain transfer before the user approves.
+            const fee = feeReady
+              ? buildFeeTransfer(repairOwner, batch)
+              : null;
+            if (fee) instructions.push(fee);
+            const progress = { current: b + 1, total: batches.length };
+            let batchLanded = false;
 
-            try {
-              // 3. Send the signed transaction to the network.
-              const sentSignature = await connection.sendRawTransaction(
-                signed.serialize()
-              );
-
-              // 4. Wait for confirmation. Passing the blockhash +
-              //    lastValidBlockHeight (rather than just the signature)
-              //    bounds the wait: confirmation ends once the blockhash
-              //    expires, instead of polling indefinitely.
-              await connection.confirmTransaction(
-                {
-                  signature: sentSignature,
-                  blockhash: transaction.recentBlockhash!,
-                  lastValidBlockHeight: transaction.lastValidBlockHeight!,
-                },
-                "confirmed"
-              );
-
-              batchLanded = true;
-            } catch (sendError) {
-              // Our submission failed - but that may not mean the repair
-              // failed. The wallet may have submitted the transaction itself
-              // and it may have already landed. Ask the chain what actually
-              // happened.
-              setRunState({ status: "verifying", progress });
-
-              const { closedPubkeys } = await verifyAccountsClosed(
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS && !batchLanded; attempt++) {
+              // 1. Assemble the unsigned transaction (fresh blockhash each
+              //    attempt - this is the whole point of the retry).
+              setRunState({ status: "building", progress });
+              const transaction = await buildTransaction(
                 connection,
-                batch
+                repairOwner,
+                instructions
               );
 
-              if (closedPubkeys.length === batch.length) {
-                // Everything in this batch is closed. The repair succeeded;
-                // our submission simply lost the race. Fall through to the
-                // bookkeeping below (a break here would skip it).
+              // 2. Hand the unsigned transaction to the wallet for signing.
+              //    This is where Phantom pops up and the user clicks Approve.
+              //    Nothing is signed until the user explicitly approves.
+              setRunState({ status: "awaiting-signature", progress });
+              const signed = await signer(transaction);
+
+              // The signature is derived from the signed payload itself, so it
+              // identifies this exact transaction no matter who submits it -
+              // our app or the wallet's own submission.
+              const signatureBytes = signed.signatures[0]?.signature;
+              if (!signatureBytes) {
+                throw new Error(
+                  "Wallet returned a transaction without a signature. Nothing was sent."
+                );
+              }
+              const signature = bs58.encode(signatureBytes);
+              setRunState({
+                status: "sending",
+                signature: confirmed[0] ?? signature,
+                signatures: [...confirmed],
+              });
+
+              try {
+                // 3. Send the signed transaction to the network.
+                const sentSignature = await connection.sendRawTransaction(
+                  signed.serialize()
+                );
+
+                // 4. Wait for confirmation. Passing the blockhash +
+                //    lastValidBlockHeight (rather than just the signature)
+                //    bounds the wait: confirmation ends once the blockhash
+                //    expires, instead of polling indefinitely.
+                await connection.confirmTransaction(
+                  {
+                    signature: sentSignature,
+                    blockhash: transaction.recentBlockhash!,
+                    lastValidBlockHeight: transaction.lastValidBlockHeight!,
+                  },
+                  "confirmed"
+                );
+
                 batchLanded = true;
-              } else {
-                // Not landed. An expired blockhash is retryable with a fresh
-                // one; anything else fails this batch.
-                const message =
-                  sendError instanceof Error
-                    ? sendError.message
-                    : String(sendError);
-                if (attempt < MAX_ATTEMPTS && /blockhash/i.test(message)) {
-                  continue;
+              } catch (sendError) {
+                // Our submission failed - but that may not mean the repair
+                // failed. The wallet may have submitted the transaction itself
+                // and it may have already landed. Ask the chain what actually
+                // happened.
+                setRunState({ status: "verifying", progress });
+
+                const { closedPubkeys } = await verifyAccountsClosed(
+                  connection,
+                  batch
+                );
+
+                if (closedPubkeys.length === batch.length) {
+                  // Everything in this batch is closed. The repair succeeded;
+                  // our submission simply lost the race. Fall through to the
+                  // bookkeeping below (a break here would skip it).
+                  batchLanded = true;
+                } else {
+                  // Not landed. An expired blockhash is retryable with a fresh
+                  // one; anything else fails this batch.
+                  const message =
+                    sendError instanceof Error
+                      ? sendError.message
+                      : String(sendError);
+                  if (attempt < MAX_ATTEMPTS && /blockhash/i.test(message)) {
+                    continue;
+                  }
+                  throw sendError;
                 }
-                throw sendError;
+              }
+
+              if (batchLanded) {
+                confirmed.push(signature);
+                for (const a of batch) closedSoFar.add(a.pubkey);
+                setRunState({
+                  signatures: [...confirmed],
+                  signature: confirmed[0],
+                  closedCount: closedSoFar.size,
+                  recoveredLamports: recoveredOf(closedSoFar),
+                });
               }
             }
-
-            if (batchLanded) {
-              confirmed.push(signature);
-              for (const a of batch) closedSoFar.add(a.pubkey);
-              setRunState({
-                signatures: [...confirmed],
-                signature: confirmed[0],
-                closedCount: closedSoFar.size,
-                recoveredLamports: recoveredOf(closedSoFar),
-              });
-            }
           }
+
+          // All batches landed.
+          setState({
+            status: "done",
+            signature: confirmed[0],
+            signatures: [...confirmed],
+            closedCount: closedSoFar.size,
+            totalToClose: accounts.length,
+            recoveredLamports: recoveredOf(closedSoFar),
+            progress: null,
+            error: null,
+          });
+        } catch (err) {
+          // The run stopped - real error, expired blockhash (twice), a
+          // wallet switch, or the user cancelled an approval. Batches that
+          // already landed are still repaired; report that honestly instead
+          // of all-or-nothing.
+          const message = err instanceof Error ? err.message : String(err);
+          const rejected =
+            message.toLowerCase().includes("user rejected") ||
+            message.toLowerCase().includes("rejected");
+          // A blockhash expiry is a dead transaction, never a lost one.
+          const expired = /blockhash/i.test(message);
+
+          let closedPubkeys: string[] = [];
+          try {
+            setRunState({ status: "verifying" });
+            const verified = await verifyAccountsClosed(connection, accounts);
+            closedPubkeys = verified.closedPubkeys;
+          } catch {
+            // Verification itself failed; report without partial info rather
+            // than masking the original error.
+          }
+
+          const closed = closedPubkeys.length;
+          const partial = closed > 0;
+
+          setState({
+            status: "error",
+            signature: confirmed[0] ?? null,
+            signatures: [...confirmed],
+            closedCount: closed,
+            totalToClose: accounts.length,
+            recoveredLamports: recoveredOf(closedPubkeys),
+            progress: null,
+            error: partial
+              ? `Repair stopped after ${closed} of ${accounts.length} accounts were closed (${lamportsToSol(recoveredOf(closedPubkeys))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}`
+              : rejected
+                ? "Transaction cancelled. Nothing was sent."
+                : expired
+                  ? "The transaction expired while waiting for approval. Nothing was sent and nothing was lost. Please try again and approve promptly."
+                  : message,
+          });
         }
-
-        // All batches landed.
-        setState({
-          status: "done",
-          signature: confirmed[0],
-          signatures: [...confirmed],
-          closedCount: closedSoFar.size,
-          totalToClose: accounts.length,
-          recoveredLamports: recoveredOf(closedSoFar),
-          progress: null,
-          error: null,
-        });
-      } catch (err) {
-        // The run stopped - real error, expired blockhash (twice), or the
-        // user cancelled an approval. Batches that already landed are still
-        // repaired; report that honestly instead of all-or-nothing.
-        const message = err instanceof Error ? err.message : String(err);
-        const rejected =
-          message.toLowerCase().includes("user rejected") ||
-          message.toLowerCase().includes("rejected");
-        // A blockhash expiry is a dead transaction, never a lost one.
-        const expired = /blockhash/i.test(message);
-
-        let closedPubkeys: string[] = [];
-        try {
-          setRunState({ status: "verifying" });
-          const verified = await verifyAccountsClosed(connection, accounts);
-          closedPubkeys = verified.closedPubkeys;
-        } catch {
-          // Verification itself failed; report without partial info rather
-          // than masking the original error.
-        }
-
-        const closed = closedPubkeys.length;
-        const partial = closed > 0;
-
-        setState({
-          status: "error",
-          signature: confirmed[0] ?? null,
-          signatures: [...confirmed],
-          closedCount: closed,
-          totalToClose: accounts.length,
-          recoveredLamports: recoveredOf(closedPubkeys),
-          progress: null,
-          error: partial
-            ? `Repair stopped after ${closed} of ${accounts.length} accounts were closed (${lamportsToSol(recoveredOf(closedPubkeys))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}`
-            : rejected
-              ? "Transaction cancelled. Nothing was sent."
-              : expired
-                ? "The transaction expired while waiting for approval. Nothing was sent and nothing was lost. Please try again and approve promptly."
-                : message,
-        });
+      } finally {
+        repairInFlight.current = false;
       }
     },
     [connection, wallet]

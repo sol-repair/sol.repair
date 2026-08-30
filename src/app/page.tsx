@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   useConnection,
   useWallet,
@@ -148,6 +148,36 @@ export default function Home() {
     | { state: "error"; error: string }
   >({ state: "idle" });
 
+  // The single fee decision the whole confirmation flow shares: does the
+  // fee account exist on-chain? Preview, simulation, copy, and the repair
+  // itself all consume this value, so they can never disagree. Resets to
+  // false (fee skipped) whenever the wallet changes, and stays false until
+  // the chain answers - a stale false only ever under-collects, it never
+  // promises a fee that will not be charged.
+  const [feeReady, setFeeReady] = useState(false);
+  const [feeOwner, setFeeOwner] = useState<string | null>(null);
+  const feeOwnerKey = publicKey ? publicKey.toBase58() : null;
+  if (feeOwnerKey !== feeOwner) {
+    // Reset during render (the "reset state on data change" pattern) so a
+    // previous wallet's fee decision can never leak into a new wallet.
+    setFeeOwner(feeOwnerKey);
+    setFeeReady(false);
+  }
+  useEffect(() => {
+    if (!publicKey) return;
+    let cancelled = false;
+    feeAccountReady(connection)
+      .then((ready) => {
+        if (!cancelled) setFeeReady(ready);
+      })
+      .catch(() => {
+        if (!cancelled) setFeeReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, publicKey]);
+
   const hasEligible = result && result.eligibleAccounts.length > 0;
 
   // --- Account selection: granular user control over WHAT gets closed. ---
@@ -226,7 +256,7 @@ export default function Home() {
       rentDestination: publicKey.toBase58(),
       closeAuthority: publicKey.toBase58(),
     }));
-    const fee = buildFeeTransfer(publicKey, first);
+    const fee = feeReady ? buildFeeTransfer(publicKey, first) : null;
     if (fee) {
       preview.push({
         program: "System Program",
@@ -238,7 +268,7 @@ export default function Home() {
       });
     }
     return preview;
-  }, [publicKey, selectedAccounts, selectedCount]);
+  }, [publicKey, selectedAccounts, selectedCount, feeReady]);
 
   // Simulate every batch against the RPC (no signature needed). Passing the
   // simulation proves the transactions execute cleanly; the net SOL change
@@ -249,13 +279,8 @@ export default function Home() {
     setSim({ state: "running" });
     try {
       const batches = chunkInstructions(selectedAccounts);
-      // Same fee gating as the real repair: the fee account must exist.
-      let feeReady = false;
-      try {
-        feeReady = await feeAccountReady(connection);
-      } catch {
-        feeReady = false;
-      }
+      // feeReady is the shared page-level decision, so the simulation and
+      // the real repair can never disagree about the fee.
       for (const batch of batches) {
         const instructions = buildCloseAccountInstructions(batch, publicKey);
         // Same shape as the real repair: closes first, fee transfer last.
@@ -293,7 +318,7 @@ export default function Home() {
         error: e instanceof Error ? e.message : String(e),
       });
     }
-  }, [connection, publicKey, selectedAccounts, selectedCount, selectedLamports, serviceFeeLamports]);
+  }, [connection, publicKey, selectedAccounts, selectedCount, selectedLamports, serviceFeeLamports, feeReady]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
@@ -594,16 +619,16 @@ export default function Home() {
                     adds when signing, all to the Solana network, not to us
                   </p>
                   <p>
-                    Service fee (1% of recovered): ~
-                    {lamportsToSol(serviceFeeLamports)} SOL, one transfer to
-                    the published fee address
+                    {feeReady
+                      ? `Service fee (1% of recovered): ~${lamportsToSol(serviceFeeLamports)} SOL, one transfer to the published fee address`
+                      : "Service fee: none on this repair (the fee account is not ready yet)"}
                   </p>
                 </div>
 
                 <p className="mt-3 text-xs font-medium text-emerald-400">
-                  No tokens are moved, ever. The only SOL that leaves your
-                  wallet is the 1% service fee, shown in your wallet before
-                  you approve.
+                  {feeReady
+                    ? "No tokens are moved, ever. The only SOL that leaves your wallet is the 1% service fee, shown in your wallet before you approve."
+                    : "No tokens are moved, ever. No SOL leaves your wallet on this repair."}
                 </p>
 
                 {/* Raw transaction inspector: prove what will be signed. */}
@@ -612,12 +637,9 @@ export default function Home() {
                     Inspect exactly what you&rsquo;ll sign
                   </summary>
                   <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-                    Every transaction contains closeAccount instructions
-                    (classic Token Program or Token-2022, matching each
-                    account) plus one transfer for the 1% service fee to the
-                    published fee address. No token approvals, no authority
-                    changes, nothing else. Rent goes back to your own
-                    address.
+                    {feeReady
+                      ? "Every transaction contains closeAccount instructions (classic Token Program or Token-2022, matching each account) plus one transfer for the 1% service fee to the published fee address. No token approvals, no authority changes, nothing else. Rent goes back to your own address."
+                      : "Every transaction contains closeAccount instructions (classic Token Program or Token-2022, matching each account). No fee transfer. No token approvals, no authority changes, nothing else. Rent goes back to your own address."}
                     {batchCount > 1 &&
                       ` Showing the first of ${batchCount} transactions.`}
                   </p>
@@ -644,7 +666,7 @@ export default function Home() {
                       Simulation passed on all {sim.txCount} transaction
                       {sim.txCount === 1 ? "" : "s"}. Expected net: +
                       {sim.netSol} SOL to your wallet after the network fee
-                      and the 1% service fee.
+                      {feeReady ? " and the 1% service fee" : ""}.
                       (Your wallet may add a priority fee when signing.)
                     </p>
                   )}
@@ -656,7 +678,7 @@ export default function Home() {
                 </div>
                 <div className="mt-4 flex gap-3">
                   <button
-                    onClick={() => repair(selectedAccounts)}
+                    onClick={() => repair(selectedAccounts, feeReady)}
                     disabled={selectedCount === 0}
                     className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
                   >
