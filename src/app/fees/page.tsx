@@ -14,6 +14,7 @@ import { useFeeLedger } from "@/hooks/useFeeLedger";
 import {
   formatBlockTime,
   formatLamportsSol,
+  isKnownTestFee,
   type FeeLedgerCluster,
 } from "@/lib/solana/feeLedger";
 
@@ -182,8 +183,18 @@ export default function FeesPage() {
                   <span className="whitespace-nowrap text-zinc-400">
                     {formatBlockTime(row.blockTime)}
                   </span>
-                  <span className="flex-1 truncate text-zinc-400 underline decoration-zinc-700 underline-offset-2 group-hover:text-zinc-200">
-                    {short(row.signature)}
+                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                    <span className="truncate text-zinc-400 underline decoration-zinc-700 underline-offset-2 group-hover:text-zinc-200">
+                      {short(row.signature)}
+                    </span>
+                    {isKnownTestFee(cluster, row.signature) && (
+                      <span
+                        title="Known operator test, not organic revenue"
+                        className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-zinc-400"
+                      >
+                        test
+                      </span>
+                    )}
                   </span>
                   <span className="whitespace-nowrap text-right tabular-nums text-zinc-300">
                     {formatLamportsSol(row.lamports)}

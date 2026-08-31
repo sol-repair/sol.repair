@@ -25,6 +25,7 @@ import {
   feeRowsFromRawTransactions,
   formatBlockTime,
   formatLamportsSol,
+  isKnownTestFee,
   type RawTransaction,
 } from "@/lib/solana/feeLedger";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@/lib/solana/tokenAccounts";
@@ -254,6 +255,44 @@ describe("feeRowsFromRawTransactions", () => {
     raw.blockTime = null;
     const rows = feeRowsFromRawTransactions([{ signature: "notime", raw }], FEE_WALLET);
     expect(rows[0].blockTime).toBeNull();
+  });
+});
+
+describe("isKnownTestFee", () => {
+  it("tags the three known mainnet self/family test signatures", () => {
+    // Receipt-verified signatures: two Aug 19 self-tests + the Aug 29
+    // family test (see PROJECT_STATE / self-test log).
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "i7Riy8r8TSts5dSoYayhjVUuRfkf4CTsd3JtYdVEFTjCNwEhMHhhJqMeeLkAyoGdHunvvsq7pZZwNcj6A7udhzY"
+      )
+    ).toBe(true);
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "4GnC4yuZUB2sC1Ft6aFP4ouhfaBKgHmAJBpYK4cCSVqeEmFUouDQorsSsUxw2wpnU2DqrM5CswPdphvagPqcPswi"
+      )
+    ).toBe(true);
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "qsbutSckYFLtSXXV9ewBsWqoPMePdpFcafuCR8pEXeu9yVUQLaAEMVwxV3wEv1cchn6ge3LTFYSCKXjn97yznPQ"
+      )
+    ).toBe(true);
+  });
+
+  it("does not tag an unknown mainnet signature (a real fee can never match)", () => {
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "5Xkd8WqNy32UmkbBBijgVJcYKEqmoYxZPcMWpUusEMkF1Sya3RfXRJqW1mffnPQKfCJuDnq4HpnSCUmDyKzEBkyz"
+      )
+    ).toBe(false);
+  });
+
+  it("tags every devnet signature: devnet SOL is test funds by definition", () => {
+    expect(isKnownTestFee("devnet", "anything-at-all")).toBe(true);
   });
 });
 

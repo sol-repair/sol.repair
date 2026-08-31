@@ -66,6 +66,34 @@ export type FeeLedgerRow = {
 
 export const FEE_LEDGER_PAGE_SIZE = 25;
 
+/** Mainnet fee signatures known (receipt-verified, operator-logged) to be
+ *  self-tests or family tests rather than organic fees. The ledger tags
+ *  these rows so the public page stays honest about what is real revenue.
+ *
+ *  The rule is deliberately signature-based: a real user's signature can
+ *  never appear here, so a real fee can never be mislabeled as a test.
+ *  When the operator runs a new mainnet test, its signature is verified
+ *  on-chain and added to this list in the next release. Devnet needs no
+ *  list: devnet SOL is test funds by definition, so every devnet row is
+ *  a test row. */
+const MAINNET_TEST_SIGNATURES: ReadonlySet<string> = new Set([
+  // Aug 19 self-test, Token-2022 close.
+  "i7Riy8r8TSts5dSoYayhjVUuRfkf4CTsd3JtYdVEFTjCNwEhMHhhJqMeeLkAyoGdHunvvsq7pZZwNcj6A7udhzY",
+  // Aug 19 self-test, classic SPL close.
+  "4GnC4yuZUB2sC1Ft6aFP4ouhfaBKgHmAJBpYK4cCSVqeEmFUouDQorsSsUxw2wpnU2DqrM5CswPdphvagPqcPswi",
+  // Aug 29 family test.
+  "qsbutSckYFLtSXXV9ewBsWqoPMePdpFcafuCR8pEXeu9yVUQLaAEMVwxV3wEv1cchn6ge3LTFYSCKXjn97yznPQ",
+]);
+
+/** True when a ledger row is a known test fee, not organic revenue. */
+export function isKnownTestFee(
+  cluster: FeeLedgerCluster,
+  signature: string
+): boolean {
+  if (cluster === "devnet") return true;
+  return MAINNET_TEST_SIGNATURES.has(signature);
+}
+
 /** Error thrown when the ledger's RPC calls fail. `kind` drives the
  *  user-facing message; the page never shows raw error text. */
 export class LedgerFetchError extends Error {
