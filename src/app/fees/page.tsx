@@ -116,7 +116,7 @@ export default function FeesPage() {
             <button
               key={c}
               onClick={() => setCluster(c)}
-              className={`rounded-md border px-3 py-1.5 font-mono text-xs transition-colors ${
+              className={`rounded-md border px-3 py-3 font-mono text-xs transition-colors ${
                 c === cluster
                   ? "border-zinc-500 text-zinc-100"
                   : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
@@ -145,7 +145,7 @@ export default function FeesPage() {
             <p className="mt-1 text-red-400/70">{error}</p>
             <button
               onClick={reload}
-              className="mt-3 rounded-lg border border-zinc-700 px-4 py-2 text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+              className="mt-3 rounded-lg border border-zinc-700 px-4 py-3 text-xs text-zinc-400 transition-colors hover:text-zinc-200"
             >
               Retry
             </button>
@@ -171,26 +171,24 @@ export default function FeesPage() {
                 <span className="text-right">Amount SOL</span>
               </div>
               {rows.map((row) => (
-                <div
+                <a
                   key={row.signature}
-                  className="flex items-baseline justify-between gap-3 border-b border-zinc-800 py-2 font-mono text-xs transition-colors hover:bg-zinc-900/40"
+                  href={explorerUrl(cluster, row.signature)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={row.signature}
+                  className="group flex items-baseline justify-between gap-3 border-b border-zinc-800 py-3 font-mono text-xs transition-colors hover:bg-zinc-900/40"
                 >
                   <span className="whitespace-nowrap text-zinc-500">
                     {formatBlockTime(row.blockTime)}
                   </span>
-                  <a
-                    href={explorerUrl(cluster, row.signature)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={row.signature}
-                    className="flex-1 truncate text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-zinc-200"
-                  >
+                  <span className="flex-1 truncate text-zinc-400 underline decoration-zinc-700 underline-offset-2 group-hover:text-zinc-200">
                     {short(row.signature)}
-                  </a>
+                  </span>
                   <span className="whitespace-nowrap text-right tabular-nums text-zinc-300">
                     {formatLamportsSol(row.lamports)}
                   </span>
-                </div>
+                </a>
               ))}
             </div>
 
@@ -198,7 +196,7 @@ export default function FeesPage() {
               <button
                 onClick={loadMore}
                 disabled={loadingMore}
-                className="mt-4 w-full rounded-md border border-zinc-700 px-3 py-1.5 font-mono text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-50"
+                className="mt-4 w-full rounded-md border border-zinc-700 px-3 py-3 font-mono text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-50"
               >
                 {loadingMore ? "Loading..." : "Load 25 more"}
               </button>
@@ -216,7 +214,7 @@ export default function FeesPage() {
             <span className="break-all">fee wallet: {feeWallet}</span>
             <button
               onClick={copyFeeWallet}
-              className="shrink-0 text-zinc-400 underline decoration-zinc-700 underline-offset-2 transition-colors hover:text-zinc-200"
+              className="shrink-0 px-2 py-2 text-zinc-400 underline decoration-zinc-700 underline-offset-2 transition-colors hover:text-zinc-200"
             >
               {copied ? "copied" : "copy"}
             </button>
@@ -237,7 +235,7 @@ export default function FeesPage() {
           <p>
             <Link
               href="/"
-              className="underline underline-offset-2 hover:text-zinc-400"
+              className="inline-block py-2 underline underline-offset-2 hover:text-zinc-400"
             >
               ← back to the repair tool
             </Link>
