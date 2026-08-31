@@ -259,9 +259,9 @@ describe("feeRowsFromRawTransactions", () => {
 });
 
 describe("isKnownTestFee", () => {
-  it("tags the three known mainnet self/family test signatures", () => {
-    // Receipt-verified signatures: two Aug 19 self-tests + the Aug 29
-    // family test (see PROJECT_STATE / self-test log).
+  it("tags the four known mainnet test signatures", () => {
+    // Receipt-verified signatures: two Aug 19 self-tests, the Aug 29
+    // family test, and the Aug 30 owner self-test (CLUG close).
     expect(
       isKnownTestFee(
         "mainnet-beta",
@@ -278,6 +278,12 @@ describe("isKnownTestFee", () => {
       isKnownTestFee(
         "mainnet-beta",
         "qsbutSckYFLtSXXV9ewBsWqoPMePdpFcafuCR8pEXeu9yVUQLaAEMVwxV3wEv1cchn6ge3LTFYSCKXjn97yznPQ"
+      )
+    ).toBe(true);
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "4BsA9nPxEePuHpNyN8KYzZYbCZyWVADojyiv4JvXvDxzpDt17Xq3n2Dc41fsqtaJH2FjYqhC5ectmUepbD2g9aAB"
       )
     ).toBe(true);
   });
