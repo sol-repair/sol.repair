@@ -63,7 +63,7 @@ function ExplorerLink({ signature }: { signature: string }) {
   const href = explorerUrl(signature);
   if (href === null) {
     return (
-      <p className="mt-3 break-all font-mono text-xs text-zinc-500">
+      <p className="mt-3 break-all font-mono text-xs text-zinc-400">
         Signature: {signature}
       </p>
     );
@@ -324,7 +324,7 @@ export default function Home() {
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <div className="w-full max-w-xl">
         <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-500">SOL.repair</span>
+          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
           <div className="flex items-center gap-4">
             <a
               href="https://github.com/sol-repair/sol.repair"
@@ -332,7 +332,7 @@ export default function Home() {
               rel="noopener noreferrer"
               title="Source code on GitHub"
               aria-label="Source code on GitHub"
-              className="text-zinc-500 transition-colors hover:text-zinc-200"
+              className="text-zinc-400 transition-colors hover:text-zinc-200"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -350,10 +350,10 @@ export default function Home() {
         <h1 className="mb-3 text-3xl font-semibold tracking-tight text-zinc-50">
           Reclaim SOL from empty token accounts.
         </h1>
-        <p className="mb-2 text-zinc-400">
+        <p className="mb-2 text-zinc-300">
           Close dusty SPL accounts and get your rent-exempt deposits back.
         </p>
-        <p className="mb-8 text-zinc-400">
+        <p className="mb-8 text-zinc-300">
           100% open source.{" "}
           <a
             href="https://github.com/sol-repair/sol.repair"
@@ -365,7 +365,7 @@ export default function Home() {
           </a>
           . 1% success fee.
         </p>
-        <p className="mb-8 font-mono text-xs leading-relaxed text-zinc-500">
+        <p className="mb-8 font-mono text-xs leading-relaxed text-zinc-400">
           This tool batches createCloseAccountInstruction to return your
           ~0.002 SOL rent.
           <br />
@@ -374,7 +374,7 @@ export default function Home() {
 
         <div className="mb-8">
           <WalletButton />
-          <p className="mt-3 text-center text-xs leading-relaxed text-zinc-500">
+          <p className="mt-3 text-center text-xs leading-relaxed text-zinc-400">
             Read-only connection. Powered by @solana/wallet-adapter.
           </p>
           <Link
@@ -433,7 +433,7 @@ export default function Home() {
 
         {publicKey && (
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 font-mono text-sm">
-            <p className="text-zinc-500">Connected:</p>
+            <p className="text-zinc-400">Connected:</p>
             <p className="break-all text-zinc-200">{publicKey.toBase58()}</p>
           </div>
         )}
@@ -475,7 +475,7 @@ export default function Home() {
                   never offer that choice. */}
               {hasEligible && (
                 <details open className="mt-3">
-                  <summary className="cursor-pointer text-xs text-zinc-500 transition-colors hover:text-zinc-300">
+                  <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                     Choose which accounts to close ({selectedCount} of{" "}
                     {result.eligibleAccounts.length} selected)
                   </summary>
@@ -497,7 +497,7 @@ export default function Home() {
                       Select none
                     </button>
                   </div>
-                  <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-500">
+                  <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
                     {result.eligibleAccounts.map((account) => (
                       <label
                         key={account.pubkey}
@@ -536,11 +536,11 @@ export default function Home() {
 
               {result.skippedAccounts.length > 0 && (
                 <details className="mt-4">
-                  <summary className="cursor-pointer text-xs text-zinc-500 transition-colors hover:text-zinc-300">
+                  <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                     {result.skippedAccounts.length} skipped, kept safe, with
                     reasons
                   </summary>
-                  <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-500">
+                  <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
                     {result.skippedAccounts.map((account) => (
                       <div
                         key={account.pubkey}
@@ -590,7 +590,7 @@ export default function Home() {
                   Repair Wallet
                 </button>
                 {selectedCount === 0 && (
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-zinc-400">
                     Select at least one account above to repair.
                   </p>
                 )}
@@ -642,7 +642,7 @@ export default function Home() {
                   <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                     Inspect exactly what you&rsquo;ll sign
                   </summary>
-                  <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                  <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                     {feeReady
                       ? "Every transaction contains closeAccount instructions (classic Token Program or Token-2022, matching each account) plus one transfer for the 1% service fee to the published fee address. No token approvals, no authority changes, nothing else. Rent goes back to your own address."
                       : "Every transaction contains closeAccount instructions (classic Token Program or Token-2022, matching each account). No fee transfer. No token approvals, no authority changes, nothing else. Rent goes back to your own address."}
@@ -650,7 +650,7 @@ export default function Home() {
                       ` Showing the first of ${batchCount} transactions.`}
                   </p>
                   {firstBatchPreview && (
-                    <pre className="mt-2 max-h-64 overflow-auto rounded bg-black p-2 font-mono text-[10px] leading-relaxed text-zinc-500">
+                    <pre className="mt-2 max-h-64 overflow-auto rounded bg-black p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
                       {JSON.stringify(firstBatchPreview, null, 2)}
                     </pre>
                   )}
@@ -736,7 +736,7 @@ export default function Home() {
                   <ExplorerLink key={sig} signature={sig} />
                 ))}
                 {signatures.length > 1 && (
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-zinc-400">
                     Completed in {signatures.length} transactions.
                   </p>
                 )}
@@ -775,7 +775,7 @@ export default function Home() {
           </div>
         )}
 
-        <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-600">
+        <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-400">
           <p>
             Built with @solana/spl-token CloseAccount instructions. Read-only
             connection. Every transaction is signed by you, in your own

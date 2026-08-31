@@ -75,7 +75,7 @@ export default function FeesPage() {
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <div className="w-full max-w-xl">
         <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-500">SOL.repair</span>
+          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
           <div className="flex items-center gap-4">
             <a
               href="https://github.com/sol-repair/sol.repair"
@@ -83,7 +83,7 @@ export default function FeesPage() {
               rel="noopener noreferrer"
               title="Source code on GitHub"
               aria-label="Source code on GitHub"
-              className="text-zinc-500 transition-colors hover:text-zinc-200"
+              className="text-zinc-400 transition-colors hover:text-zinc-200"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -98,13 +98,13 @@ export default function FeesPage() {
           </div>
         </div>
 
-        <p className="mb-2 font-mono text-[11px] uppercase tracking-wider text-zinc-500">
+        <p className="mb-2 font-mono text-[11px] uppercase tracking-wider text-zinc-400">
           Fee Ledger
         </p>
         <h1 className="mb-3 text-3xl font-semibold tracking-tight text-zinc-50">
           Every fee we&rsquo;ve ever collected.
         </h1>
-        <p className="mb-6 text-zinc-400">
+        <p className="mb-6 text-zinc-300">
           The 1% success fee, straight from chain data. This page runs in
           your browser — no backend, nothing cached on a server. Every row
           links to the transaction, so you can verify every number
@@ -127,7 +127,7 @@ export default function FeesPage() {
           ))}
         </div>
 
-        <p className="mb-4 font-mono text-xs text-zinc-500">
+        <p className="mb-4 font-mono text-xs text-zinc-400">
           {rows.length} fee{rows.length === 1 ? "" : "s"} ·{" "}
           {formatLamportsSol(totalLamports)} SOL total · rpc {cluster} ·
           updated {updatedAgo(fetchedAt, now)}
@@ -153,9 +153,9 @@ export default function FeesPage() {
         )}
 
         {!loading && !error && rows.length === 0 && (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-8 text-center font-mono text-xs leading-relaxed text-zinc-500">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-8 text-center font-mono text-xs leading-relaxed text-zinc-400">
             <p>No fees collected yet.</p>
-            <p className="mt-1 text-zinc-600">
+            <p className="mt-1 text-zinc-400">
               This table fills as people run cleanups. Nothing here is
               simulated.
             </p>
@@ -165,7 +165,7 @@ export default function FeesPage() {
         {rows.length > 0 && (
           <>
             <div className="border-t border-zinc-800">
-              <div className="flex items-baseline justify-between gap-3 border-b border-zinc-800 py-2 font-mono text-[10px] uppercase tracking-wider text-zinc-600">
+              <div className="flex items-baseline justify-between gap-3 border-b border-zinc-800 py-2 font-mono text-[10px] uppercase tracking-wider text-zinc-400">
                 <span>Date (UTC)</span>
                 <span className="flex-1">Tx</span>
                 <span className="text-right">Amount SOL</span>
@@ -179,7 +179,7 @@ export default function FeesPage() {
                   title={row.signature}
                   className="group flex items-baseline justify-between gap-3 border-b border-zinc-800 py-3 font-mono text-xs transition-colors hover:bg-zinc-900/40"
                 >
-                  <span className="whitespace-nowrap text-zinc-500">
+                  <span className="whitespace-nowrap text-zinc-400">
                     {formatBlockTime(row.blockTime)}
                   </span>
                   <span className="flex-1 truncate text-zinc-400 underline decoration-zinc-700 underline-offset-2 group-hover:text-zinc-200">
@@ -202,14 +202,14 @@ export default function FeesPage() {
               </button>
             )}
             {!hasMore && (
-              <p className="mt-4 text-center font-mono text-xs text-zinc-600">
+              <p className="mt-4 text-center font-mono text-xs text-zinc-400">
                 end of ledger
               </p>
             )}
           </>
         )}
 
-        <div className="mt-8 rounded-md border border-zinc-800 p-3 font-mono text-xs leading-relaxed text-zinc-500">
+        <div className="mt-8 rounded-md border border-zinc-800 p-3 font-mono text-xs leading-relaxed text-zinc-400">
           <p className="flex items-center justify-between gap-3">
             <span className="break-all">fee wallet: {feeWallet}</span>
             <button
@@ -223,7 +223,7 @@ export default function FeesPage() {
             Reproduce without this page: getSignaturesForAddress on this
             address against any Solana RPC.
           </p>
-          <p className="mt-1 text-zinc-600">
+          <p className="mt-1 text-zinc-400">
             A row is a System transfer into this address that happened
             inside a repair transaction (one that also contains a
             token-program closeAccount). Seed funding is not a fee and is
@@ -231,15 +231,13 @@ export default function FeesPage() {
           </p>
         </div>
 
-        <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-600">
-          <p>
-            <Link
-              href="/"
-              className="inline-block py-2 underline underline-offset-2 hover:text-zinc-400"
-            >
-              ← back to the repair tool
-            </Link>
-          </p>
+        <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-400">
+          <Link
+            href="/"
+            className="flex w-full items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-800 hover:text-white"
+          >
+            ← Back to the repair tool
+          </Link>
         </footer>
       </div>
     </main>
