@@ -36,6 +36,18 @@ trust it, don't use it.
 - Not financial advice. It's a utility that runs one specific on-chain
   operation and nothing else.
 
+## The fee ledger
+
+The site has a public fee ledger at /fees. It lists every fee transfer
+into the fee wallet, straight from chain data, with the amount, the
+transaction signature, and the date. Every row links to the transaction
+on Solscan, so you can verify any of it yourself. Mainnet and devnet
+are listed separately, and test transactions are labeled as tests.
+
+The page is display only. It reads the chain in your browser and it
+never changes anything. It does not show the wallet addresses behind
+the fees, just the amounts and the signatures.
+
 ## What gets closed
 
 Token accounts (classic SPL Token and Token-2022) that pass all of these:
