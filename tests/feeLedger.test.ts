@@ -22,6 +22,7 @@ import {
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
+  decodeRawTransaction,
   feeRowsFromRawTransactions,
   fetchFeeLedgerPage,
   formatBlockTime,
@@ -401,6 +402,41 @@ describe("fetchFeeLedgerPage pagination (stubbed RPC)", () => {
       .filter((b: { method: string }) => b.method === "getSignaturesForAddress")
       .map((b: { params: { before?: string }[] }) => b.params[1]?.before);
     expect(beforeArgs).toEqual([undefined, "s-25"]);
+  });
+});
+
+describe("decodeRawTransaction malformed v0 envelope data", () => {
+  // Both fixtures start from a REAL serialized v0 transaction and
+  // corrupt only the side envelope (meta.loadedAddresses) the network
+  // delivers alongside it. The function's contract: garbage means
+  // "unrecognizable transaction" -> null, never a throw that would
+  // fail the whole ledger page as a misleading RPC error.
+
+  it("returns null when a loaded address is not valid base58", () => {
+    const raw = buildV0Raw([
+      closeIx(),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_740),
+    ]);
+    raw.meta!.loadedAddresses = {
+      writable: ["not-a-valid-public-key!!!"],
+      readonly: [],
+    };
+    expect(decodeRawTransaction(raw)).toBeNull();
+  });
+
+  it("returns null when the loaded-address count disagrees with the message header", () => {
+    // The compiled v0 message uses zero lookup keys; claiming one
+    // writable loaded address makes getAccountKeys throw its
+    // numAccountKeysFromLookups guard inside TransactionMessage.decompile.
+    const raw = buildV0Raw([
+      closeIx(),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_740),
+    ]);
+    raw.meta!.loadedAddresses = {
+      writable: [Keypair.generate().publicKey.toBase58()],
+      readonly: [],
+    };
+    expect(decodeRawTransaction(raw)).toBeNull();
   });
 });
 

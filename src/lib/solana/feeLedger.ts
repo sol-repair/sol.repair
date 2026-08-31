@@ -245,49 +245,58 @@ export function decodeRawTransaction(raw: RawTransaction): {
     );
     instructions = [...top, ...inner];
   } else {
-    // Versioned transactions resolve some accounts through address lookup
-    // tables; getTransaction returns the loaded addresses in meta.
-    const accountKeysFromLookups = {
-      writable: (raw.meta?.loadedAddresses?.writable ?? []).map(
-        (s) => new PublicKey(s)
-      ),
-      readonly: (raw.meta?.loadedAddresses?.readonly ?? []).map(
-        (s) => new PublicKey(s)
-      ),
-    };
-    const decompiled = TransactionMessage.decompile(message, {
-      accountKeysFromLookups,
-    });
-    const keySet = message.getAccountKeys({ accountKeysFromLookups });
-    const top: DecodedInstruction[] = decompiled.instructions.map((ix) => ({
-      programId: ix.programId.toBase58(),
-      accountPubkeys: ix.keys.map((k) => k.pubkey.toBase58()),
-      data: ix.data,
-    }));
-    const keys = (index: number) => keySet.get(index);
-    const inner = (raw.meta?.innerInstructions ?? []).flatMap((group) =>
-      (group.instructions ?? [])
-        .map((ix) => {
-          if (typeof ix.programIdIndex !== "number") return null;
-          const programId = keys(ix.programIdIndex)?.toBase58();
-          if (!programId) return null;
-          let data: Uint8Array;
-          try {
-            data = bs58.decode(ix.data ?? "");
-          } catch {
-            return null;
-          }
-          const accountPubkeys: string[] = [];
-          for (const index of ix.accounts ?? []) {
-            const pubkey = keys(index)?.toBase58();
-            if (!pubkey) return null;
-            accountPubkeys.push(pubkey);
-          }
-          return { programId, accountPubkeys, data };
-        })
-        .filter((ix): ix is DecodedInstruction => ix !== null)
-    );
-    instructions = [...top, ...inner];
+    // Versioned transactions resolve some accounts through address
+    // lookup tables; getTransaction returns the loaded addresses in
+    // meta. That envelope is network-supplied data: a malformed
+    // entry (not base58) or a count that disagrees with the message
+    // header makes PublicKey/decompile throw. The function's
+    // contract is null-on-garbage, so the whole v0 path sits inside
+    // the same defensive boundary as the deserialization above.
+    try {
+      const accountKeysFromLookups = {
+        writable: (raw.meta?.loadedAddresses?.writable ?? []).map(
+          (s) => new PublicKey(s)
+        ),
+        readonly: (raw.meta?.loadedAddresses?.readonly ?? []).map(
+          (s) => new PublicKey(s)
+        ),
+      };
+      const decompiled = TransactionMessage.decompile(message, {
+        accountKeysFromLookups,
+      });
+      const keySet = message.getAccountKeys({ accountKeysFromLookups });
+      const top: DecodedInstruction[] = decompiled.instructions.map((ix) => ({
+        programId: ix.programId.toBase58(),
+        accountPubkeys: ix.keys.map((k) => k.pubkey.toBase58()),
+        data: ix.data,
+      }));
+      const keys = (index: number) => keySet.get(index);
+      const inner = (raw.meta?.innerInstructions ?? []).flatMap((group) =>
+        (group.instructions ?? [])
+          .map((ix) => {
+            if (typeof ix.programIdIndex !== "number") return null;
+            const programId = keys(ix.programIdIndex)?.toBase58();
+            if (!programId) return null;
+            let data: Uint8Array;
+            try {
+              data = bs58.decode(ix.data ?? "");
+            } catch {
+              return null;
+            }
+            const accountPubkeys: string[] = [];
+            for (const index of ix.accounts ?? []) {
+              const pubkey = keys(index)?.toBase58();
+              if (!pubkey) return null;
+              accountPubkeys.push(pubkey);
+            }
+            return { programId, accountPubkeys, data };
+          })
+          .filter((ix): ix is DecodedInstruction => ix !== null)
+      );
+      instructions = [...top, ...inner];
+    } catch {
+      return null;
+    }
   }
 
   return {
