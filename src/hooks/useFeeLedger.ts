@@ -32,7 +32,9 @@ type CacheEntry = {
 };
 
 function cacheKey(cluster: FeeLedgerCluster): string {
-  return `solrepair:fee-ledger:v1:${cluster}`;
+  // v2: pagination metadata switched from fee-row-based to raw-signature-
+  // based; old cached cursors were invalidated rather than trusted.
+  return `solrepair:fee-ledger:v2:${cluster}`;
 }
 
 function readCache(cluster: FeeLedgerCluster): CacheEntry | null {
@@ -153,17 +155,19 @@ export function useFeeLedger() {
         const page = await fetchFeeLedgerPage(endpoint, feeWallet);
         if (generation.current !== gen) return;
         const fetchedAt = Date.now();
-        const nextHasMore = page.length === FEE_LEDGER_PAGE_SIZE;
-        const nextLast =
-          page.length > 0 ? page[page.length - 1].signature : null;
-        setRows(page);
+        // Pagination is judged on the RAW signature page, not the filtered
+        // fee rows: a full 25-signature page can hold zero fees without
+        // that meaning the wallet history is exhausted.
+        const nextHasMore = page.rawSignatureCount === FEE_LEDGER_PAGE_SIZE;
+        const nextLast = page.lastRawSignature;
+        setRows(page.rows);
         setLastSignature(nextLast);
         setHasMore(nextHasMore);
         setFetchedAt(fetchedAt);
         setError(null);
         setLoading(false);
         writeCache(cluster, {
-          rows: page,
+          rows: page.rows,
           fetchedAt,
           lastSignature: nextLast,
           hasMore: nextHasMore,
@@ -206,13 +210,16 @@ export function useFeeLedger() {
     setError(null);
     try {
       const page = await fetchFeeLedgerPage(endpoint, feeWallet, lastSignature);
-      if (page.length === 0) {
+      // Cursor and hasMore from the raw signature page: a page of 25 raw
+      // signatures with zero fee rows must still advance the cursor, and
+      // only an empty RAW page means the history is exhausted.
+      const nextLast = page.lastRawSignature;
+      const nextHasMore = page.rawSignatureCount === FEE_LEDGER_PAGE_SIZE;
+      if (!nextLast) {
         setHasMore(false);
         return;
       }
-      const next = [...rows, ...page];
-      const nextLast = page[page.length - 1].signature;
-      const nextHasMore = page.length === FEE_LEDGER_PAGE_SIZE;
+      const next = [...rows, ...page.rows];
       setRows(next);
       setLastSignature(nextLast);
       setHasMore(nextHasMore);

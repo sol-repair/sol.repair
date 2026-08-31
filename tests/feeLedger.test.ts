@@ -19,10 +19,11 @@ import {
   VersionedTransaction,
   type Message,
 } from "@solana/web3.js";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
   feeRowsFromRawTransactions,
+  fetchFeeLedgerPage,
   formatBlockTime,
   formatLamportsSol,
   isKnownTestFee,
@@ -318,6 +319,88 @@ describe("formatLamportsSol", () => {
   it("handles whole SOL and zero", () => {
     expect(formatLamportsSol(2_039_280_000)).toBe("2.03928");
     expect(formatLamportsSol(0)).toBe("0");
+  });
+});
+
+describe("fetchFeeLedgerPage pagination (stubbed RPC)", () => {
+  // The pagination contract: hasMore and the next cursor come from the RAW
+  // signature page (newest-first, exactly what getSignaturesForAddress
+  // returned), never from the filtered fee rows. A full 25-signature page
+  // can legitimately hold zero fees (pruned, failed, or non-repair
+  // transactions); judging by fee rows would end the ledger early.
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const feeTx = (lamports: number): RawTransaction =>
+    buildLegacyRaw([closeIx(), systemTransfer(new PublicKey(FEE_WALLET), lamports)]).raw;
+
+  /** Stub global fetch as a JSON-RPC server: getSignaturesForAddress is
+   *  dispatched by the `before` cursor, getTransaction returns the fee
+   *  fixtures for known signatures and null (pruned) for the rest. */
+  function stubRpc(
+    pages: { before?: string; signatures: string[]; fees: Record<string, number> }[]
+  ) {
+    const txs: Record<string, RawTransaction> = {};
+    for (const p of pages) {
+      for (const [sig, lamports] of Object.entries(p.fees)) txs[sig] = feeTx(lamports);
+    }
+    const fetchMock = vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      let result: unknown;
+      if (body.method === "getSignaturesForAddress") {
+        const before = (body.params[1] as { before?: string } | undefined)?.before;
+        const page = pages.find((p) => p.before === before);
+        result = (page?.signatures ?? []).map((s) => ({ signature: s, blockTime: BLOCK_TIME }));
+      } else {
+        result = txs[body.params[0] as string] ?? null;
+      }
+      return { ok: true, status: 200, json: async () => ({ result }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("a full 25-signature page with zero fees still reports more pages and a raw cursor", async () => {
+    const signatures = Array.from({ length: 25 }, (_, i) => `pruned-${i + 1}`);
+    stubRpc([{ signatures, fees: {} }]);
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    expect(page.rows).toHaveLength(0);
+    expect(page.rawSignatureCount).toBe(25);
+    expect(page.lastRawSignature).toBe("pruned-25");
+  });
+
+  it("continues from the raw cursor when a full page holds a single fee", async () => {
+    const page1 = Array.from({ length: 25 }, (_, i) => `s-${i + 1}`);
+    const page2 = ["t-1", "t-2", "t-3"];
+    const mock = stubRpc([
+      { signatures: page1, fees: { "s-7": 20_392 } },
+      { before: "s-25", signatures: page2, fees: { "t-2": 20_740 } },
+    ]);
+
+    const first = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    expect(first.rows.map((r) => r.signature)).toEqual(["s-7"]);
+    expect(first.rawSignatureCount).toBe(25);
+    expect(first.lastRawSignature).toBe("s-25");
+
+    // The next page must be requested with the RAW cursor (s-25), not the
+    // last fee row (s-7), and the fee on it must land in the rows.
+    const second = await fetchFeeLedgerPage(
+      "https://rpc.example",
+      FEE_WALLET,
+      first.lastRawSignature!
+    );
+    expect(second.rows.map((r) => r.signature)).toEqual(["t-2"]);
+    expect(second.rows[0].lamports).toBe(20_740);
+    expect(second.rawSignatureCount).toBe(3);
+    expect(second.lastRawSignature).toBe("t-3");
+
+    const beforeArgs = mock.mock.calls
+      .map((c) => JSON.parse(String((c[1] as { body?: string })?.body)))
+      .filter((b: { method: string }) => b.method === "getSignaturesForAddress")
+      .map((b: { params: { before?: string }[] }) => b.params[1]?.before);
+    expect(beforeArgs).toEqual([undefined, "s-25"]);
   });
 });
 

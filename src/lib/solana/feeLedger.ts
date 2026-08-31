@@ -488,6 +488,23 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/** One fetched page of the ledger: the fee rows extracted from it, plus
+ *  the raw-pagination facts. hasMore and the next-page cursor MUST come
+ *  from the raw signature page (exactly what getSignaturesForAddress
+ *  returned, newest-first), never from the filtered fee rows: a full
+ *  25-signature page can legitimately hold zero fees (pruned, failed, or
+ *  non-repair transactions), and judging by fee rows would report the end
+ *  of the ledger while older fees still exist. */
+export type FeeLedgerPage = {
+  rows: FeeLedgerRow[];
+  /** How many raw signatures the RPC returned for this page. */
+  rawSignatureCount: number;
+  /** The oldest raw signature in this page, newest-first order: the exact
+   *  cursor the next page must continue from. Null when the RPC returned
+   *  no signatures at all (wallet history exhausted). */
+  lastRawSignature: string | null;
+};
+
 /**
  * Fetch one page of the ledger: the fee wallet's latest signatures, each
  * fetched raw and decoded, extracted into rows. Newest-first, as the RPC
@@ -497,7 +514,7 @@ export async function fetchFeeLedgerPage(
   endpoint: string,
   feeWallet: string,
   before?: string
-): Promise<FeeLedgerRow[]> {
+): Promise<FeeLedgerPage> {
   const signatures = await fetchFeeSignatures(endpoint, feeWallet, before);
   const entries = await mapWithConcurrency(
     signatures,
@@ -510,5 +527,12 @@ export async function fetchFeeLedgerPage(
     // page's 25+ transaction fetches out of burst territory.
     150
   );
-  return feeRowsFromRawTransactions(entries, feeWallet);
+  return {
+    rows: feeRowsFromRawTransactions(entries, feeWallet),
+    rawSignatureCount: signatures.length,
+    lastRawSignature:
+      signatures.length > 0
+        ? signatures[signatures.length - 1].signature
+        : null,
+  };
 }
