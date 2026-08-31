@@ -114,4 +114,24 @@ describe("verifyAccountsClosed", () => {
     );
     expect(result.closedPubkeys).toHaveLength(1);
   });
+
+  it("reads at confirmed commitment so verification matches the confirm path", async () => {
+    // The repair waits for confirmation at "confirmed", but the RPC's
+    // default read commitment is "finalized", which lags the chain by
+    // ~12 seconds. In the exact race this function exists for (the
+    // wallet submitted the transaction itself moments ago), a
+    // finalized-view read still sees the accounts open and turns a
+    // succeeded repair into a reported failure. The verification must
+    // look at the same view the confirmation did.
+    const commitments: Array<string | undefined> = [];
+    const connection = {
+      async getAccountInfo(_pk: PublicKey, commitment?: string) {
+        commitments.push(commitment);
+        return null;
+      },
+    } as unknown as Connection;
+    await verifyAccountsClosed(connection, [account(12)]);
+    expect(commitments).toHaveLength(1);
+    expect(commitments[0]).toBe("confirmed");
+  });
 });

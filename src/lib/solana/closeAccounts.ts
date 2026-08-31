@@ -89,7 +89,14 @@ export async function verifyAccountsClosed(
 
   for (const account of accounts) {
     const info = await connection.getAccountInfo(
-      new PublicKey(account.pubkey)
+      new PublicKey(account.pubkey),
+      // "confirmed" matches the commitment the repair's confirmation
+      // waits on. The RPC default ("finalized") lags the chain by
+      // ~12 seconds, so in the wallet-self-submission race this
+      // function exists for, a finalized read still sees the
+      // accounts open and turns a succeeded repair into a false
+      // failure. Verify against the same view confirmation used.
+      "confirmed"
     );
     // A closed token account either no longer exists (null - fully cleaned
     // up) or is no longer owned by either token program (classic SPL or
