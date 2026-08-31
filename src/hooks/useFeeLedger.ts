@@ -208,8 +208,15 @@ export function useFeeLedger() {
     if (loadingMore || !lastSignature) return;
     setLoadingMore(true);
     setError(null);
+    // Take the generation ticket the initial fetch uses: if the
+    // cluster changes (or a reload starts) while this fetch is in
+    // flight, the ticket is stale when the response lands, and a
+    // stale response must never write rows or cursor into the new
+    // view.
+    const gen = generation.current;
     try {
       const page = await fetchFeeLedgerPage(endpoint, feeWallet, lastSignature);
+      if (generation.current !== gen) return;
       // Cursor and hasMore from the raw signature page: a page of 25 raw
       // signatures with zero fee rows must still advance the cursor, and
       // only an empty RAW page means the history is exhausted.
