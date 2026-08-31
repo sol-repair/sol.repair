@@ -25,7 +25,7 @@ export const FEE_PERCENT = 1;
  * from the test wallet, so test runs can watch the fee land exactly the way
  * it will on mainnet.
  */
-const DEV_FEE_WALLET = new PublicKey(
+export const DEV_FEE_WALLET = new PublicKey(
   "4Z5iVtvydRcrMJdRbrXSpn3vhrxzLE8hZGnzm6ejMKpn"
 );
 
@@ -35,7 +35,7 @@ const DEV_FEE_WALLET = new PublicKey(
  * existed on-chain fails the transaction, so feeAccountReady checks for it
  * at repair time and the fee is skipped until it exists.
  */
-const MAINNET_FEE_WALLET = new PublicKey(
+export const MAINNET_FEE_WALLET = new PublicKey(
   "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K"
 );
 

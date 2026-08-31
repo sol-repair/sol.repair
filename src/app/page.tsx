@@ -377,6 +377,14 @@ export default function Home() {
           <p className="mt-3 text-center text-xs leading-relaxed text-zinc-500">
             Read-only connection. Powered by @solana/wallet-adapter.
           </p>
+          <p className="mt-3 text-center text-xs text-zinc-600">
+            <Link
+              href="/fees"
+              className="underline underline-offset-2 hover:text-zinc-400"
+            >
+              every fee we&rsquo;ve collected →
+            </Link>
+          </p>
         </div>
 
         {!publicKey && (
