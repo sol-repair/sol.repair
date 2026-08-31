@@ -67,6 +67,23 @@ The app defaults to Solana devnet and the UI shows DEVNET right on it so
 you can't mistake it for mainnet. Mainnet is an explicit config change, not
 the default.
 
+The network and RPC endpoint are set with environment variables. Copy
+`.env.example` to `.env.local` and edit what you need. The example file
+explains each variable. The short version is that
+`NEXT_PUBLIC_SOLANA_NETWORK` picks the network and
+`NEXT_PUBLIC_MAINNET_RPC_ENDPOINT` optionally points mainnet at a dedicated
+RPC provider instead of the public endpoint.
+
+## Tests
+
+```bash
+npm test
+```
+
+The suite covers the account eligibility rules, transaction building, fee
+math, and the repair flow. It runs against local fixtures, never the live
+chain, so it is safe to run anywhere.
+
 ## Tech stack
 
 Next.js (App Router), TypeScript, Tailwind CSS, @solana/web3.js v1, and the
