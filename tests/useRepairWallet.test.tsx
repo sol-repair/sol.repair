@@ -191,4 +191,74 @@ describe("useRepairWallet", () => {
     expect(signCalls).toBe(1);
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
   });
+
+  it("retries with a fresh blockhash when confirmation rejects with the real expiry message", async () => {
+    // web3.js 1.98.4 reports a transaction that outlived its blockhash
+    // during CONFIRMATION as TransactionExpiredBlockheightExceededError:
+    // "Signature <sig> has expired: block height exceeded." The retry
+    // used to match only /blockhash/i, which misses this wording, so the
+    // automatic fresh-blockhash retry never fired for the most common
+    // expiry shape and the user got a dead stop instead of one more
+    // approval prompt.
+    const EXPIRED = new Error(
+      "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
+    );
+    let confirmCalls = 0;
+    mocks.conn.confirmTransaction.mockImplementation(async () => {
+      confirmCalls += 1;
+      if (confirmCalls === 1) throw EXPIRED;
+      return { value: { err: null } };
+    });
+    // On the failed first attempt the accounts are genuinely still open.
+    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("done");
+    // The user was asked to sign exactly twice: the expired attempt
+    // plus the fresh-blockhash retry.
+    expect(signCalls).toBe(2);
+    expect(confirmCalls).toBe(2);
+  });
+
+  it("reports the friendly expired message when both attempts expire", async () => {
+    const EXPIRED = new Error(
+      "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
+    );
+    mocks.conn.confirmTransaction.mockRejectedValue(EXPIRED);
+    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("error");
+    // The friendly copy, not the raw library message.
+    expect(result.current.error).toMatch(
+      /expired while waiting for approval/i
+    );
+    expect(result.current.error).not.toMatch(/Signature 5oMN/i);
+    // Both attempts were used before giving up.
+    expect(signCalls).toBe(2);
+  });
 });

@@ -111,6 +111,17 @@ const INITIAL_STATE: RepairState = {
 // signature.
 const MAX_ATTEMPTS = 2;
 
+/** web3.js reports a spent blockhash two different ways: "Blockhash
+ *  not found" when the RPC rejects the submission outright, and
+ *  "Signature ... has expired: block height exceeded." when the
+ *  transaction dies while awaiting confirmation (the common shape
+ *  when the user sat on the approval). Both must trigger the
+ *  fresh-blockhash retry; matching only the first used to dead-stop
+ *  the repair on the second. */
+function isBlockhashExpiry(message: string): boolean {
+  return /blockhash|block height exceeded/i.test(message);
+}
+
 export function useRepairWallet() {
   const { connection } = useConnection();
   const wallet = useWallet();
@@ -275,7 +286,10 @@ export function useRepairWallet() {
                     sendError instanceof Error
                       ? sendError.message
                       : String(sendError);
-                  if (attempt < MAX_ATTEMPTS && /blockhash/i.test(message)) {
+                  if (
+                    attempt < MAX_ATTEMPTS &&
+                    isBlockhashExpiry(message)
+                  ) {
                     continue;
                   }
                   throw sendError;
@@ -316,7 +330,7 @@ export function useRepairWallet() {
             message.toLowerCase().includes("user rejected") ||
             message.toLowerCase().includes("rejected");
           // A blockhash expiry is a dead transaction, never a lost one.
-          const expired = /blockhash/i.test(message);
+          const expired = isBlockhashExpiry(message);
 
           let closedPubkeys: string[] = [];
           try {
