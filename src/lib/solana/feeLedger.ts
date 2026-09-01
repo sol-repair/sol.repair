@@ -525,8 +525,19 @@ export async function fetchFeeLedgerPage(
   before?: string
 ): Promise<FeeLedgerPage> {
   const signatures = await fetchFeeSignatures(endpoint, feeWallet, before);
+  // A node can serve the same signature twice inside one page. Fetch and
+  // decode each signature once (first occurrence wins, newest-first order
+  // preserved) so a repeated fee never renders twice or double-counts.
+  // The pagination facts below deliberately stay on the RAW list: the
+  // page is judged by exactly what the RPC returned.
+  const seen = new Set<string>();
+  const unique = signatures.filter((s) => {
+    if (seen.has(s.signature)) return false;
+    seen.add(s.signature);
+    return true;
+  });
   const entries = await mapWithConcurrency(
-    signatures,
+    unique,
     2,
     async (s) => ({
       signature: s.signature,

@@ -226,7 +226,13 @@ export function useFeeLedger() {
         setHasMore(false);
         return;
       }
-      const next = [...rows, ...page.rows];
+      // The next page can re-serve the boundary signature the cursor
+      // already paged past (node-side pagination inconsistency). A row
+      // the view already shows must never be appended again - the public
+      // total would double-count the fee.
+      const known = new Set(rows.map((r) => r.signature));
+      const fresh = page.rows.filter((r) => !known.has(r.signature));
+      const next = [...rows, ...fresh];
       setRows(next);
       setLastSignature(nextLast);
       setHasMore(nextHasMore);

@@ -42,7 +42,7 @@ function closeIx(): TransactionInstruction {
 
 /** A real serialized repair transaction whose fee transfer lands in
  *  `toWallet` (the shape getTransaction(base64) returns). */
-function feeRawTx(toWallet: string): unknown {
+function feeRawTx(toWallet: string, lamports: number = 20_392): unknown {
   const payer = Keypair.generate().publicKey;
   const tx = new Transaction({
     feePayer: payer,
@@ -53,7 +53,7 @@ function feeRawTx(toWallet: string): unknown {
     SystemProgram.transfer({
       fromPubkey: payer,
       toPubkey: new PublicKey(toWallet),
-      lamports: 20_392,
+      lamports,
     })
   );
   const serialized = tx.serialize({
@@ -169,5 +169,83 @@ describe("useFeeLedger loadMore stale-response guard", () => {
     expect(result.current.error).toBeNull();
     // The stale run must not leave the load-more button stuck.
     expect(result.current.loadingMore).toBe(false);
+  });
+});
+
+describe("useFeeLedger loadMore duplicate signatures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not double-render or double-count a boundary signature re-served on the next page", async () => {
+    // R4-3, edge 2: the next page can re-serve the boundary signature
+    // the cursor already paged past (node-side pagination inconsistency,
+    // e.g. a load balancer handing the next call to a different node).
+    // The row list and the public total must count that fee once.
+    const jsonResponse = (result: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result }),
+    });
+    const txFor: Record<string, unknown> = {
+      "m-1": feeRawTx(MAINNET_WALLET, 20_392),
+      "m-2": feeRawTx(MAINNET_WALLET, 20_740),
+      "m-3": feeRawTx(MAINNET_WALLET, 5_000),
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+          params: unknown[];
+        };
+        if (body.method === "getSignaturesForAddress") {
+          const before = (body.params[1] as { before?: string } | undefined)
+            ?.before;
+          if (before === "m-2") {
+            // The node re-serves the boundary signature m-2 (a fee row on
+            // page 1) plus one new signature carrying a real fee.
+            return jsonResponse([
+              { signature: "m-2", blockTime: 1_755_577_000 },
+              { signature: "m-3", blockTime: 1_755_576_900 },
+            ]);
+          }
+          return jsonResponse([
+            { signature: "m-1", blockTime: 1_755_577_001 },
+            { signature: "m-2", blockTime: 1_755_577_000 },
+          ]);
+        }
+        const sig = body.params[0] as string;
+        return jsonResponse(txFor[sig] ?? null);
+      })
+    );
+
+    const { result } = renderHook(() => useFeeLedger());
+
+    await waitFor(() => {
+      expect(result.current.rows.map((r) => r.signature)).toEqual([
+        "m-1",
+        "m-2",
+      ]);
+    });
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(result.current.rows.map((r) => r.signature)).toEqual([
+      "m-1",
+      "m-2",
+      "m-3",
+    ]);
+    expect(result.current.totalLamports).toBe(20_392 + 20_740 + 5_000);
+    expect(result.current.error).toBeNull();
   });
 });

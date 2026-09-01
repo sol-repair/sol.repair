@@ -363,6 +363,28 @@ describe("fetchFeeLedgerPage pagination (stubbed RPC)", () => {
     return fetchMock;
   }
 
+  it("renders a signature the node serves twice in one page exactly once", async () => {
+    // R4-3, edge 1: a node can repeat a signature inside a single
+    // getSignaturesForAddress page. A repeated fee row would double-count
+    // public revenue, so the page must dedupe by signature. Pagination
+    // facts stay RAW: the page is still judged by exactly what the RPC
+    // returned (25 served entries = maybe more pages, cursor = last raw
+    // entry), dedup or not.
+    const signatures = [
+      "dup-fee",
+      ...Array.from({ length: 23 }, (_, i) => `s-${i + 1}`),
+      "dup-fee",
+    ];
+    stubRpc([{ signatures, fees: { "dup-fee": 20_392 } }]);
+
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+
+    expect(page.rows.map((r) => r.signature)).toEqual(["dup-fee"]);
+    expect(page.rows[0].lamports).toBe(20_392);
+    expect(page.rawSignatureCount).toBe(25);
+    expect(page.lastRawSignature).toBe("dup-fee");
+  });
+
   it("a full 25-signature page with zero fees still reports more pages and a raw cursor", async () => {
     const signatures = Array.from({ length: 25 }, (_, i) => `pruned-${i + 1}`);
     stubRpc([{ signatures, fees: {} }]);
