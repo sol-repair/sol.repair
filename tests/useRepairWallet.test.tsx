@@ -232,6 +232,49 @@ describe("useRepairWallet", () => {
     expect(confirmCalls).toBe(2);
   });
 
+  it("does not re-sign a confirm-time expiry when the chain already closed the accounts", async () => {
+    // The expiry idempotency proof (R4-1). confirmTransaction bounded by
+    // lastValidBlockHeight can throw "block height exceeded" in the very
+    // instant the transaction landed in one of the final valid blocks: the
+    // poll read stale state and gave up, but the chain moved. The retry
+    // path must ask the chain FIRST - verifyAccountsClosed - and only
+    // rebuild + re-sign a batch the chain still reports open. If that
+    // guard ever regresses, the repair would ask the wallet for a second
+    // signature to redo work that already happened.
+    const EXPIRED = new Error(
+      "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
+    );
+    mocks.conn.confirmTransaction.mockRejectedValue(EXPIRED);
+    // The chain says the account is already closed: the wallet submitted
+    // the transaction itself and it landed before the expiry surfaced.
+    mocks.conn.getAccountInfo.mockResolvedValue(null);
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    // Exactly one signature request: the expiry was recognized as an
+    // already-landed repair - never rebuilt, never re-signed, never
+    // re-sent.
+    expect(signCalls).toBe(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.getLatestBlockhash).toHaveBeenCalledTimes(1);
+    // The run reports full success, not the friendly-expired dead stop.
+    expect(result.current.status).toBe("done");
+    expect(result.current.closedCount).toBe(1);
+    expect(result.current.recoveredLamports).toBe(2039280n);
+    expect(result.current.signatures).toHaveLength(1);
+  });
+
   it("reports the friendly expired message when both attempts expire", async () => {
     const EXPIRED = new Error(
       "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
