@@ -333,16 +333,24 @@ export function useRepairWallet() {
           const expired = isBlockhashExpiry(message);
 
           let closedPubkeys: string[] = [];
+          let verifyFailed = false;
           try {
             setRunState({ status: "verifying" });
             const verified = await verifyAccountsClosed(connection, accounts);
             closedPubkeys = verified.closedPubkeys;
           } catch {
-            // Verification itself failed; report without partial info rather
-            // than masking the original error.
+            // Verification itself failed. Fall back to the run's own
+            // confirmed bookkeeping below instead of reporting zero
+            // progress while transactions are provably on-chain.
+            verifyFailed = true;
           }
 
-          const closed = closedPubkeys.length;
+          // When the chain could not be asked, the run's receipts are the
+          // honest source: closedSoFar only ever grew from batches whose
+          // confirmation resolved (or whose on-chain verification said
+          // closed), each with a kept signature.
+          const reportClosed = verifyFailed ? [...closedSoFar] : closedPubkeys;
+          const closed = reportClosed.length;
           const partial = closed > 0;
 
           setState({
@@ -351,10 +359,10 @@ export function useRepairWallet() {
             signatures: [...confirmed],
             closedCount: closed,
             totalToClose: accounts.length,
-            recoveredLamports: recoveredOf(closedPubkeys),
+            recoveredLamports: recoveredOf(reportClosed),
             progress: null,
             error: partial
-              ? `Repair stopped after ${closed} of ${accounts.length} accounts were closed (${lamportsToSol(recoveredOf(closedPubkeys))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}`
+              ? `Repair stopped after ${closed} of ${accounts.length} accounts were closed (${lamportsToSol(recoveredOf(reportClosed))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}${verifyFailed ? " On-chain verification could not be reached, so this count is from the confirmed transactions - the linked signature is the receipt." : ""}`
               : rejected
                 ? "Transaction cancelled. Nothing was sent."
                 : expired

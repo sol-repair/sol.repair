@@ -232,6 +232,53 @@ describe("useRepairWallet", () => {
     expect(confirmCalls).toBe(2);
   });
 
+  it("reports honest partial progress when the final verification itself fails", async () => {
+    // R4-2. Two batches (21 accounts -> 20 + 1). Batch 1 confirms and
+    // lands. The user rejects batch 2's approval. The catch path then
+    // re-verifies on-chain - and THAT RPC call fails too. The report must
+    // still be honest about the landed batch: signatures kept, progress
+    // reported from the run's confirmed bookkeeping with a verification
+    // caveat. Never "Transaction cancelled. Nothing was sent." while a
+    // transaction is provably on-chain, and never a crash.
+    const accounts = makeAccounts(21);
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      if (signCalls === 2) {
+        throw new Error("User rejected the request.");
+      }
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    // Batch 1 confirms normally (no verification runs on the success
+    // path). The only getAccountInfo caller in this scenario is the
+    // catch path's final verification - make it fail.
+    mocks.conn.confirmTransaction.mockResolvedValue({ value: { err: null } });
+    mocks.conn.getAccountInfo.mockRejectedValue(new Error("RPC unavailable"));
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(2);
+    // The landed batch's receipt is kept, not silently dropped.
+    expect(result.current.signatures).toHaveLength(1);
+    // Honest progress from the confirmed bookkeeping: 20 of 21 closed,
+    // rent sum of batch 1 (every fixture account is 2039280 lamports).
+    expect(result.current.closedCount).toBe(20);
+    expect(result.current.recoveredLamports).toBe(40785600n);
+    expect(result.current.error).toMatch(/stopped after 20 of 21/i);
+    expect(result.current.error).not.toMatch(/Nothing was sent/i);
+    // The caveat says where the number comes from when the chain could
+    // not be asked.
+    expect(result.current.error).toMatch(/verification/i);
+  });
+
   it("does not re-sign a confirm-time expiry when the chain already closed the accounts", async () => {
     // The expiry idempotency proof (R4-1). confirmTransaction bounded by
     // lastValidBlockHeight can throw "block height exceeded" in the very
