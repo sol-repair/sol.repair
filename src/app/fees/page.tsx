@@ -106,10 +106,12 @@ export default function FeesPage() {
           Every fee we&rsquo;ve ever collected.
         </h1>
         <p className="mb-6 text-zinc-300">
-          The 1% success fee, straight from chain data. This page runs in
-          your browser — no backend, nothing cached on a server. Every row
-          links to the transaction, so you can verify every number
-          yourself.
+          Fee activity is derived directly from transactions to the
+          SOL.repair fee wallet — successful transactions containing
+          token-account closes and a transfer to the fee address. This page
+          runs in your browser — no backend, nothing cached on a server.
+          Every row links to the transaction, so you can verify every
+          number yourself.
         </p>
 
         <div className="mb-4 flex gap-2">
