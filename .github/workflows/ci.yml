@@ -1,0 +1,26 @@
+# Repository-native gate: the exact commands the manual pre-commit gate
+# runs (tests, typecheck, lint, build), enforced on every push to the
+# shipping branches and every pull request. Vercel deploys independently;
+# this exists so a change that skips the manual gate cannot land silently
+# with a green repo.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+      - run: npx eslint .
+      - run: npm run build
