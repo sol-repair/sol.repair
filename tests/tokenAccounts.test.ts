@@ -60,6 +60,24 @@ function tokenAccount(seed: number, overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** An entry whose RPC `data` is not the parsed shape the scan requested.
+ *  The cast back to the healthy fixture type is deliberate: a fixture
+ *  needs to carry data a provider could really return, and the scan has
+ *  to cope with whatever arrives. */
+function brokenData(
+  seed: number,
+  data: unknown
+): ReturnType<typeof tokenAccount> {
+  return {
+    pubkey: pk(seed),
+    account: {
+      lamports: 2_039_280,
+      owner: TOKEN_PROGRAM_ID.toBase58(),
+      data,
+    },
+  } as ReturnType<typeof tokenAccount>;
+}
+
 /** The one mocked boundary: the parsed-accounts RPC call, keyed by
  *  program id, exactly as the scan consumes it. */
 function mockConnection(
@@ -207,5 +225,37 @@ describe("getClosableAccounts eligibility checks", () => {
     expect(result.totalAccounts).toBe(2);
     expect(result.eligibleAccounts).toHaveLength(1);
     expect(result.recoverableLamports).toBe(2_039_280n);
+  });
+
+  it("reports unreadable RPC data as skipped instead of aborting the scan", async () => {
+    // The scan asks for parsed encoding, but the shape that comes back
+    // is provider-supplied. One malformed entry must neither abort the
+    // scan nor vanish: it is reported as skipped with an honest reason,
+    // its healthy neighbors still classify, and it still counts in the
+    // total.
+    const malformed = [
+      brokenData(18, "not-json"),
+      brokenData(19, { parsed: null }),
+      brokenData(20, {}),
+      brokenData(21, { parsed: {} }),
+    ];
+    const { result } = await runScan([tokenAccount(2), ...malformed]);
+
+    expect(result.totalAccounts).toBe(5);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].pubkey).toBe(pk(2).toBase58());
+    expect(result.recoverableLamports).toBe(2_039_280n);
+
+    expect(result.skippedAccounts).toHaveLength(4);
+    for (const skipped of result.skippedAccounts) {
+      expect(skipped.reason).toBe(
+        "response could not be read (malformed RPC data)"
+      );
+      expect(skipped.mint).toBe("unknown");
+      expect(skipped.program).toBe("spl");
+    }
+    expect(result.skippedAccounts.map((s) => s.pubkey)).toEqual(
+      malformed.map((m) => m.pubkey.toBase58())
+    );
   });
 });

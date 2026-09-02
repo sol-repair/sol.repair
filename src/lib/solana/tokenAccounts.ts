@@ -88,6 +88,26 @@ export interface ScanResult {
 }
 
 /**
+ * Pull the parsed token info out of an RPC account entry, or null when the
+ * provider returned something other than the parsed shape the scan requested
+ * (base64 data, or a parsed field that is null, missing, or lacks info).
+ * Null means "unreadable": report it, never guess at it.
+ */
+function readParsedInfo(data: unknown): TokenAccountInfo | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+  const parsed = (data as { parsed?: unknown }).parsed;
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+  const info = (parsed as { info?: unknown }).info;
+  return typeof info === "object" && info !== null
+    ? (info as TokenAccountInfo)
+    : null;
+}
+
+/**
  * Scan a wallet for SPL token accounts and classify which are safe to close.
  *
  * Returns the full picture: total accounts found, which ones are eligible,
@@ -114,8 +134,20 @@ export async function getClosableAccounts(
     totalAccounts += response.value.length;
 
     for (const { pubkey, account } of response.value) {
-      const info = (account.data as { parsed: { info: TokenAccountInfo } })
-        .parsed.info;
+      // The scan requests parsed encoding, but the response shape is
+      // provider-supplied. An unreadable entry is reported as skipped
+      // (never silently hidden, never classified without reading it)
+      // instead of aborting the whole scan.
+      const info = readParsedInfo(account.data);
+      if (!info) {
+        skippedAccounts.push({
+          pubkey: pubkey.toString(),
+          mint: "unknown",
+          reason: "response could not be read (malformed RPC data)",
+          program: tag,
+        });
+        continue;
+      }
 
       // --- The five eligibility checks ---
       //
