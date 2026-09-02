@@ -23,6 +23,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import {
   Keypair,
   PublicKey,
+  SystemProgram,
   Transaction,
   type Connection,
 } from "@solana/web3.js";
@@ -471,5 +472,126 @@ describe("useRepairWallet", () => {
     expect(result.current.error).not.toMatch(/Signature 5oMN/i);
     // Both attempts were used before giving up.
     expect(signCalls).toBe(2);
+  });
+
+  it("retries only the still-open accounts after externally-partial closes", async () => {
+    // External-audit 2026-09-02 hardening spec: a transaction is ATOMIC,
+    // so verification reading 7-closed/13-open of a 20-account batch
+    // means something else closed those 7 mid-run. The expiry retry must
+    // be RECONCILED with that verification: rebuild from the 13
+    // still-open accounts, fee recalculated on the retry batch only,
+    // second transaction lands, run completes 20-for-20. A stale
+    // full-batch retry can never land (closing nonexistent accounts
+    // fails the whole transaction), so the owner would get a doomed
+    // approval instead of a finished repair.
+    const accounts = makeAccounts(20); // one batch of 20
+
+    // 7 of the 20 were closed by something else mid-run.
+    const closedElsewhere = new Set(accounts.slice(0, 7).map((a) => a.pubkey));
+    mocks.conn.getAccountInfo.mockImplementation(async (pk: PublicKey) =>
+      closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+    );
+
+    let confirmCalls = 0;
+    mocks.conn.confirmTransaction.mockImplementation(async () => {
+      confirmCalls += 1;
+      if (confirmCalls === 1) {
+        throw new Error(
+          "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
+        );
+      }
+      // The reconciled 13-account retry lands cleanly.
+      return { value: { err: null } };
+    });
+
+    // Capture what each approval actually contained: close count and the
+    // fee transfer lamports. In this web3.js build the System transfer's
+    // from/to ride in the account metas, so the data is just the u32
+    // instruction tag plus the u64 LE lamports at offset 4.
+    const approvals: Array<{ closes: number; feeLamports: bigint | null }> = [];
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      const closes = tx.instructions.filter((ix) =>
+        ix.programId.toBase58().startsWith("Token")
+      ).length;
+      const feeIx = tx.instructions.find(
+        (ix) => ix.programId.toBase58() === SystemProgram.programId.toBase58()
+      );
+      approvals.push({
+        closes,
+        feeLamports: feeIx ? feeIx.data.readBigUInt64LE(4) : null,
+      });
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    // Approval 1: the original full batch with the full-batch fee.
+    expect(approvals[0].closes).toBe(20);
+    expect(approvals[0].feeLamports).toBe(407856n); // floor(20 x 2039280 / 100)
+    // Approval 2: RECONCILED - the 13 still-open accounts only, with the
+    // fee recalculated on the retry batch only.
+    expect(approvals).toHaveLength(2);
+    expect(approvals[1].closes).toBe(13);
+    expect(approvals[1].feeLamports).toBe(265106n); // floor(13 x 2039280 / 100)
+    // The retry landed: the run completes with everything closed and the
+    // recovered amount covering all 20 accounts' rent.
+    expect(result.current.status).toBe("done");
+    expect(result.current.closedCount).toBe(20);
+    expect(result.current.recoveredLamports).toBe(20n * 2039280n);
+    expect(confirmCalls).toBe(2);
+  });
+
+  it("still reports honestly when the reconciled retry also fails", async () => {
+    // The safety net the hardened path must keep (owner instruction:
+    // do not weaken the honest-failure proof): if the reconciled retry
+    // ALSO fails (non-retryable), the run stops with the honest partial
+    // report derived from verified chain state - never a false success,
+    // never a masked failure.
+    const accounts = makeAccounts(20);
+
+    const closedElsewhere = new Set(accounts.slice(0, 7).map((a) => a.pubkey));
+    mocks.conn.getAccountInfo.mockImplementation(async (pk: PublicKey) =>
+      closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+    );
+
+    let confirmCalls = 0;
+    let lastCloses = 0;
+    mocks.conn.confirmTransaction.mockImplementation(async () => {
+      confirmCalls += 1;
+      if (confirmCalls === 1) {
+        throw new Error(
+          "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
+        );
+      }
+      throw new Error(
+        "Transaction 62hkW… failed: TransactionExecutionError: InstructionError { Custom: 3 }"
+      );
+    });
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      lastCloses = tx.instructions.filter((ix) =>
+        ix.programId.toBase58().startsWith("Token")
+      ).length;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    // The second approval was the reconciled 13-account retry, and it
+    // failed on-chain: honest partial report, exact numbers, receipt kept.
+    expect(lastCloses).toBe(13);
+    expect(result.current.status).toBe("error");
+    expect(result.current.closedCount).toBe(7);
+    expect(result.current.recoveredLamports).toBe(7n * 2039280n);
+    expect(result.current.error).toMatch(/stopped after 7 of 20/);
   });
 });

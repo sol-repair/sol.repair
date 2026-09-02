@@ -209,7 +209,7 @@ export function useRepairWallet() {
                 "The connected wallet changed during the repair. Stopped before signing anything else. Reconnect the original wallet and run the repair again for the remaining accounts."
               );
             }
-            const instructions = buildCloseAccountInstructions(
+            let instructions = buildCloseAccountInstructions(
               batch,
               repairOwner
             );
@@ -295,10 +295,8 @@ export function useRepairWallet() {
                 // happened.
                 setRunState({ status: "verifying", progress });
 
-                const { closedPubkeys } = await verifyAccountsClosed(
-                  connection,
-                  batch
-                );
+                const { closedPubkeys, stillOpenPubkeys } =
+                  await verifyAccountsClosed(connection, batch);
 
                 if (closedPubkeys.length === batch.length) {
                   // Everything in this batch is closed. The repair succeeded;
@@ -316,6 +314,24 @@ export function useRepairWallet() {
                     attempt < MAX_ATTEMPTS &&
                     isBlockhashExpiry(message)
                   ) {
+                    // A transaction is atomic, so this batch cannot have
+                    // partially landed on its own - accounts the chain
+                    // still reports open just didn't close. Rebuild the
+                    // batch from only those: re-signing the already-closed
+                    // ones would doom the retry (closing a nonexistent
+                    // account fails the whole transaction).
+                    const stillOpenBatch = batch.filter((account) =>
+                      stillOpenPubkeys.includes(account.pubkey)
+                    );
+                    instructions = buildCloseAccountInstructions(
+                      stillOpenBatch,
+                      repairOwner
+                    );
+                    // The 1% fee rides on what the retry actually closes.
+                    const retryFee = feeReady
+                      ? buildFeeTransfer(repairOwner, stillOpenBatch)
+                      : null;
+                    if (retryFee) instructions.push(retryFee);
                     continue;
                   }
                   throw sendError;
