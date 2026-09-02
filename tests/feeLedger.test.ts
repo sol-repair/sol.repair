@@ -538,3 +538,71 @@ describe("rpcCall timeout (stubbed hanging fetch)", () => {
     await expect(page).rejects.toMatchObject({ kind: "network" });
   });
 });
+
+describe("per-transaction retry (stubbed transient RPC failure)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retries one transient transaction-fetch failure instead of failing the page", async () => {
+    // External audit finding #6: a single 500 on one of the page's
+    // getTransaction calls used to fail the whole page fetch. One
+    // bounded retry keeps a blip from hiding an otherwise readable
+    // ledger; the sibling test pins that a persistent failure still
+    // surfaces as the honest page error (never a silently dropped row).
+    const raw = buildLegacyRaw([
+      closeIx(),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+    ]).raw;
+    let txCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+        };
+        if (body.method === "getSignaturesForAddress") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              result: [{ signature: "s-1", blockTime: BLOCK_TIME }],
+            }),
+          };
+        }
+        txCalls += 1;
+        if (txCalls === 1) {
+          return { ok: false, status: 500, json: async () => ({}) };
+        }
+        return { ok: true, status: 200, json: async () => ({ result: raw }) };
+      })
+    );
+
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    expect(page.rows.map((r) => r.signature)).toEqual(["s-1"]);
+    expect(page.rows[0].lamports).toBe(20_392);
+    expect(txCalls).toBe(2);
+  });
+
+  it("still fails the page honestly when the failure persists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as { method: string };
+        if (body.method === "getSignaturesForAddress") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              result: [{ signature: "s-1", blockTime: BLOCK_TIME }],
+            }),
+          };
+        }
+        return { ok: false, status: 500, json: async () => ({}) };
+      })
+    );
+    await expect(
+      fetchFeeLedgerPage("https://rpc.example", FEE_WALLET)
+    ).rejects.toBeInstanceOf(LedgerFetchError);
+  });
+});

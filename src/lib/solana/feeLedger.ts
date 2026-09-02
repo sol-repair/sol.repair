@@ -478,6 +478,29 @@ export async function fetchRawTransaction(
   return (result ?? null) as RawTransaction | null;
 }
 
+/** One bounded retry for a single transaction fetch. A transient 5xx or
+ *  connection blip on one of the page's ~25 lookups used to fail the
+ *  whole page; retrying once keeps a blip from hiding an otherwise
+ *  readable ledger. A failure that persists must still THROW - treating
+ *  it as a pruned (null) transaction would silently drop a revenue row,
+ *  and an honest error beats an incomplete ledger. 429s are excluded:
+ *  the rpc layer already retries them and the page's pacing owns that
+ *  regime. */
+async function fetchRawTransactionWithRetry(
+  endpoint: string,
+  signature: string
+): Promise<RawTransaction | null> {
+  try {
+    return await fetchRawTransaction(endpoint, signature);
+  } catch (e) {
+    if (!(e instanceof LedgerFetchError) || e.kind === "rate-limited") {
+      throw e;
+    }
+    await sleep(250);
+    return await fetchRawTransaction(endpoint, signature);
+  }
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Run `task` over `items` with at most `limit` in flight and an optional
@@ -549,7 +572,7 @@ export async function fetchFeeLedgerPage(
     2,
     async (s) => ({
       signature: s.signature,
-      raw: await fetchRawTransaction(endpoint, s.signature),
+      raw: await fetchRawTransactionWithRetry(endpoint, s.signature),
     }),
     // ~150ms per started call (2 workers -> ~75ms per call) smooths the
     // page's 25+ transaction fetches out of burst territory.
