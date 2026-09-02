@@ -30,6 +30,9 @@ const PROGRAM_IDS: Record<TokenProgram, PublicKey> = {
   "token-2022": TOKEN_2022_PROGRAM_ID,
 };
 
+// getMultipleAccountsInfo accepts at most 100 pubkeys per request.
+const VERIFY_CHUNK_SIZE = 100;
+
 /**
  * Build CloseAccount instructions for the given eligible accounts.
  *
@@ -87,9 +90,14 @@ export async function verifyAccountsClosed(
   const closedPubkeys: string[] = [];
   const stillOpenPubkeys: string[] = [];
 
-  for (const account of accounts) {
-    const info = await connection.getAccountInfo(
-      new PublicKey(account.pubkey),
+  // The error paths call this for EVERY account in the repair, so reads
+  // are batched (100 pubkeys per getMultipleAccountsInfo request, the RPC
+  // maximum) instead of one serial getAccountInfo call per account.
+  const pubkeys = accounts.map((a) => new PublicKey(a.pubkey));
+  for (let i = 0; i < pubkeys.length; i += VERIFY_CHUNK_SIZE) {
+    const chunk = pubkeys.slice(i, i + VERIFY_CHUNK_SIZE);
+    const infos = await connection.getMultipleAccountsInfo(
+      chunk,
       // "confirmed" matches the commitment the repair's confirmation
       // waits on. The RPC default ("finalized") lags the chain by
       // ~12 seconds, so in the wallet-self-submission race this
@@ -98,18 +106,24 @@ export async function verifyAccountsClosed(
       // failure. Verify against the same view confirmation used.
       "confirmed"
     );
-    // A closed token account either no longer exists (null - fully cleaned
-    // up) or is no longer owned by either token program (classic SPL or
-    // Token-2022).
-    const stillTokenOwned =
-      info !== null &&
-      (info.owner.equals(TOKEN_PROGRAM_ID) ||
-        info.owner.equals(TOKEN_2022_PROGRAM_ID));
-    if (stillTokenOwned) {
-      stillOpenPubkeys.push(account.pubkey);
-    } else {
-      closedPubkeys.push(account.pubkey);
-    }
+    // getMultipleAccountsInfo returns one entry per input pubkey, in
+    // order (null where the account does not exist), so the chunk
+    // index maps straight back onto the accounts array.
+    infos.forEach((info, j) => {
+      const account = accounts[i + j];
+      // A closed token account either no longer exists (null - fully
+      // cleaned up) or is no longer owned by either token program
+      // (classic SPL or Token-2022).
+      const stillTokenOwned =
+        info !== null &&
+        (info.owner.equals(TOKEN_PROGRAM_ID) ||
+          info.owner.equals(TOKEN_2022_PROGRAM_ID));
+      if (stillTokenOwned) {
+        stillOpenPubkeys.push(account.pubkey);
+      } else {
+        closedPubkeys.push(account.pubkey);
+      }
+    });
   }
 
   return { closedPubkeys, stillOpenPubkeys };

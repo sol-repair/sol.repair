@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
       | ((tx: Transaction) => Promise<Transaction>),
   },
   conn: {
-    getAccountInfo: vi.fn(),
+    getMultipleAccountsInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
     confirmTransaction: vi.fn(),
@@ -93,7 +93,9 @@ describe("useRepairWallet", () => {
     });
     mocks.conn.sendRawTransaction.mockResolvedValue("signed-tx-id");
     mocks.conn.confirmTransaction.mockResolvedValue({ value: { err: null } });
-    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
   });
 
   afterEach(() => {
@@ -295,7 +297,9 @@ describe("useRepairWallet", () => {
       return { value: { err: null } };
     });
     // On the failed first attempt the accounts are genuinely still open.
-    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
 
     let signCalls = 0;
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
@@ -338,10 +342,12 @@ describe("useRepairWallet", () => {
     });
 
     // Batch 1 confirms normally (no verification runs on the success
-    // path). The only getAccountInfo caller in this scenario is the
+    // path). The only getMultipleAccountsInfo caller in this scenario is the
     // catch path's final verification - make it fail.
     mocks.conn.confirmTransaction.mockResolvedValue({ value: { err: null } });
-    mocks.conn.getAccountInfo.mockRejectedValue(new Error("RPC unavailable"));
+    mocks.conn.getMultipleAccountsInfo.mockRejectedValue(
+      new Error("RPC unavailable")
+    );
 
     const { result } = renderHook(() => useRepairWallet());
 
@@ -379,7 +385,9 @@ describe("useRepairWallet", () => {
     mocks.conn.confirmTransaction.mockRejectedValue(EXPIRED);
     // The chain says the account is already closed: the wallet submitted
     // the transaction itself and it landed before the expiry surfaced.
-    mocks.conn.getAccountInfo.mockResolvedValue(null);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => null)
+    );
 
     let signCalls = 0;
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
@@ -420,7 +428,9 @@ describe("useRepairWallet", () => {
       value: { err: { InstructionError: [0, { Custom: 311 }] } },
     });
     // The accounts are genuinely still open (the transaction failed).
-    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
 
     let signCalls = 0;
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
@@ -449,7 +459,9 @@ describe("useRepairWallet", () => {
       "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
     );
     mocks.conn.confirmTransaction.mockRejectedValue(EXPIRED);
-    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
 
     let signCalls = 0;
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
@@ -488,8 +500,11 @@ describe("useRepairWallet", () => {
 
     // 7 of the 20 were closed by something else mid-run.
     const closedElsewhere = new Set(accounts.slice(0, 7).map((a) => a.pubkey));
-    mocks.conn.getAccountInfo.mockImplementation(async (pk: PublicKey) =>
-      closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) =>
+        pks.map((pk) =>
+          closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+        )
     );
 
     let confirmCalls = 0;
@@ -555,8 +570,11 @@ describe("useRepairWallet", () => {
     const accounts = makeAccounts(20);
 
     const closedElsewhere = new Set(accounts.slice(0, 7).map((a) => a.pubkey));
-    mocks.conn.getAccountInfo.mockImplementation(async (pk: PublicKey) =>
-      closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) =>
+        pks.map((pk) =>
+          closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+        )
     );
 
     let confirmCalls = 0;

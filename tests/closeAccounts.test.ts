@@ -78,18 +78,18 @@ describe("buildCloseAccountInstructions", () => {
 
 describe("verifyAccountsClosed", () => {
   function connectionReturning(
-    info: { owner: PublicKey } | null
+    resolve: (pk: PublicKey) => { owner: PublicKey } | null
   ): Connection {
     return {
-      async getAccountInfo() {
-        return info;
+      async getMultipleAccountsInfo(pks: PublicKey[]) {
+        return pks.map(resolve);
       },
     } as unknown as Connection;
   }
 
   it("a nonexistent account counts as closed", async () => {
     const { closedPubkeys, stillOpenPubkeys } = await verifyAccountsClosed(
-      connectionReturning(null),
+      connectionReturning(() => null),
       [account(8)]
     );
     expect(closedPubkeys).toHaveLength(1);
@@ -98,7 +98,7 @@ describe("verifyAccountsClosed", () => {
 
   it("an account still owned by a token program counts as open", async () => {
     const result = await verifyAccountsClosed(
-      connectionReturning({ owner: TOKEN_PROGRAM_ID }),
+      connectionReturning(() => ({ owner: TOKEN_PROGRAM_ID })),
       [account(9), account(10, "token-2022")]
     );
     // same mocked response for both: token-owned means still open
@@ -109,7 +109,7 @@ describe("verifyAccountsClosed", () => {
     // closed token accounts can be reused by the system program;
     // what matters is that no token program owns it anymore
     const result = await verifyAccountsClosed(
-      connectionReturning({ owner: PublicKey.default }),
+      connectionReturning(() => ({ owner: PublicKey.default })),
       [account(11)]
     );
     expect(result.closedPubkeys).toHaveLength(1);
@@ -125,13 +125,48 @@ describe("verifyAccountsClosed", () => {
     // look at the same view the confirmation did.
     const commitments: Array<string | undefined> = [];
     const connection = {
-      async getAccountInfo(_pk: PublicKey, commitment?: string) {
+      async getMultipleAccountsInfo(_pks: PublicKey[], commitment?: string) {
         commitments.push(commitment);
-        return null;
+        return [null];
       },
     } as unknown as Connection;
     await verifyAccountsClosed(connection, [account(12)]);
-    expect(commitments).toHaveLength(1);
-    expect(commitments[0]).toBe("confirmed");
+    expect(commitments).toEqual(["confirmed"]);
+  });
+
+  it("chunks large verifications instead of one RPC call per account", async () => {
+    // The error paths call verification for EVERY account in the repair;
+    // one serial getAccountInfo per account turned a large wallet's
+    // failure into an RPC storm. Batched reads cap it at ~1% of the
+    // calls (100 pubkeys per getMultipleAccountsInfo request).
+    const accounts = Array.from({ length: 250 }, (_, i) => account(i));
+    const closedElsewhere = new Set(
+      accounts.slice(0, 7).map((a) => a.pubkey)
+    );
+    const callSizes: number[] = [];
+    const commitments: Array<string | undefined> = [];
+    const connection = {
+      async getMultipleAccountsInfo(pks: PublicKey[], commitment?: string) {
+        callSizes.push(pks.length);
+        commitments.push(commitment);
+        return pks.map((pk) =>
+          closedElsewhere.has(pk.toBase58())
+            ? null
+            : { owner: TOKEN_PROGRAM_ID }
+        );
+      },
+    } as unknown as Connection;
+
+    const { closedPubkeys, stillOpenPubkeys } = await verifyAccountsClosed(
+      connection,
+      accounts
+    );
+
+    expect(callSizes).toEqual([100, 100, 50]);
+    expect(commitments).toEqual(["confirmed", "confirmed", "confirmed"]);
+    // Results stay aligned with the input order: exactly the 7 accounts
+    // the chain reports gone are closed, the other 243 still open.
+    expect(closedPubkeys).toEqual(accounts.slice(0, 7).map((a) => a.pubkey));
+    expect(stillOpenPubkeys).toHaveLength(243);
   });
 });
