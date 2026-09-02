@@ -265,7 +265,7 @@ export function useRepairWallet() {
                 //    lastValidBlockHeight (rather than just the signature)
                 //    bounds the wait: confirmation ends once the blockhash
                 //    expires, instead of polling indefinitely.
-                await connection.confirmTransaction(
+                const confirmation = await connection.confirmTransaction(
                   {
                     signature: sentSignature,
                     blockhash: transaction.recentBlockhash!,
@@ -273,6 +273,19 @@ export function useRepairWallet() {
                   },
                   "confirmed"
                 );
+                // The normal confirmation path rejects failed transactions,
+                // but web3.js's blockhash-expiry branch RESOLVES with the
+                // on-chain error in value.err instead (expiry won the
+                // race, the re-check poll then found the transaction at
+                // target commitment). A landed-and-failed transaction
+                // reverted atomically: nothing closed, nothing moved.
+                // Treat it as the failure it is; the shared catch then
+                // verifies on-chain and reports honestly.
+                if (confirmation.value.err) {
+                  throw new Error(
+                    "The transaction was confirmed on-chain but failed. Nothing was closed and nothing was lost - run the repair again."
+                  );
+                }
 
                 batchLanded = true;
               } catch (sendError) {

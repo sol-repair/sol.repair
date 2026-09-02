@@ -406,6 +406,43 @@ describe("useRepairWallet", () => {
     expect(result.current.signatures).toHaveLength(1);
   });
 
+  it("treats a confirmation that resolves with an on-chain error as a failure", async () => {
+    // web3.js 1.98.4's blockhash-expiry branch can RESOLVE (not reject)
+    // with the transaction's on-chain error in value.err: when the expiry
+    // promise wins the race but the re-check poll then finds the
+    // transaction at target commitment, the strategy resolves with
+    // { value: { err } } unchecked. A landed-and-failed transaction is
+    // atomic - nothing closed, nothing moved - and must never be booked
+    // as a landed repair with success copy.
+    mocks.conn.confirmTransaction.mockResolvedValue({
+      context: { slot: 123 },
+      value: { err: { InstructionError: [0, { Custom: 311 }] } },
+    });
+    // The accounts are genuinely still open (the transaction failed).
+    mocks.conn.getAccountInfo.mockResolvedValue(STILL_OPEN);
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(1);
+    expect(result.current.closedCount).toBe(0);
+    expect(result.current.recoveredLamports).toBe(0n);
+    expect(result.current.error).toMatch(/failed/i);
+    // Not the expiry copy: this is a distinct, honest failure mode.
+    expect(result.current.error).not.toMatch(/expired while waiting/i);
+  });
+
   it("reports the friendly expired message when both attempts expire", async () => {
     const EXPIRED = new Error(
       "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
