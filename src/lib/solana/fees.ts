@@ -11,11 +11,17 @@ import type { ClosableAccount } from "./tokenAccounts";
 /**
  * The 1% success fee, charged on recovered rent.
  *
- * The fee is a plain SystemProgram transfer from the user's wallet to the
+ * The fee is a plain SystemProgram.transfer from the user's wallet to the
  * fee address below. It is appended AFTER the closeAccount instructions in
- * each transaction, so the rent those closes just returned covers it, even
- * for a wallet starting from zero. Users see the transfer in their wallet
- * before they approve, same as everything else.
+ * each transaction, so the rent those closes just returned covers the
+ * SERVICE fee - a wallet with zero SOL can still pay the 1%. The NETWORK
+ * fee is different and must not be conflated with it: Solana checks
+ * fee-payability before executing any instruction, so the wallet must
+ * already hold enough SOL for the base fee (plus any priority fee the
+ * wallet itself adds) or the transaction is rejected outright - the rent
+ * being recovered in the same transaction cannot pre-fund it. Users see
+ * the transfer in their wallet before they approve, same as everything
+ * else.
  */
 
 export const FEE_PERCENT = 1;

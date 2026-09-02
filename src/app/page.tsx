@@ -625,6 +625,11 @@ export default function Home() {
                     adds when signing, all to the Solana network, not to us
                   </p>
                   <p>
+                    Your wallet needs this small balance before signing — the
+                    network fee can&rsquo;t be paid from the rent being
+                    recovered.
+                  </p>
+                  <p>
                     {feeReady
                       ? `Service fee (1% of recovered): ~${lamportsToSol(serviceFeeLamports)} SOL, one transfer to the published fee address`
                       : "Service fee: none on this repair (the fee account is not ready yet)"}
@@ -633,8 +638,8 @@ export default function Home() {
 
                 <p className="mt-3 text-xs font-medium text-emerald-400">
                   {feeReady
-                    ? "No tokens are moved, ever. The only SOL that leaves your wallet is the 1% service fee, shown in your wallet before you approve."
-                    : "No tokens are moved, ever. No SOL leaves your wallet on this repair."}
+                    ? "No tokens are moved, ever. The only SOL that goes to us is the 1% service fee, shown in your wallet before you approve."
+                    : "No tokens are moved, ever. No SOL goes to us on this repair."}
                 </p>
 
                 {/* Raw transaction inspector: prove what will be signed. */}

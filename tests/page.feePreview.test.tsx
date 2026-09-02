@@ -170,9 +170,14 @@ describe("repair confirmation fee preview parity", () => {
     await screen.findByText(/Service fee: none on this repair/);
     expect(screen.queryByText(/1% of recovered/)).toBeNull();
     expect(
-      screen.getByText(/No SOL leaves your wallet on this repair/)
+      screen.getByText(/No SOL goes to us on this repair/)
     ).toBeTruthy();
     expect(screen.getByText(/No fee transfer/)).toBeTruthy();
+    // The network fee needs an existing SOL balance - the repair cannot
+    // self-fund it from the rent it recovers (external audit 2026-09-01).
+    expect(
+      screen.getByText(/needs this small balance before signing/)
+    ).toBeTruthy();
 
     // The raw preview must contain only closeAccount instructions.
     const preview = parsePreview();
@@ -197,8 +202,13 @@ describe("repair confirmation fee preview parity", () => {
     await screen.findByText(/Service fee \(1% of recovered\)/);
     expect(
       screen.getByText(
-        /The only SOL that leaves your wallet is the 1% service fee/
+        /The only SOL that goes to us is the 1% service fee/
       )
+    ).toBeTruthy();
+    // The network fee needs an existing SOL balance - the repair cannot
+    // self-fund it from the rent it recovers (external audit 2026-09-01).
+    expect(
+      screen.getByText(/needs this small balance before signing/)
     ).toBeTruthy();
 
     const preview = parsePreview();
