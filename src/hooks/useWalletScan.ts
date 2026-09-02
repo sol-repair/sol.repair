@@ -64,6 +64,13 @@ export function useWalletScan(): {
 
     let cancelled = false;
 
+    // Commitment note (audit round 4, R4-5): this scan runs at the RPC
+    // node's DEFAULT commitment (finalized) - getClosableAccounts passes
+    // no override, deliberately. A stale scan can only produce a repair
+    // transaction that fails on-chain (account already closed), which
+    // the send/confirm/verify path reports honestly; no decision below
+    // assumes state fresher than what it actually read. Do not "fix"
+    // this to processed/confirmed without a reason.
     getClosableAccounts(connection, publicKey)
       .then((result) => {
         if (!cancelled) {
