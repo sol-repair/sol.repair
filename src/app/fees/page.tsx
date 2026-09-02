@@ -103,15 +103,21 @@ export default function FeesPage() {
           Fee Ledger
         </p>
         <h1 className="mb-3 text-3xl font-semibold tracking-tight text-zinc-50">
-          Every fee we&rsquo;ve ever collected.
+          Every fee recorded on-chain.
         </h1>
-        <p className="mb-6 text-zinc-300">
+        <p className="mb-2 text-zinc-300">
           Fee activity is derived directly from transactions to the
           SOL.repair fee wallet — successful transactions containing
           token-account closes and a transfer to the fee address. This page
           runs in your browser — no backend, nothing cached on a server.
           Every row links to the transaction, so you can verify every
           number yourself.
+        </p>
+        <p className="mb-6 text-xs leading-relaxed text-zinc-500">
+          The chain can&rsquo;t tag a transaction &ldquo;this was
+          SOL.repair&rdquo;. A row here is the exact shape our repair
+          produces — token-account closes with a transfer to the published
+          fee address. The signature is the receipt; judge for yourself.
         </p>
 
         <div className="mb-4 flex gap-2">
