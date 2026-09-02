@@ -22,6 +22,7 @@ import {
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
+  LedgerFetchError,
   decodeRawTransaction,
   feeRowsFromRawTransactions,
   fetchFeeLedgerPage,
@@ -498,5 +499,42 @@ describe("FEE_LEDGER_ENDPOINTS selection", () => {
     expect(mod.FEE_LEDGER_ENDPOINTS.devnet).toBe("https://api.devnet.solana.com");
     vi.unstubAllEnvs();
     vi.resetModules();
+  });
+});
+
+describe("rpcCall timeout (stubbed hanging fetch)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("aborts a hung RPC call and surfaces the honest network error", async () => {
+    // A pathological provider/connection can leave a fetch pending far
+    // longer than the UI expects. Every ledger RPC call is bounded by an
+    // abort timer; the hang must become LedgerFetchError("network")
+    // (the page's honest error state), never an eternal "Reading the
+    // chain...". External audit 2026-09-02 finding #7.
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: unknown, init?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new Error("The operation was aborted"))
+            );
+          })
+      )
+    );
+
+    const page = fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    // Attach the rejection handler BEFORE advancing the clock: with fake
+    // timers the rejection lands mid-advance, and an unattached instant
+    // trips vitest's unhandled-rejection tracking even though the very
+    // next line asserts it.
+    const settled = expect(page).rejects.toBeInstanceOf(LedgerFetchError);
+    await vi.advanceTimersByTimeAsync(31_000);
+    await settled;
+    await expect(page).rejects.toMatchObject({ kind: "network" });
   });
 });

@@ -383,22 +383,38 @@ export function formatBlockTime(blockTime: number | null): string {
   );
 }
 
+/** How long one ledger RPC call may hang before it is aborted. The public
+ *  endpoints occasionally wedge a connection; without a bound the page
+ *  would sit on "Reading the chain..." until the browser's own
+ *  (minutes-long) timeout fires. */
+const RPC_CALL_TIMEOUT_MS = 30_000;
+
+async function rpcFetch(endpoint: string, payload: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RPC_CALL_TIMEOUT_MS);
+  try {
+    return await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      signal: controller.signal,
+    });
+  } catch {
+    // Aborted (call timeout) or the network dropped: either way the
+    // honest network error, never an eternal spinner.
+    throw new LedgerFetchError("network");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function rpcCall(
   endpoint: string,
   method: string,
   params: unknown[]
 ): Promise<unknown> {
   const payload = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    });
-  } catch {
-    throw new LedgerFetchError("network");
-  }
+  let res = await rpcFetch(endpoint, payload);
   // The public endpoints burst-throttle. Retry a 429 a couple of times with
   // growing backoff before the page surfaces its rate-limited state; the
   // total added delay stays under ~4.5s. A failed fallback endpoint would
@@ -407,15 +423,7 @@ async function rpcCall(
   for (const waitMs of [1200, 3000]) {
     if (res.status !== 429) break;
     await new Promise((r) => setTimeout(r, waitMs));
-    try {
-      res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      });
-    } catch {
-      throw new LedgerFetchError("network");
-    }
+    res = await rpcFetch(endpoint, payload);
   }
   if (res.status === 429) throw new LedgerFetchError("rate-limited");
   if (!res.ok) throw new LedgerFetchError("rpc");
