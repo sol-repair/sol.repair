@@ -42,7 +42,7 @@
  * the wallet adapter, which hands it to Phantom for the user to approve.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 
@@ -134,6 +134,18 @@ export function useRepairWallet() {
   // future repairs.
   const repairInFlight = useRef(false);
 
+  // The wallet provider issues a NEW context object on every state
+  // change, so an in-flight repair's captured `wallet` never sees a
+  // later switch (B1). Mirror the live public key in a ref - stable
+  // across re-renders, readable from inside the running repair - so the
+  // mid-run check compares against the CURRENT wallet, not the snapshot
+  // the run started with. Signing safety never depended on this (the
+  // signer is pinned at start); the honest "wallet changed" report did.
+  const livePublicKeyRef = useRef(wallet.publicKey);
+  useEffect(() => {
+    livePublicKeyRef.current = wallet.publicKey;
+  }, [wallet.publicKey]);
+
   const repair = useCallback(
     async (accounts: ClosableAccount[], feeReady: boolean) => {
       if (repairInFlight.current) return;
@@ -189,7 +201,8 @@ export function useRepairWallet() {
             // If the connected wallet changed since the run started, stop
             // BEFORE building the next transaction. Never sign for a
             // different identity than the one the user started with.
-            const livePublicKey = wallet.publicKey;
+            // Reads the ref (the live key), not the captured snapshot.
+            const livePublicKey = livePublicKeyRef.current;
             if (!livePublicKey || !livePublicKey.equals(repairOwner)) {
               walletChanged = true;
               throw new Error(

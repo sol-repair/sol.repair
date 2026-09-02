@@ -172,20 +172,104 @@ describe("useRepairWallet", () => {
       return tx;
     });
 
-    // The user switches wallets after the first batch confirms.
-    mocks.conn.confirmTransaction.mockImplementation(async () => {
-      mocks.holder.publicKey = KEYPAIR_B.publicKey;
-      return { value: { err: null } };
+    // Park confirmation so the test controls when batch 1 finishes.
+    let releaseConfirm!: (value: { value: { err: null } }) => void;
+    const confirmParked = new Promise<{ value: { err: null } }>((resolve) => {
+      releaseConfirm = resolve;
+    });
+    mocks.conn.confirmTransaction.mockReturnValue(confirmParked);
+
+    const { result, rerender } = renderHook(() => useRepairWallet());
+
+    let p!: Promise<void>;
+    act(() => {
+      p = result.current.repair(accounts, true);
+    });
+    // Batch 1 is signed and sent; its confirmation is parked.
+    await waitFor(() =>
+      expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1)
+    );
+
+    // The user switches wallets while the run awaits confirmation. The
+    // provider hands the next render an updated context value;
+    // rerender() commits it - the production mechanism by which a
+    // running repair can observe a switch at all (B1: the captured
+    // context object itself never changes).
+    mocks.holder.publicKey = KEYPAIR_B.publicKey;
+    await act(async () => {
+      rerender();
     });
 
-    const { result } = renderHook(() => useRepairWallet());
-
+    // Batch 1 confirms; the run reaches batch 2's identity check with
+    // the committed switch visible and stops before signing again.
     await act(async () => {
-      await result.current.repair(accounts, true);
+      releaseConfirm({ value: { err: null } });
+      await p;
     });
 
     // The run stopped and told the user why, and batch 2 was never built
     // or signed for wallet B.
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toMatch(/wallet changed/i);
+    expect(signCalls).toBe(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("detects the wallet switch when the adapter issues new context objects (production shape)", async () => {
+    // B1 (R4-6). The real wallet provider does NOT mutate a stable
+    // context object - it issues a brand-new one on every state change.
+    // An in-flight repair closure holds the OLD object, so reading
+    // wallet.publicKey from the captured snapshot always showed the
+    // original wallet: outside these tests (whose mock mutated in place)
+    // the detector compared the original to itself and could never fire.
+    // Signing safety was never at risk - the signer is pinned at start,
+    // so a run can never sign for the new wallet - but the honest
+    // "wallet changed, stopping" message was dead in production. The
+    // live public key must reach the running loop through a ref.
+    const KEYPAIR_B = Keypair.generate();
+    const accounts = makeAccounts(21); // two batches: 20 + 1
+
+    let signCalls = 0;
+    const signer = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+    mocks.holder.signTransaction = signer;
+
+    // Park confirmation so the test controls when batch 1 finishes.
+    let releaseConfirm!: (value: { value: { err: null } }) => void;
+    const confirmParked = new Promise<{ value: { err: null } }>((resolve) => {
+      releaseConfirm = resolve;
+    });
+    mocks.conn.confirmTransaction.mockReturnValue(confirmParked);
+
+    const { result, rerender } = renderHook(() => useRepairWallet());
+
+    let p!: Promise<void>;
+    act(() => {
+      p = result.current.repair(accounts, true);
+    });
+    await waitFor(() =>
+      expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1)
+    );
+
+    // The provider replaces the context object while the run awaits
+    // confirmation - new object, new publicKey, no in-place mutation of
+    // the old one - and React commits it (rerender).
+    mocks.holder = {
+      publicKey: KEYPAIR_B.publicKey,
+      signTransaction: signer,
+    };
+    await act(async () => {
+      rerender();
+    });
+
+    await act(async () => {
+      releaseConfirm({ value: { err: null } });
+      await p;
+    });
+
     expect(result.current.status).toBe("error");
     expect(result.current.error).toMatch(/wallet changed/i);
     expect(signCalls).toBe(1);
