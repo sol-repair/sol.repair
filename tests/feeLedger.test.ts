@@ -130,7 +130,7 @@ describe("feeRowsFromRawTransactions", () => {
       systemTransfer(new PublicKey(FEE_WALLET), 20_740),
     ]);
     const rows = feeRowsFromRawTransactions([{ signature: "sig1", raw }], FEE_WALLET);
-    expect(rows).toEqual([{ signature: "sig1", blockTime: BLOCK_TIME, lamports: 20_740 }]);
+    expect(rows).toEqual([{ signature: "sig1", blockTime: BLOCK_TIME, lamports: 20_740, onePercentMatch: null }]);
   });
 
   it("extracts from a classic (spl-token) repair too", () => {
@@ -139,7 +139,7 @@ describe("feeRowsFromRawTransactions", () => {
       systemTransfer(new PublicKey(FEE_WALLET), 20_392),
     ]);
     const rows = feeRowsFromRawTransactions([{ signature: "classic", raw }], FEE_WALLET);
-    expect(rows).toEqual([{ signature: "classic", blockTime: BLOCK_TIME, lamports: 20_392 }]);
+    expect(rows).toEqual([{ signature: "classic", blockTime: BLOCK_TIME, lamports: 20_392, onePercentMatch: null }]);
   });
 
   it("extracts from a versioned (v0) transaction", () => {
@@ -148,7 +148,7 @@ describe("feeRowsFromRawTransactions", () => {
       systemTransfer(new PublicKey(FEE_WALLET), 20_740),
     ]);
     const rows = feeRowsFromRawTransactions([{ signature: "v0", raw }], FEE_WALLET);
-    expect(rows).toEqual([{ signature: "v0", blockTime: BLOCK_TIME, lamports: 20_740 }]);
+    expect(rows).toEqual([{ signature: "v0", blockTime: BLOCK_TIME, lamports: 20_740, onePercentMatch: null }]);
   });
 
   it("excludes the seed funding (a transfer with no closeAccount)", () => {
@@ -200,7 +200,7 @@ describe("feeRowsFromRawTransactions", () => {
     ]);
     raw.meta!.innerInstructions = [{ index: 0, instructions: [message.instructions[2]] }];
     const rows = feeRowsFromRawTransactions([{ signature: "cpi", raw }], FEE_WALLET);
-    expect(rows).toEqual([{ signature: "cpi", blockTime: BLOCK_TIME, lamports: 20_784 }]);
+    expect(rows).toEqual([{ signature: "cpi", blockTime: BLOCK_TIME, lamports: 20_784, onePercentMatch: null }]);
   });
 
   it("counts transferWithSeed instructions", () => {
@@ -258,6 +258,129 @@ describe("feeRowsFromRawTransactions", () => {
     raw.blockTime = null;
     const rows = feeRowsFromRawTransactions([{ signature: "notime", raw }], FEE_WALLET);
     expect(rows[0].blockTime).toBeNull();
+  });
+});
+
+describe("feeRowsFromRawTransactions 1% conformance (onePercentMatch)", () => {
+  /** closeAccount for a KNOWN token account, so the test can place that
+   *  account's pre-tx rent into meta.preBalances at its message index. */
+  function closeIxFor(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+  }
+
+  /** preBalances for a legacy fixture: the given rent on the closed
+   *  account, 1 lamport on everything else (other accounts' balances are
+   *  irrelevant to the check). */
+  function preBalancesFor(
+    message: Message,
+    account: PublicKey,
+    rent: number
+  ): number[] {
+    return message.accountKeys.map((k) => (k.equals(account) ? rent : 1));
+  }
+
+  it("marks a fee that is exactly floor(1%) of the freed rent as conforming", () => {
+    // Today's live devnet repair, exact on-chain numbers: two closes
+    // freeing 1,856,000 + 1,886,803 = 3,742,803 rent (the UI's 0.001887
+    // display is 6-decimal rounding of 1,886,803 — the balance
+    // arithmetic 3,625,375 + 37,428 + 80,000 fixes the exact total),
+    // fee 37,428 = floor(3,742,803 / 100).
+    const accountA = Keypair.generate().publicKey;
+    const accountB = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(accountA),
+      closeIxFor(accountB),
+      systemTransfer(new PublicKey(FEE_WALLET), 37_428),
+    ]);
+    raw.meta!.preBalances = message.accountKeys.map((k) =>
+      k.equals(accountA) ? 1_856_000 : k.equals(accountB) ? 1_886_803 : 1
+    );
+    const rows = feeRowsFromRawTransactions([{ signature: "today", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("marks a fee one lamport off the 1% rule as non-conforming", () => {
+    // rent 2,039,280 -> floor(1%) = 20,392; 20,391 is a mismatch.
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_391),
+    ]);
+    raw.meta!.preBalances = preBalancesFor(message, account, 2_039_280);
+    const rows = feeRowsFromRawTransactions([{ signature: "off-by-one", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("marks an inflated crafted transfer as non-conforming", () => {
+    // A crafted tx closing one rent-exempt account (2,039,280) while
+    // transferring 100,000 to the fee wallet: a real fee would be 20,392.
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 100_000),
+    ]);
+    raw.meta!.preBalances = preBalancesFor(message, account, 2_039_280);
+    const rows = feeRowsFromRawTransactions([{ signature: "crafted", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("does not judge when the response lacks preBalances (null, no tag)", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    // no meta.preBalances at all: unverifiable, never accused
+    const rows = feeRowsFromRawTransactions([{ signature: "noverdict", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBeNull();
+  });
+
+  it("does not judge when the closed account is missing from preBalances", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    // truncated preBalances: the index math cannot complete
+    raw.meta!.preBalances = [1];
+    const rows = feeRowsFromRawTransactions([{ signature: "short", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBeNull();
+  });
+
+  it("checks v0 transactions too (static account keys order)", () => {
+    const account = Keypair.generate().publicKey;
+    const message = new TransactionMessage({
+      payerKey: Keypair.generate().publicKey,
+      recentBlockhash: RECENT_BLOCKHASH,
+      instructions: [
+        closeIxFor(account),
+        systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      ],
+    }).compileToV0Message();
+    const serialized = new VersionedTransaction(message).serialize();
+    const raw: RawTransaction = {
+      blockTime: BLOCK_TIME,
+      version: 0,
+      meta: {
+        err: null,
+        loadedAddresses: { readonly: [], writable: [] },
+        innerInstructions: [],
+        preBalances: message.staticAccountKeys.map((k) =>
+          k.equals(account) ? 2_039_280 : 1
+        ),
+      },
+      transaction: [Buffer.from(serialized).toString("base64"), "base64"],
+    };
+    const rows = feeRowsFromRawTransactions([{ signature: "v0check", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
   });
 });
 

@@ -117,7 +117,10 @@ export default function FeesPage() {
           The chain can&rsquo;t tag a transaction &ldquo;this was
           SOL.repair&rdquo;. A row here is the exact shape our repair
           produces — token-account closes with a transfer to the published
-          fee address. The signature is the receipt; judge for yourself.
+          fee address. Every row is checked against the fee rule: when the
+          transferred amount is not exactly 1% of the rent its closes
+          freed, the row is marked, not hidden. The signature is the
+          receipt; judge for yourself.
         </p>
 
         <div className="mb-4 flex gap-2">
@@ -201,6 +204,14 @@ export default function FeesPage() {
                         className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-zinc-400"
                       >
                         test
+                      </span>
+                    )}
+                    {row.onePercentMatch === false && (
+                      <span
+                        title="The amount transferred to the fee wallet does not equal 1% of the rent this transaction's closes freed"
+                        className="shrink-0 rounded border border-amber-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-500/80"
+                      >
+                        not a 1% fee
                       </span>
                     )}
                   </span>

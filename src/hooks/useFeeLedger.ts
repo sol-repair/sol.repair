@@ -32,9 +32,11 @@ type CacheEntry = {
 };
 
 function cacheKey(cluster: FeeLedgerCluster): string {
-  // v2: pagination metadata switched from fee-row-based to raw-signature-
-  // based; old cached cursors were invalidated rather than trusted.
-  return `solrepair:fee-ledger:v2:${cluster}`;
+  // v3: rows now carry onePercentMatch; v2-cached rows lack the field and
+  // would render untagged for the cache's TTL, so they are invalidated
+  // rather than trusted. (v2 had moved pagination metadata from fee-row-
+  // based to raw-signature-based for the same reason.)
+  return `solrepair:fee-ledger:v3:${cluster}`;
 }
 
 function readCache(cluster: FeeLedgerCluster): CacheEntry | null {

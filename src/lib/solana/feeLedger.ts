@@ -32,6 +32,9 @@ import {
 } from "@solana/web3.js";
 
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "./tokenAccounts";
+// Read-only: the conformance check mirrors the frozen fee formula's rate.
+// fees.ts itself is not modified.
+import { FEE_PERCENT } from "./fees";
 
 /** Endpoints for the ledger. The devnet tab always uses the public devnet
  *  endpoint. The mainnet tab uses the same dedicated provider endpoint the
@@ -62,6 +65,16 @@ export type FeeLedgerRow = {
   /** Unix seconds from the RPC's blockTime, or null if the node omitted it. */
   blockTime: number | null;
   lamports: number;
+  /** Conformance to the fee rule: true when the inbound lamports equal
+   *  exactly floor(1%) of the rent this transaction's closeAccount
+   *  instructions freed — the shape every real SOL.repair fee has. False
+   *  when they differ: the page marks the row (never hides it), because a
+   *  crafted transfer inside a repair-shaped transaction must not display
+   *  as ordinary revenue. Null when the rent cannot be computed from the
+   *  response — no verdict, no accusation, no tag. Encodes today's 1%
+   *  rate (FEE_PERCENT); if the fee ever changes, this must become
+   *  era-aware. */
+  onePercentMatch: boolean | null;
 };
 
 export const FEE_LEDGER_PAGE_SIZE = 25;
@@ -125,6 +138,10 @@ export type RawTransaction = {
   version?: number | string | null;
   meta?: {
     err?: unknown;
+    /** Lamports of each account before the transaction, indexed over the
+     *  message account keys in wire order: static keys, then loaded
+     *  writable, then loaded readonly. */
+    preBalances?: number[];
     loadedAddresses?: { readonly?: string[]; writable?: string[] };
     innerInstructions?: {
       index?: number;
@@ -209,6 +226,10 @@ function resolveInstruction(
 export function decodeRawTransaction(raw: RawTransaction): {
   blockTime: number | null;
   instructions: DecodedInstruction[];
+  /** The transaction's account keys in meta.preBalances order (static
+   *  keys, then loaded writable, then loaded readonly), so a decoded
+   *  instruction's account can be mapped to its pre-tx lamports. */
+  accountKeys: string[];
 } | null {
   const txData = raw.transaction;
   if (
@@ -233,6 +254,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
   }
 
   let instructions: DecodedInstruction[];
+  let accountKeys: string[];
   if (message.version === "legacy") {
     const keys: readonly (PublicKey | undefined)[] = message.accountKeys;
     const top = message.instructions
@@ -244,6 +266,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
         .filter((ix): ix is DecodedInstruction => ix !== null)
     );
     instructions = [...top, ...inner];
+    accountKeys = message.accountKeys.map((k) => k.toBase58());
   } else {
     // Versioned transactions resolve some accounts through address
     // lookup tables; getTransaction returns the loaded addresses in
@@ -294,6 +317,13 @@ export function decodeRawTransaction(raw: RawTransaction): {
           .filter((ix): ix is DecodedInstruction => ix !== null)
       );
       instructions = [...top, ...inner];
+      // preBalances index order: static keys, then loaded writable, then
+      // loaded readonly — the wire order the RPC documents.
+      accountKeys = [
+        ...message.staticAccountKeys,
+        ...accountKeysFromLookups.writable,
+        ...accountKeysFromLookups.readonly,
+      ].map((k) => k.toBase58());
     } catch {
       return null;
     }
@@ -302,6 +332,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
   return {
     blockTime: typeof raw.blockTime === "number" ? raw.blockTime : null,
     instructions,
+    accountKeys,
   };
 }
 
@@ -336,6 +367,28 @@ function inboundTransferLamports(
   return Number.isSafeInteger(lamports) && lamports > 0 ? lamports : 0;
 }
 
+/** Total rent the transaction's closeAccount instructions freed (the
+ *  closed accounts' pre-tx lamports), or null when it cannot be computed
+ *  from the response — a missing/truncated preBalances array or an
+ *  unresolvable account index means no verdict rather than a guess. */
+function closedRentLamports(
+  decoded: { instructions: DecodedInstruction[]; accountKeys: string[] },
+  preBalances: number[] | undefined
+): number | null {
+  if (!Array.isArray(preBalances)) return null;
+  let total = 0;
+  for (const ix of decoded.instructions) {
+    if (!isCloseAccount(ix)) continue;
+    const closed = ix.accountPubkeys[0];
+    const index = decoded.accountKeys.indexOf(closed);
+    if (index < 0 || index >= preBalances.length) return null;
+    const lamports = preBalances[index];
+    if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
+    total += lamports;
+  }
+  return total;
+}
+
 /**
  * Turn raw getTransaction responses (keyed by signature) into ledger rows.
  *
@@ -359,7 +412,15 @@ export function feeRowsFromRawTransactions(
       0
     );
     if (lamports <= 0) continue;
-    rows.push({ signature, blockTime: decoded.blockTime, lamports });
+    // Same arithmetic as the frozen fee builder (fees.ts): BigInt
+    // division truncates, i.e. floor, with no float drift possible.
+    const rent = closedRentLamports(decoded, raw.meta?.preBalances);
+    const onePercentMatch =
+      rent === null
+        ? null
+        : BigInt(lamports) ===
+          (BigInt(rent) * BigInt(FEE_PERCENT)) / 100n;
+    rows.push({ signature, blockTime: decoded.blockTime, lamports, onePercentMatch });
   }
   return rows;
 }
