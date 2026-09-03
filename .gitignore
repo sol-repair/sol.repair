@@ -1,0 +1,64 @@
+# See https://help.github.com/articles/ignoring-files/ for more information.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist
+
+# env files (NEVER commit real env files - protects wallet keys and secrets)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+!.env.example
+*.key
+*.pem
+
+# secrets - explicit guard against accidental key leakage
+# (if it looks like a private key, seed phrase, or credential, ignore it)
+
+# misc
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# editor directories (personal config, not project config)
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# cache
+.cache/
