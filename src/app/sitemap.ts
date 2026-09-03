@@ -1,8 +1,9 @@
 import type { MetadataRoute } from "next";
 
 /**
- * Sitemap for the three public pages. The homepage is the product; the two
- * legal pages are included so crawlers have a complete map, weighted low.
+ * Sitemap for the public pages. The homepage is the product; the guide
+ * pages are the honest-explanation surface; the two legal pages are
+ * included so crawlers have a complete map, weighted low.
  */
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = "https://sol.repair";
@@ -12,6 +13,30 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: new Date(),
       changeFrequency: "weekly",
       priority: 1,
+    },
+    {
+      url: `${base}/guides/random-tokens`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
+      url: `${base}/guides/solana-rent`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
+      url: `${base}/guides/close-token-accounts`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
+      url: `${base}/guides`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.4,
     },
     {
       url: `${base}/terms`,

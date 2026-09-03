@@ -792,6 +792,13 @@ export default function Home() {
           </p>
           <p className="mt-2">
             <Link
+              href="/guides"
+              className="underline underline-offset-2 hover:text-zinc-400"
+            >
+              Guides
+            </Link>
+            {" · "}
+            <Link
               href="/terms"
               className="underline underline-offset-2 hover:text-zinc-400"
             >
