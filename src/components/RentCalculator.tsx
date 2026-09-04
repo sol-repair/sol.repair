@@ -9,13 +9,13 @@
 
 import { useState } from "react";
 
-import { estimateRentLamports, formatRentSol } from "@/lib/rent";
+import { estimateRentRange, formatRentSol } from "@/lib/rent";
 
 export function RentCalculator() {
   const [count, setCount] = useState("10");
 
   const parsed = Number.parseInt(count, 10);
-  const estimate = count.trim() === "" ? null : estimateRentLamports(parsed);
+  const range = count.trim() === "" ? null : estimateRentRange(parsed);
 
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-950 p-4">
@@ -36,15 +36,17 @@ export function RentCalculator() {
         className="mt-2 w-32 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-zinc-500"
       />
       <p className="mt-3 font-mono text-sm text-zinc-200">
-        {estimate === null ? (
+        {range === null ? (
           <span className="text-zinc-500">
             Enter a count between 1 and 99,999.
           </span>
         ) : (
           <>
-            About{" "}
-            <span className="text-zinc-50">{formatRentSol(estimate)} SOL</span>{" "}
-            in rent deposits
+            Between about{" "}
+            <span className="text-zinc-50">
+              {formatRentSol(range[0])} and {formatRentSol(range[1])} SOL
+            </span>{" "}
+            in rent deposits, depending on when the accounts were created
           </>
         )}
       </p>

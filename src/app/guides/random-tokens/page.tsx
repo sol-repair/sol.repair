@@ -63,8 +63,10 @@ export default function RandomTokensGuide() {
             <p>
               The tokens are not the cost. The account holding them is. Every
               token account on Solana must keep a deposit of rent to stay
-              open. For a standard token account that deposit is 2,039,280
-              lamports, about 0.002 SOL. It sits there for as long as the
+              open. For a standard token account, that deposit is about 0.002
+              SOL. Accounts created before September 4, 2026 hold 2,039,280
+              lamports, and newer ones hold 1,855,569 lamports. It sits there
+              for as long as the
               account exists. It does not drain away. It is your SOL, held in
               an account you never asked for.
             </p>

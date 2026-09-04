@@ -36,6 +36,7 @@ describe("guide pages render with their content", () => {
       screen.getByRole("heading", { level: 1, name: /random tokens/i })
     ).toBeTruthy();
     expect(screen.getByText(/2,039,280/)).toBeTruthy();
+    expect(screen.getByText(/1,855,569/)).toBeTruthy();
     expect(screen.getByText(/skipped and kept safe/)).toBeTruthy();
   });
 
@@ -47,6 +48,9 @@ describe("guide pages render with their content", () => {
     expect(screen.getByText(/deposit, not a fee/i)).toBeTruthy();
     expect(screen.getByLabelText(/empty token accounts/i)).toBeTruthy();
     expect(screen.getByText(/0.0203928 SOL/)).toBeTruthy();
+    expect(screen.getByText(/0.01855569/)).toBeTruthy();
+    expect(screen.getByText(/1,855,569/)).toBeTruthy();
+    expect(screen.getByText(/Mainnet lowered it on September 4, 2026/)).toBeTruthy();
   });
 
   it("close guide states what closing never does and the fee", () => {
