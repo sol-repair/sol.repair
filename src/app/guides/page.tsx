@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { GUIDES } from "@/lib/guides";
 
 export const metadata: Metadata = {
   title: "Guides | SOL.repair",
@@ -7,27 +8,6 @@ export const metadata: Metadata = {
     "Plain-English guides to Solana token accounts: why random tokens appear, what rent is, and how closing an empty account works.",
   alternates: { canonical: "/guides" },
 };
-
-const GUIDES = [
-  {
-    href: "/guides/random-tokens",
-    title: "Why do I have random tokens in my wallet?",
-    summary:
-      "Spam airdrops explained, the one rule that keeps you safe, and what those accounts actually cost you.",
-  },
-  {
-    href: "/guides/solana-rent",
-    title: "What is Solana rent?",
-    summary:
-      "Rent is a deposit, not a fee. Real numbers, a simple calculator, and where the number comes from.",
-  },
-  {
-    href: "/guides/close-token-accounts",
-    title: "How to close empty token accounts",
-    summary:
-      "Exactly what the closeAccount instruction does, and how to check any tool before you sign.",
-  },
-];
 
 export default function GuidesIndexPage() {
   return (

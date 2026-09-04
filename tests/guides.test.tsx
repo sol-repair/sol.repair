@@ -17,6 +17,7 @@ import SolanaRentGuide from "@/app/guides/solana-rent/page";
 import CloseTokenAccountsGuide from "@/app/guides/close-token-accounts/page";
 import GuidesIndexPage from "@/app/guides/page";
 import GuidesSection from "@/components/GuidesSection";
+import { GUIDES } from "@/lib/guides";
 
 const PAGES = [
   { name: "random-tokens", Component: RandomTokensGuide },
@@ -116,5 +117,26 @@ describe("owner writing rules hold mechanically", () => {
       const text = container.textContent ?? "";
       expect(text.includes("!"), `exclamation found in ${name}`).toBe(false);
     }
+  });
+});
+
+describe("the guide list is a single source", () => {
+  it("holds exactly the three published guides", () => {
+    expect(GUIDES.map((g) => g.href)).toEqual([
+      "/guides/random-tokens",
+      "/guides/solana-rent",
+      "/guides/close-token-accounts",
+    ]);
+    for (const guide of GUIDES) {
+      expect(guide.title.length).toBeGreaterThan(0);
+      expect(guide.summary.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("holds the owner's writing rules on the raw strings", () => {
+    const text = GUIDES.map((g) => `${g.title} ${g.summary}`).join(" ");
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    expect(text.includes("!")).toBe(false);
   });
 });
