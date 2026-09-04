@@ -149,6 +149,29 @@ export async function getClosableAccounts(
         continue;
       }
 
+      // Deep-field validation: the parsed envelope can be intact while the
+      // numbers inside are garbage. A balance or rent that cannot be read
+      // as a whole number is NEVER sanitized into zero or another default:
+      // the account cannot be proven safely closable, so it is reported
+      // and skipped like any other unreadable entry.
+      if (
+        typeof account.lamports !== "number" ||
+        !Number.isInteger(account.lamports) ||
+        account.lamports < 0 ||
+        typeof info.tokenAmount !== "object" ||
+        info.tokenAmount === null ||
+        typeof info.tokenAmount.amount !== "string" ||
+        !/^\d+$/.test(info.tokenAmount.amount)
+      ) {
+        skippedAccounts.push({
+          pubkey: pubkey.toString(),
+          mint: info.mint,
+          reason: "response could not be read (malformed RPC data)",
+          program: tag,
+        });
+        continue;
+      }
+
       // --- The five eligibility checks ---
       //
       // These are stricter than the protocol minimum. The on-chain program

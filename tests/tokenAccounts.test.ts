@@ -32,13 +32,20 @@ function pk(seed: number): PublicKey {
 const OWNER = pk(1);
 
 /** A clean, eligible account in the real parsed shape. Fixtures below
- *  override a single field each so every test isolates one rule. */
-function tokenAccount(seed: number, overrides: Record<string, unknown> = {}) {
+ *  override a single field each so every test isolates one rule. The
+ *  accountOverrides argument reaches the account-level fields (lamports,
+ *  owner) that sit outside the parsed data. */
+function tokenAccount(
+  seed: number,
+  overrides: Record<string, unknown> = {},
+  accountOverrides: Record<string, unknown> = {}
+) {
   return {
     pubkey: pk(seed),
     account: {
       lamports: 2_039_280,
       owner: TOKEN_PROGRAM_ID.toBase58(),
+      ...accountOverrides,
       data: {
         parsed: {
           info: {
@@ -258,4 +265,90 @@ describe("getClosableAccounts eligibility checks", () => {
       malformed.map((m) => m.pubkey.toBase58())
     );
   });
+});
+
+describe("getClosableAccounts deep numerical fields", () => {
+  // The parsed envelope can be intact while the numbers inside are
+  // garbage. The scan must NEVER sanitize garbage into zero or another
+  // default: an account whose balance or rent cannot be read as a whole
+  // number cannot be proven safely closable, so it is skipped with the
+  // honest malformed reason, its healthy neighbors still classify, and
+  // nothing is counted toward the recoverable total.
+  const MALFORMED = "response could not be read (malformed RPC data)";
+
+  const cases = [
+    {
+      name: "a balance string that is not a number",
+      seed: 30,
+      overrides: {
+        tokenAmount: {
+          amount: "abc",
+          decimals: 6,
+          uiAmount: null,
+          uiAmountString: "abc",
+        },
+      },
+    },
+    {
+      name: "a balance field missing entirely",
+      seed: 31,
+      overrides: {
+        tokenAmount: { decimals: 6, uiAmount: null, uiAmountString: "0" },
+      } as Record<string, unknown>,
+    },
+    {
+      name: "a fractional balance string",
+      seed: 32,
+      overrides: {
+        tokenAmount: {
+          amount: "1.5",
+          decimals: 6,
+          uiAmount: null,
+          uiAmountString: "1.5",
+        },
+      },
+    },
+  ];
+
+  for (const { name, seed, overrides } of cases) {
+    it(`skips an account with ${name}, without defaulting it to zero`, async () => {
+      const garbage = tokenAccount(seed, overrides);
+      const { result } = await runScan([tokenAccount(2), garbage]);
+
+      expect(result.totalAccounts).toBe(2);
+      expect(result.eligibleAccounts).toHaveLength(1);
+      expect(result.eligibleAccounts[0].pubkey).toBe(pk(2).toBase58());
+      expect(result.recoverableLamports).toBe(2_039_280n);
+
+      expect(result.skippedAccounts).toHaveLength(1);
+      const skipped = result.skippedAccounts[0];
+      expect(skipped.pubkey).toBe(pk(seed).toBase58());
+      expect(skipped.reason).toBe(MALFORMED);
+      expect(skipped.mint).toBe(pk(seed + 100).toBase58());
+    });
+  }
+
+  const lamportsCases = [
+    { name: "rent that is fractional", seed: 40, lamports: 3.5 },
+    { name: "rent that is missing", seed: 41, lamports: undefined },
+    { name: "negative rent", seed: 42, lamports: -100 },
+  ];
+
+  for (const { name, seed, lamports } of lamportsCases) {
+    it(`skips an account with ${name}, without defaulting it to zero`, async () => {
+      const garbage = tokenAccount(seed, {}, { lamports });
+      const { result } = await runScan([tokenAccount(2), garbage]);
+
+      expect(result.totalAccounts).toBe(2);
+      expect(result.eligibleAccounts).toHaveLength(1);
+      expect(result.eligibleAccounts[0].pubkey).toBe(pk(2).toBase58());
+      expect(result.recoverableLamports).toBe(2_039_280n);
+
+      expect(result.skippedAccounts).toHaveLength(1);
+      const skipped = result.skippedAccounts[0];
+      expect(skipped.pubkey).toBe(pk(seed).toBase58());
+      expect(skipped.reason).toBe(MALFORMED);
+      expect(skipped.mint).toBe(pk(seed + 100).toBase58());
+    });
+  }
 });
