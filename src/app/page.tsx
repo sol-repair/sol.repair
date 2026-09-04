@@ -9,7 +9,10 @@ import { VersionedTransaction } from "@solana/web3.js";
 import { NetworkBadge } from "@/components/NetworkBadge";
 import { WalletButton } from "@/components/WalletButton";
 import { useWalletScan } from "@/hooks/useWalletScan";
-import { useRepairWallet } from "@/hooks/useRepairWallet";
+import {
+  MAX_ACCOUNTS_PER_RUN,
+  useRepairWallet,
+} from "@/hooks/useRepairWallet";
 import { lamportsToSol } from "@/lib/solana/tokenAccounts";
 import { SOLANA_NETWORK } from "@/lib/solana/connection";
 import { buildCloseAccountInstructions } from "@/lib/solana/closeAccounts";
@@ -214,36 +217,46 @@ export default function Home() {
     [result, selected]
   );
   const selectedCount = selectedAccounts.length;
-  const selectedLamports = useMemo(
-    () =>
-      selectedAccounts.reduce((sum, a) => sum + BigInt(a.lamports), 0n),
+
+  // Repair ceiling: one run covers at most MAX_ACCOUNTS_PER_RUN accounts
+  // (five approval popups). Everything below - the preview, the fees, the
+  // simulation, and the repair itself - is computed over the capped
+  // runAccounts, and the review screen says the rest are closed by
+  // running the repair again.
+  const runAccounts = useMemo(
+    () => selectedAccounts.slice(0, MAX_ACCOUNTS_PER_RUN),
     [selectedAccounts]
   );
+  const cappedCount = selectedCount - runAccounts.length;
+  const runLamports = useMemo(
+    () => runAccounts.reduce((sum, a) => sum + BigInt(a.lamports), 0n),
+    [runAccounts]
+  );
 
-  // The 1% service fee across all selected accounts (summed per batch, the
+  // The 1% service fee across the capped run (summed per batch, the
   // same way the repair charges it).
   const serviceFeeLamports = useMemo(
     () =>
-      chunkInstructions(selectedAccounts).reduce(
+      chunkInstructions(runAccounts).reduce(
         (sum, batch) => sum + feeAmountLamports(batch),
         0n
       ),
-    [selectedAccounts]
+    [runAccounts]
   );
 
   // Repairs larger than one transaction's instruction budget are split into
   // sequential approvals; tell the user up front how many to expect.
-  const batchCount = selectedCount
-    ? chunkInstructions(selectedAccounts).length
+  const batchCount = runAccounts.length
+    ? chunkInstructions(runAccounts).length
     : 1;
 
   // Human-readable preview of the first transaction's instructions, built
   // with the SAME builders the repair uses. Display only, nothing is sent.
   const firstBatchPreview = useMemo(() => {
-    if (!publicKey || selectedCount === 0) {
+    if (!publicKey || runAccounts.length === 0) {
       return null;
     }
-    const first = chunkInstructions(selectedAccounts)[0];
+    const first = chunkInstructions(runAccounts)[0];
     const preview: PreviewInstruction[] = buildCloseAccountInstructions(
       first,
       publicKey
@@ -269,17 +282,17 @@ export default function Home() {
       });
     }
     return preview;
-  }, [publicKey, selectedAccounts, selectedCount, feeReady]);
+  }, [publicKey, runAccounts, feeReady]);
 
   // Simulate every batch against the RPC (no signature needed). Passing the
   // simulation proves the transactions execute cleanly; the net SOL change
   // is computed deterministically from the scan (rent minus network and
   // service fees).
   const runSimulation = useCallback(async () => {
-    if (!publicKey || selectedCount === 0) return;
+    if (!publicKey || runAccounts.length === 0) return;
     setSim({ state: "running" });
     try {
-      const batches = chunkInstructions(selectedAccounts);
+      const batches = chunkInstructions(runAccounts);
       // feeReady is the shared page-level decision, so the simulation and
       // the real repair can never disagree about the fee.
       for (const batch of batches) {
@@ -309,7 +322,7 @@ export default function Home() {
       setSim({
         state: "ok",
         netSol: lamportsToSol(
-          selectedLamports - feeLamports - (feeReady ? serviceFeeLamports : 0n)
+          runLamports - feeLamports - (feeReady ? serviceFeeLamports : 0n)
         ),
         txCount: batches.length,
       });
@@ -319,7 +332,7 @@ export default function Home() {
         error: e instanceof Error ? e.message : String(e),
       });
     }
-  }, [connection, publicKey, selectedAccounts, selectedCount, selectedLamports, serviceFeeLamports, feeReady]);
+  }, [connection, publicKey, runAccounts, runLamports, serviceFeeLamports, feeReady]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
@@ -609,15 +622,22 @@ export default function Home() {
                   {batchCount === 1
                     ? "1 transaction"
                     : `${batchCount} transactions`}{" "}
-                  closing {selectedCount} empty token account
-                  {selectedCount === 1 ? "" : "s"}.
+                  {cappedCount > 0
+                    ? `closing the first ${MAX_ACCOUNTS_PER_RUN} of your ${selectedCount} selected accounts.`
+                    : `closing ${selectedCount} empty token account${selectedCount === 1 ? "" : "s"}.`}
                 </p>
+                {cappedCount > 0 && (
+                  <p className="mt-2 text-sm text-zinc-400">
+                    Run the repair again after it finishes to close the
+                    remaining {cappedCount} accounts.
+                  </p>
+                )}
 
                 <div className="mt-3 space-y-1 rounded-md border border-zinc-800 bg-black/40 p-3 font-mono text-xs text-zinc-400">
-                  <p>Accounts being closed: {selectedCount}</p>
+                  <p>Accounts being closed: {runAccounts.length}</p>
                   <p>
                     Total SOL returning to your wallet: ~
-                    {lamportsToSol(selectedLamports)} SOL
+                    {lamportsToSol(runLamports)} SOL
                   </p>
                   <p>
                     Network fee: ~
@@ -690,7 +710,7 @@ export default function Home() {
                 </div>
                 <div className="mt-4 flex gap-3">
                   <button
-                    onClick={() => repair(selectedAccounts, feeReady)}
+                    onClick={() => repair(runAccounts, feeReady)}
                     disabled={selectedCount === 0}
                     className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -738,6 +758,13 @@ export default function Home() {
                   {closedCount} account{closedCount === 1 ? "" : "s"} closed.
                   Recovered {lamportsToSol(recoveredLamports)} SOL.
                 </p>
+                {selectedCount - closedCount > 0 && (
+                  <p className="mt-2 text-sm text-zinc-400">
+                    Run the repair again to close the remaining{" "}
+                    {selectedCount - closedCount} account
+                    {selectedCount - closedCount === 1 ? "" : "s"}.
+                  </p>
+                )}
                 {signatures.map((sig) => (
                   <ExplorerLink key={sig} signature={sig} />
                 ))}

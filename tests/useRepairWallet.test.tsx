@@ -28,7 +28,10 @@ import {
   type Connection,
 } from "@solana/web3.js";
 
-import { useRepairWallet } from "../src/hooks/useRepairWallet";
+import {
+  MAX_ACCOUNTS_PER_RUN,
+  useRepairWallet,
+} from "../src/hooks/useRepairWallet";
 import {
   TOKEN_PROGRAM_ID,
   type ClosableAccount,
@@ -611,5 +614,53 @@ describe("useRepairWallet", () => {
     expect(result.current.closedCount).toBe(7);
     expect(result.current.recoveredLamports).toBe(7n * 2039280n);
     expect(result.current.error).toMatch(/stopped after 7 of 20/);
+  });
+
+  it("caps a run at MAX_ACCOUNTS_PER_RUN accounts and leaves the rest for the next run", async () => {
+    // The repair ceiling: one run covers at most 100 accounts - five
+    // approval popups of 20 closes each. A 250-account selection must
+    // stop at 100, and the 101st account must never appear in any signed
+    // transaction. The remaining 150 are closed by running the repair
+    // again, not by 13 popups in one sitting.
+    const accounts = makeAccounts(250);
+
+    const approvals: Array<{ closes: number; closedKeys: string[] }> = [];
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      const closeIxs = tx.instructions.filter((ix) =>
+        ix.programId.toBase58().startsWith("Token")
+      );
+      approvals.push({
+        closes: closeIxs.length,
+        closedKeys: closeIxs.map((ix) => ix.keys[0].pubkey.toBase58()),
+      });
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    // Exactly five approvals, each the full 20 closes.
+    expect(result.current.status).toBe("done");
+    expect(approvals).toHaveLength(MAX_ACCOUNTS_PER_RUN / 20);
+    for (const approval of approvals) {
+      expect(approval.closes).toBe(20);
+    }
+    // The first 100 accounts, in order, and nothing beyond them.
+    const closedKeys = approvals.flatMap((a) => a.closedKeys);
+    expect(new Set(closedKeys).size).toBe(MAX_ACCOUNTS_PER_RUN);
+    expect(closedKeys).toContain(accounts[0].pubkey);
+    expect(closedKeys).toContain(accounts[MAX_ACCOUNTS_PER_RUN - 1].pubkey);
+    expect(closedKeys).not.toContain(accounts[MAX_ACCOUNTS_PER_RUN].pubkey);
+    expect(closedKeys).not.toContain(accounts[249].pubkey);
+    // The bookkeeping covers the run, not the whole selection.
+    expect(result.current.totalToClose).toBe(MAX_ACCOUNTS_PER_RUN);
+    expect(result.current.closedCount).toBe(MAX_ACCOUNTS_PER_RUN);
+    expect(result.current.recoveredLamports).toBe(
+      BigInt(MAX_ACCOUNTS_PER_RUN) * 2039280n
+    );
   });
 });
