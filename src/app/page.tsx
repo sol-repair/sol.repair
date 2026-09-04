@@ -24,6 +24,7 @@ import {
   chunkInstructions,
 } from "@/lib/solana/transactions";
 import Link from "next/link";
+import GuidesSection from "@/components/GuidesSection";
 
 /** One entry in the raw transaction inspector. Close and fee entries share
  *  the program/instruction fields and differ in the rest. */
@@ -779,6 +780,8 @@ export default function Home() {
             )}
           </div>
         )}
+
+        <GuidesSection />
 
         <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-400">
           <p>

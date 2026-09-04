@@ -16,12 +16,14 @@ import RandomTokensGuide from "@/app/guides/random-tokens/page";
 import SolanaRentGuide from "@/app/guides/solana-rent/page";
 import CloseTokenAccountsGuide from "@/app/guides/close-token-accounts/page";
 import GuidesIndexPage from "@/app/guides/page";
+import GuidesSection from "@/components/GuidesSection";
 
 const PAGES = [
   { name: "random-tokens", Component: RandomTokensGuide },
   { name: "solana-rent", Component: SolanaRentGuide },
   { name: "close-token-accounts", Component: CloseTokenAccountsGuide },
   { name: "guides index", Component: GuidesIndexPage },
+  { name: "guides section", Component: GuidesSection },
 ];
 
 afterEach(cleanup);
@@ -67,6 +69,23 @@ describe("guide pages render with their content", () => {
         document.querySelector(`a[href="${href}"]`)
       ).not.toBeNull();
     }
+  });
+
+  it("guides section on the home page links all three guides with their blurbs", () => {
+    render(<GuidesSection />);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Guides" })
+    ).toBeTruthy();
+    for (const href of [
+      "/guides/random-tokens",
+      "/guides/solana-rent",
+      "/guides/close-token-accounts",
+    ]) {
+      expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
+    }
+    expect(screen.getByText(/Where dust tokens come from/)).toBeTruthy();
+    expect(screen.getByText(/parks a small SOL deposit/)).toBeTruthy();
+    expect(screen.getByText(/The steps and the checklist/)).toBeTruthy();
   });
 });
 
