@@ -1,0 +1,18 @@
+# Dependabot: automated visibility into dependency vulnerabilities.
+#
+# What this does: once a week (and on push), Dependabot checks npm for
+# updated versions and known security advisories, and opens AT MOST one
+# pull request at a time. A security update can open even at the limit.
+#
+# What this never does: merge anything, deploy anything, or run
+# `npm audit fix`. Every bump arrives as a normal PR that CI gates
+# (ci.yml runs on PRs) and the owner reviews and merges by hand.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore(deps)"
