@@ -549,6 +549,25 @@ describe("fetchFeeLedgerPage pagination (stubbed RPC)", () => {
       .map((b: { params: { before?: string }[] }) => b.params[1]?.before);
     expect(beforeArgs).toEqual([undefined, "s-25"]);
   });
+
+  it("requests each transaction with maxSupportedTransactionVersion: 1", async () => {
+    // v1 transactions activate on mainnet 2026-09-09 (SIMD-0385). From
+    // that day, a getTransaction call pinned to version 0 errors when the
+    // node returns a v1 transaction, which would fail the whole ledger
+    // page. Version 1 is accepted by the public endpoints today and
+    // returns legacy and v0 responses unchanged, so the page must already
+    // be asking for it.
+    const mock = stubRpc([{ signatures: ["s-1"], fees: {} }]);
+    await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+
+    const txParams = mock.mock.calls
+      .map((c) => JSON.parse(String((c[1] as { body?: string })?.body)))
+      .filter((b: { method: string }) => b.method === "getTransaction")
+      .map((b: { params: unknown[] }) => b.params);
+    expect(txParams).toEqual([
+      ["s-1", { maxSupportedTransactionVersion: 1, encoding: "base64" }],
+    ]);
+  });
 });
 
 describe("decodeRawTransaction malformed v0 envelope data", () => {
@@ -581,6 +600,27 @@ describe("decodeRawTransaction malformed v0 envelope data", () => {
     raw.meta!.loadedAddresses = {
       writable: [Keypair.generate().publicKey.toBase58()],
       readonly: [],
+    };
+    expect(decodeRawTransaction(raw)).toBeNull();
+  });
+});
+
+describe("decodeRawTransaction version-1 message boundary", () => {
+  // v1 transactions activate on mainnet 2026-09-09 (SIMD-0385). The
+  // bundled @solana/web3.js cannot build or decode v1 messages yet, but
+  // its deserializer throws a version assert on the 0x81 prefix. The
+  // function's null-on-garbage contract must hold for that shape too: an
+  // unrecognizable v1 transaction is skipped like a pruned one, never a
+  // throw that fails the whole page.
+
+  it("returns null for a message with the v1 version prefix", () => {
+    // A zero-signature envelope whose message starts with the versioned
+    // prefix 0x81 (version 1): deserialization asserts version 0, throws,
+    // and the boundary converts it to null.
+    const bytes = Buffer.concat([Buffer.from([0x00]), Buffer.from([0x81])]);
+    const raw: RawTransaction = {
+      transaction: [bytes.toString("base64"), "base64"],
+      meta: {},
     };
     expect(decodeRawTransaction(raw)).toBeNull();
   });

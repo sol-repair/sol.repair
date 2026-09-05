@@ -531,10 +531,13 @@ export async function fetchRawTransaction(
 ): Promise<RawTransaction | null> {
   // base64 encoding: the only transaction form the public endpoints still
   // serve. maxSupportedTransactionVersion lets versioned transactions
-  // through instead of erroring.
+  // through instead of erroring: v1 transactions activate on mainnet
+  // 2026-09-09 (SIMD-0385), and a call pinned to 0 errors on them, which
+  // would fail the whole ledger page. Version 1 is accepted by the
+  // endpoints today and returns legacy and v0 responses unchanged.
   const result = await rpcCall(endpoint, "getTransaction", [
     signature,
-    { maxSupportedTransactionVersion: 0, encoding: "base64" },
+    { maxSupportedTransactionVersion: 1, encoding: "base64" },
   ]);
   return (result ?? null) as RawTransaction | null;
 }
