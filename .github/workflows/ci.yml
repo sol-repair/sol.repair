@@ -19,6 +19,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Dependabot regenerates package-lock.json with npm 11, and npm 10's
+      # `npm ci` rejects that lockfile format. Pin npm 11 so installs here
+      # match the lockfile writer (and the owner's local npm).
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm test
       - run: npx tsc --noEmit
