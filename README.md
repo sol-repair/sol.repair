@@ -4,8 +4,8 @@ Reclaim SOL from empty token accounts.
 
 If you have used Solana for a while, you have probably racked up a bunch of
 old token accounts from airdrops, swaps, and spam tokens. Every one of them
-holds about 0.00204 SOL as rent, and you can't spend it until the account
-gets closed.
+holds about 0.00186 to 0.00204 SOL as rent, depending on when the account
+was created, and you can't spend it until the account gets closed.
 
 This site finds those accounts in your wallet, shows you exactly how much
 you can get back, and closes them in one or a few quick transactions that
