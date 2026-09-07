@@ -51,6 +51,10 @@ describe("guide pages render with their content", () => {
     expect(screen.getByText(/0.01855569/)).toBeTruthy();
     expect(screen.getByText(/1,855,569/)).toBeTruthy();
     expect(screen.getByText(/Mainnet lowered it on September 4, 2026/)).toBeTruthy();
+    expect(
+      screen.getByText(/holds about 0\.00186 to 0\.00204 SOL of rent/)
+    ).toBeTruthy();
+    expect(screen.queryByText(/holds about 0\.002 SOL of rent/)).toBeNull();
   });
 
   it("close guide states what closing never does and the fee", () => {

@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
     description:
-      "Empty token accounts lock ~0.002 SOL each as rent. Close them in a few transactions you sign yourself. Non-custodial, 1% success fee.",
+      "Empty token accounts lock about 0.00186 to 0.00204 SOL each as rent. Close them in a few transactions you sign yourself. Non-custodial, 1% success fee.",
     url: "https://sol.repair",
     siteName: "SOL.repair",
     type: "website",
@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
     description:
-      "Empty token accounts lock ~0.002 SOL each as rent. Close them in a few transactions you sign yourself.",
+      "Empty token accounts lock about 0.00186 to 0.00204 SOL each as rent. Close them in a few transactions you sign yourself.",
   },
   // Hidden from search engines everywhere except mainnet. Gated on the same
   // env var as the network itself, so the mainnet launch can't forget to

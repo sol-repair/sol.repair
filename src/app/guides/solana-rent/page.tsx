@@ -56,7 +56,7 @@ export default function SolanaRentGuide() {
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">
                 <span className="text-zinc-500">Empty token account</span>
                 <br />
-                holds about 0.002 SOL of rent
+                holds about 0.00186 to 0.00204 SOL of rent
               </div>
               <div className="text-center text-zinc-600">↓</div>
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">

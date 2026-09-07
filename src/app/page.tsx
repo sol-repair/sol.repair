@@ -381,7 +381,8 @@ export default function Home() {
         </p>
         <p className="mb-8 font-mono text-xs leading-relaxed text-zinc-400">
           This tool batches createCloseAccountInstruction to return your
-          ~0.002 SOL rent.
+          rent deposits: about 0.00186 to 0.00204 SOL per empty account,
+          depending on when it was created.
           <br />
           You sign every transaction. Funds go straight to your wallet.
         </p>
@@ -435,12 +436,12 @@ export default function Home() {
                   <span>5wNtY…vB7u · mint 6hGfA…kL1o</span>
                 </span>
                 <span className="whitespace-nowrap text-zinc-400">
-                  0.002039 SOL
+                  0.001856 SOL
                 </span>
               </div>
             </div>
             <p className="mt-2 text-emerald-400">
-              +0.006117 SOL recoverable · 1 transaction
+              +0.005934 SOL recoverable · 1 transaction
             </p>
           </div>
         )}
