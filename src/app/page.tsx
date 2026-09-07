@@ -13,7 +13,10 @@ import {
   MAX_ACCOUNTS_PER_RUN,
   useRepairWallet,
 } from "@/hooks/useRepairWallet";
-import { lamportsToSol } from "@/lib/solana/tokenAccounts";
+import {
+  TOKEN_2022_PROGRAM_ID,
+  lamportsToSol,
+} from "@/lib/solana/tokenAccounts";
 import { SOLANA_NETWORK } from "@/lib/solana/connection";
 import { buildCloseAccountInstructions } from "@/lib/solana/closeAccounts";
 import {
@@ -29,14 +32,16 @@ import {
 import Link from "next/link";
 import GuidesSection from "@/components/GuidesSection";
 
-/** One entry in the raw transaction inspector. Close and fee entries share
- *  the program/instruction fields and differ in the rest. */
+/** One entry in the raw transaction inspector. Close, revoke, and fee
+ *  entries share the program/instruction fields and differ in the rest. */
 type PreviewInstruction = {
   program: string;
   instruction: string;
   accountToClose?: string;
   rentDestination?: string;
   closeAuthority?: string;
+  /** Signing authority of a revoke instruction (the owner). */
+  authority?: string;
   from?: string;
   to?: string;
   lamports?: string;
@@ -233,6 +238,13 @@ export default function Home() {
     [runAccounts]
   );
 
+  // How many of the capped run carry an active delegate. Each gets a Revoke
+  // instruction before its close, and the review screen says so.
+  const revokeCount = useMemo(
+    () => runAccounts.filter((a) => a.needsRevoke).length,
+    [runAccounts]
+  );
+
   // The 1% service fee across the capped run (summed per batch, the
   // same way the repair charges it).
   const serviceFeeLamports = useMemo(
@@ -251,25 +263,37 @@ export default function Home() {
     : 1;
 
   // Human-readable preview of the first transaction's instructions, built
-  // with the SAME builders the repair uses. Display only, nothing is sent.
+  // from the SAME instruction list the repair signs (never a parallel
+  // reconstruction), so the inspector can never drift from what the wallet
+  // is asked to approve. Display only, nothing is sent.
   const firstBatchPreview = useMemo(() => {
     if (!publicKey || runAccounts.length === 0) {
       return null;
     }
     const first = chunkInstructions(runAccounts)[0];
-    const preview: PreviewInstruction[] = buildCloseAccountInstructions(
-      first,
-      publicKey
-    ).map((_, i) => ({
-      program:
-        first[i].program === "token-2022"
-          ? "Token-2022 Program"
-          : "SPL Token Program",
-      instruction: "closeAccount",
-      accountToClose: first[i].pubkey,
-      rentDestination: publicKey.toBase58(),
-      closeAuthority: publicKey.toBase58(),
-    }));
+    const built = buildCloseAccountInstructions(first, publicKey);
+    // Token program instruction tags: Revoke = 5, CloseAccount = 9.
+    const preview: PreviewInstruction[] = built.map((ix) => {
+      const isRevoke = ix.data[0] === 5;
+      const program = ix.programId.equals(TOKEN_2022_PROGRAM_ID)
+        ? "Token-2022 Program"
+        : "SPL Token Program";
+      return isRevoke
+        ? {
+            program,
+            instruction: "revoke",
+            accountToClose: ix.keys[0].pubkey.toBase58(),
+            authority: ix.keys[1].pubkey.toBase58(),
+            note: "clears the active delegate",
+          }
+        : {
+            program,
+            instruction: "closeAccount",
+            accountToClose: ix.keys[0].pubkey.toBase58(),
+            rentDestination: ix.keys[1].pubkey.toBase58(),
+            closeAuthority: ix.keys[2].pubkey.toBase58(),
+          };
+    });
     const fee = feeReady ? buildFeeTransfer(publicKey, first) : null;
     if (fee) {
       preview.push({
@@ -424,6 +448,8 @@ export default function Home() {
                   <span>
                     2bLmR…cF8h · mint 9jKsD…pQ3e ·{" "}
                     <span className="text-sky-400/80">Token-2022</span>
+                    {" · "}
+                    <span className="text-sky-400/80">revoke + close</span>
                   </span>
                 </span>
                 <span className="whitespace-nowrap text-zinc-400">
@@ -538,6 +564,12 @@ export default function Home() {
                                 · Token-2022
                               </span>
                             )}
+                            {account.needsRevoke && (
+                              <span className="text-sky-400/80">
+                                {" "}
+                                · revoke + close
+                              </span>
+                            )}
                           </span>
                         </span>
                         <span className="whitespace-nowrap text-zinc-400">
@@ -636,6 +668,13 @@ export default function Home() {
 
                 <div className="mt-3 space-y-1 rounded-md border border-zinc-800 bg-black/40 p-3 font-mono text-xs text-zinc-400">
                   <p>Accounts being closed: {runAccounts.length}</p>
+                  {revokeCount > 0 && (
+                    <p>
+                      Delegated accounts in this run: {revokeCount}. Each
+                      gets a revoke instruction first so the delegate is
+                      cleared before the close.
+                    </p>
+                  )}
                   <p>
                     Total SOL returning to your wallet: ~
                     {lamportsToSol(runLamports)} SOL
@@ -671,8 +710,8 @@ export default function Home() {
                   </summary>
                   <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                     {feeReady
-                      ? "Every transaction contains closeAccount instructions (classic Token Program or Token-2022, matching each account) plus one transfer for the 1% service fee to the published fee address. No token approvals, no authority changes, nothing else. Rent goes back to your own address."
-                      : "Every transaction contains closeAccount instructions (classic Token Program or Token-2022, matching each account). No fee transfer. No token approvals, no authority changes, nothing else. Rent goes back to your own address."}
+                      ? "Every transaction contains a revoke instruction for each account with an active delegate (clears the delegate), then closeAccount instructions (classic Token Program or Token-2022, matching each account), plus one transfer for the 1% service fee to the published fee address. No token approvals, no other authority changes, nothing else. Rent goes back to your own address."
+                      : "Every transaction contains a revoke instruction for each account with an active delegate (clears the delegate), then closeAccount instructions (classic Token Program or Token-2022, matching each account). No fee transfer. No token approvals, no other authority changes, nothing else. Rent goes back to your own address."}
                     {batchCount > 1 &&
                       ` Showing the first of ${batchCount} transactions.`}
                   </p>
