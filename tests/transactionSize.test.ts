@@ -7,6 +7,10 @@
  * (the implementation supports both in one batch). This test builds that
  * exact transaction with the production builders, signs it, and asserts
  * the real serialized size fits the limit.
+ *
+ * The worst case adds one Revoke per close: all 20 accounts flagged as
+ * delegated, so the batch carries 40 token-program instructions plus the
+ * fee transfer. That shape is measured too.
  */
 
 import { describe, expect, it } from "vitest";
@@ -74,6 +78,32 @@ describe("transaction size", () => {
     );
 
     // Sign the way the wallet adapter would, then measure the real bytes.
+    transaction.sign(owner);
+    const serialized = transaction.serialize().length;
+
+    expect(serialized).toBeLessThanOrEqual(PACKET_LIMIT);
+  });
+
+  it("worst case (20 delegated accounts, 40 token instructions plus fee) serializes under the packet limit", async () => {
+    const owner = Keypair.generate();
+    const accounts = makeAccounts(MAX_CLOSE_INSTRUCTIONS_PER_TX).map(
+      (a) => ({ ...a, needsRevoke: true })
+    );
+
+    // Every account is delegated: 20 revokes + 20 closes.
+    const instructions = buildCloseAccountInstructions(accounts, owner.publicKey);
+    expect(instructions.length).toBe(40);
+
+    const fee = buildFeeTransfer(owner.publicKey, accounts);
+    expect(fee).not.toBeNull();
+    instructions.push(fee!);
+
+    const transaction = await buildTransaction(
+      fakeConnection,
+      owner.publicKey,
+      instructions
+    );
+
     transaction.sign(owner);
     const serialized = transaction.serialize().length;
 

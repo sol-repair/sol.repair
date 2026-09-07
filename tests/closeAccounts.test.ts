@@ -1,7 +1,8 @@
 /**
  * Tests for the instruction layer in closeAccounts.ts: the binding
  * that makes the app safe (destination and authority are always the
- * owner, the program matches each account's tag) and the on-chain
+ * owner, the program matches each account's tag, a delegated account
+ * gets its Revoke immediately before its CloseAccount) and the on-chain
  * closed-account verification used after submission errors.
  *
  * Only the RPC boundary is mocked. The instruction construction and
@@ -73,6 +74,68 @@ describe("buildCloseAccountInstructions", () => {
     // verified against @solana/spl-token 0.4.15: closeAccount encodes
     // as the single instruction-index byte 0x09 with no arguments
     expect(Buffer.from(ixs[0].data).toString("hex")).toBe("09");
+  });
+});
+
+describe("buildCloseAccountInstructions revoke pairing", () => {
+  function flagged(
+    seed: number,
+    program: "spl" | "token-2022" = "spl"
+  ): ClosableAccount {
+    return { ...account(seed, program), needsRevoke: true };
+  }
+
+  it("emits a Revoke immediately before the close of a flagged account", () => {
+    const ixs = buildCloseAccountInstructions([flagged(20)], OWNER);
+    expect(ixs).toHaveLength(2);
+    // Revoke encodes as instruction-index byte 0x05, CloseAccount 0x09.
+    expect(Buffer.from(ixs[0].data).toString("hex")).toBe("05");
+    expect(Buffer.from(ixs[1].data).toString("hex")).toBe("09");
+  });
+
+  it("binds the revoke authority to the owner as the sole signer", () => {
+    const ixs = buildCloseAccountInstructions([flagged(21)], OWNER);
+    const revoke = ixs[0];
+    expect(revoke.keys).toHaveLength(2);
+    expect(revoke.keys[0].pubkey.equals(pk(21))).toBe(true);
+    expect(revoke.keys[0].isSigner).toBe(false);
+    expect(revoke.keys[0].isWritable).toBe(true);
+    expect(revoke.keys[1].pubkey.equals(OWNER)).toBe(true);
+    expect(revoke.keys[1].isSigner).toBe(true);
+  });
+
+  it("targets each account's own token program for its revoke", () => {
+    const ixs = buildCloseAccountInstructions(
+      [flagged(22), flagged(23, "token-2022")],
+      OWNER
+    );
+    // ixs[0] is the spl revoke, ixs[2] the token-2022 revoke.
+    expect(ixs[0].programId.equals(TOKEN_PROGRAM_ID)).toBe(true);
+    expect(ixs[2].programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+  });
+
+  it("interleaves so each revoke lands directly before its own close", () => {
+    const ixs = buildCloseAccountInstructions(
+      [account(24), flagged(25), account(26)],
+      OWNER
+    );
+    expect(ixs).toHaveLength(4);
+    expect(ixs.map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual([
+      "09", "05", "09", "09",
+    ]);
+    // The revoke and the close it precedes target the same account.
+    expect(ixs[1].keys[0].pubkey.equals(pk(25))).toBe(true);
+    expect(ixs[2].keys[0].pubkey.equals(pk(25))).toBe(true);
+  });
+
+  it("emits no revoke for clean accounts", () => {
+    const ixs = buildCloseAccountInstructions(
+      [account(27), account(28, "token-2022")],
+      OWNER
+    );
+    expect(ixs.map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual([
+      "09", "09",
+    ]);
   });
 });
 

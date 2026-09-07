@@ -3,11 +3,13 @@
  *
  * When a token account is closed, the locked rent (lamports) is returned to
  * a destination account, and the token account is wiped from the blockchain.
+ * Accounts the scan flagged as delegated get a Revoke instruction first, so
+ * the delegate is cleared in the same atomic transaction.
  *
  * Safety properties enforced here:
  *   - The destination for recovered SOL is ALWAYS the user's own wallet.
  *     Never any other address. This is the whole point of the tool.
- *   - We only build instructions for accounts that already passed the five
+ *   - We only build instructions for accounts that already passed the
  *     eligibility checks in tokenAccounts.ts. Defense in depth: even though
  *     the scan already validated these, we re-derive from the ClosableAccount
  *     list which only contains eligible accounts.
@@ -16,7 +18,10 @@
  */
 
 import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { createCloseAccountInstruction } from "@solana/spl-token";
+import {
+  createCloseAccountInstruction,
+  createRevokeInstruction,
+} from "@solana/spl-token";
 
 import {
   TOKEN_2022_PROGRAM_ID,
@@ -41,29 +46,54 @@ const VERIFY_CHUNK_SIZE = 100;
  * the account (classic SPL or Token-2022). Each account is tagged at scan
  * time and the tag drives program selection here.
  *
+ * Delegated accounts (needsRevoke): the scan lets an EMPTY delegated
+ * account through with the flag set. For those, a Revoke instruction is
+ * emitted IMMEDIATELY BEFORE the account's CloseAccount, against the same
+ * token program. The owner signs it (both token programs accept the owner
+ * for Revoke), the delegate is cleared, and the close then succeeds in the
+ * same atomic transaction. Callers append the fee transfer AFTER this
+ * list, so it always stays last.
+ *
  * Safety properties enforced here:
  *   - The destination for recovered SOL is ALWAYS the user's own wallet.
- *   - ONLY CloseAccount instructions are ever produced. No transfers, no
- *     approvals, no fee instructions mixed in. This is what wallet
- *     security scanners and the raw-tx inspector verify.
+ *   - The ONLY instructions ever produced are CloseAccount and, for
+ *     flagged accounts, Revoke. No transfers, no approvals, no fee
+ *     instructions mixed in. This is what wallet security scanners and the
+ *     raw-tx inspector verify.
  *
  * @param accounts  The eligible accounts to close (from getClosableAccounts).
- * @param owner     The connected wallet. Recovered SOL goes here.
- * @returns         Array of CloseAccount instructions, one per account.
+ * @param owner     The connected wallet. Recovered SOL goes here; the
+ *                  owner also signs any Revoke.
+ * @returns         CloseAccount instructions, one per account, each
+ *                  preceded by its Revoke when the account is delegated.
  */
 export function buildCloseAccountInstructions(
   accounts: ClosableAccount[],
   owner: PublicKey
 ): TransactionInstruction[] {
-  return accounts.map((account) =>
-    createCloseAccountInstruction(
-      new PublicKey(account.pubkey), // the token account to close
-      owner, // destination: rent goes back to the user's own wallet
-      owner, // authority: the wallet owner signs (close authority = owner)
-      [], // no multisig signers
-      PROGRAM_IDS[account.program] // owning program: SPL or Token-2022
-    )
-  );
+  const instructions: TransactionInstruction[] = [];
+  for (const account of accounts) {
+    if (account.needsRevoke) {
+      instructions.push(
+        createRevokeInstruction(
+          new PublicKey(account.pubkey), // the delegated token account
+          owner, // authority: the wallet owner clears the delegate
+          [], // no multisig signers
+          PROGRAM_IDS[account.program] // owning program: SPL or Token-2022
+        )
+      );
+    }
+    instructions.push(
+      createCloseAccountInstruction(
+        new PublicKey(account.pubkey), // the token account to close
+        owner, // destination: rent goes back to the user's own wallet
+        owner, // authority: the wallet owner signs (close authority = owner)
+        [], // no multisig signers
+        PROGRAM_IDS[account.program] // owning program: SPL or Token-2022
+      )
+    );
+  }
+  return instructions;
 }
 
 /**
