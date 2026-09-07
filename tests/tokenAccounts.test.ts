@@ -142,13 +142,77 @@ describe("getClosableAccounts eligibility checks", () => {
     expect(result.recoverableLamports).toBe(0n);
   });
 
-  it("skips an actively delegated account", async () => {
+  it("marks an empty delegated account eligible, flagged for revoke", async () => {
     const delegated = tokenAccount(4, {
       delegate: pk(5).toBase58(),
     });
     const { result } = await runScan([delegated]);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].needsRevoke).toBe(true);
+    expect(result.recoverableLamports).toBe(2_039_280n);
+    expect(result.skippedAccounts).toHaveLength(0);
+  });
+
+  it("still skips a FUNDED delegated account (balance check runs first)", async () => {
+    const delegatedAndFunded = tokenAccount(4, {
+      delegate: pk(5).toBase58(),
+      tokenAmount: {
+        amount: "77",
+        decimals: 6,
+        uiAmount: 0.000077,
+        uiAmountString: "0.000077",
+      },
+    });
+    const { result } = await runScan([delegatedAndFunded]);
     expect(result.eligibleAccounts).toHaveLength(0);
-    expect(result.skippedAccounts[0].reason).toBe("has an active delegation");
+    expect(result.skippedAccounts[0].reason).toBe("holds a token balance");
+  });
+
+  it("still skips a delegated account whose close authority is foreign", async () => {
+    const delegated = tokenAccount(4, {
+      delegate: pk(5).toBase58(),
+      closeAuthority: pk(9).toBase58(),
+    });
+    const { result } = await runScan([delegated]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe(
+      "close authority belongs to another address"
+    );
+  });
+
+  it("still skips a delegated wrapped-SOL account", async () => {
+    const delegated = tokenAccount(4, {
+      delegate: pk(5).toBase58(),
+      isNative: true,
+    });
+    const { result } = await runScan([delegated]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe("is a wrapped-SOL account");
+  });
+
+  it("still skips a delegated frozen account (on-chain Revoke rejects frozen accounts)", async () => {
+    const delegated = tokenAccount(4, {
+      delegate: pk(5).toBase58(),
+      state: "frozen",
+    });
+    const { result } = await runScan([delegated]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe(
+      "is frozen (not initialized)"
+    );
+  });
+
+  it("marks a delegated Token-2022 account eligible with its program tag", async () => {
+    const delegated = tokenAccount(4, { delegate: pk(5).toBase58() });
+    const { result } = await runScan([], [delegated]);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].needsRevoke).toBe(true);
+    expect(result.eligibleAccounts[0].program).toBe("token-2022");
+  });
+
+  it("leaves clean accounts without a revoke flag", async () => {
+    const { result } = await runScan([tokenAccount(24)]);
+    expect(result.eligibleAccounts[0].needsRevoke).toBeUndefined();
   });
 
   it("treats an omitted delegate field as NOT delegated (regression guard)", async () => {

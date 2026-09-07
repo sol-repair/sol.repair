@@ -1,10 +1,10 @@
 /**
  * Wallet scanning and account eligibility classification.
  *
- * This is the safety-critical core of SOL.repair. The five eligibility checks
- * encoded here decide which accounts are safe to close. Getting this right is
- * everything: if we wrongly mark a funded account as closeable, a user could
- * lose tokens.
+ * This is the safety-critical core of SOL.repair. The eligibility checks
+ * encoded here decide which accounts are safe to close and which ones need
+ * their delegate revoked first. Getting this right is everything: if we
+ * wrongly mark a funded account as closeable, a user could lose tokens.
  *
  * No React in this file. Pure logic, importable from tests without touching
  * the UI.
@@ -63,6 +63,10 @@ export interface ClosableAccount {
   lamports: number;
   /** Owning token program. The CloseAccount instruction must target it. */
   program: TokenProgram;
+  /** True when the account carries an active delegate. The close builder
+   *  emits a Revoke instruction immediately before this account's
+   *  CloseAccount. Absent on clean accounts. */
+  needsRevoke?: boolean;
 }
 
 /** An account we skip on purpose, with the reason.
@@ -177,7 +181,9 @@ export async function getClosableAccounts(
       // These are stricter than the protocol minimum. The on-chain program
       // only enforces check #1 (zero balance). We add the rest defensively
       // to avoid breaking a user's intentional setup. Failed accounts are
-      // reported (not hidden) so the scan is verifiable by the user.
+      // reported (not hidden) so the scan is verifiable by the user. Check
+      // #2 marks instead of failing: a delegated account stays eligible and
+      // gets its Revoke before the close, but checks #3-#5 still apply to it.
 
       // 1. Zero token balance. The main rule.
       //    If this fails, the account holds tokens and must NEVER be closed.
@@ -192,22 +198,22 @@ export async function getClosableAccounts(
         continue;
       }
 
-      // 2. No active delegation.
+      // 2. Active delegation: mark, don't skip.
+      //    The balance check above guarantees the account is EMPTY by the
+      //    time we get here. An empty delegated account still locks the
+      //    owner's rent, and the owner can revoke the delegation and close
+      //    in one transaction, so it stays eligible with a needsRevoke flag
+      //    that the close builder turns into a Revoke instruction right
+      //    before this account's CloseAccount. Checks #3-#5 below still
+      //    apply: a delegated account with a foreign close authority,
+      //    wrapped SOL, or a frozen state is still skipped (the on-chain
+      //    Revoke itself rejects frozen accounts).
       //    NOTE: the parsed RPC response OMITS the delegate field entirely
       //    when there is no delegation. A naive `info.delegate !== null`
       //    check is WRONG because a missing field is undefined, and
       //    undefined !== null is true, which would flag every account as
       //    delegated. The correct check is Boolean().
-      const isDelegated = Boolean(info.delegate);
-      if (isDelegated) {
-        skippedAccounts.push({
-          pubkey: pubkey.toString(),
-          mint: info.mint,
-          reason: "has an active delegation",
-          program: tag,
-        });
-        continue;
-      }
+      const needsRevoke = Boolean(info.delegate);
 
       // 3. Close authority still with the owner.
       //    Accounts created by other programs (DeFi auxiliaries, spam
@@ -257,6 +263,7 @@ export async function getClosableAccounts(
         mint: info.mint,
         lamports: account.lamports,
         program: tag,
+        ...(needsRevoke ? { needsRevoke: true } : {}),
       });
       recoverableLamports += BigInt(account.lamports);
     }
