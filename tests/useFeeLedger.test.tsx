@@ -25,7 +25,7 @@ import { TOKEN_PROGRAM_ID } from "../src/lib/solana/tokenAccounts";
 import { useFeeLedger } from "../src/hooks/useFeeLedger";
 
 const MAINNET_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
-const DEVNET_WALLET = "4Z5iVtvydRcrMJdRbrXSpn3vhrxzLE8hZGnzm6ejMKpn";
+const DEVNET_WALLET = "FXaMw3mBGkgKeu6wrhJCJCm1rKcMZcuMx6U19cvXAin4";
 const RECENT_BLOCKHASH = PublicKey.default.toBase58();
 
 function closeIx(): TransactionInstruction {
@@ -122,10 +122,15 @@ describe("useFeeLedger loadMore stale-response guard", () => {
               { signature: "m-2", blockTime: 1_755_577_000 },
             ]);
           }
-          return jsonResponse([
-            { signature: "d-1", blockTime: 1_755_577_001 },
-            { signature: "d-2", blockTime: 1_755_577_000 },
-          ]);
+          if (wallet === DEVNET_WALLET) {
+            return jsonResponse([
+              { signature: "d-1", blockTime: 1_755_577_001 },
+              { signature: "d-2", blockTime: 1_755_577_000 },
+            ]);
+          }
+          // Any other wallet queried (e.g. a stale fee address) gets no
+          // signatures, which fails the row assertions below.
+          return jsonResponse([]);
         }
         // getTransaction
         const sig = body.params[0] as string;

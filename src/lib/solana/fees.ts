@@ -27,12 +27,13 @@ import type { ClosableAccount } from "./tokenAccounts";
 export const FEE_PERCENT = 1;
 
 /**
- * Devnet fee goes to the seeding payer's devnet wallet, a separate account
- * from the test wallet, so test runs can watch the fee land exactly the way
- * it will on mainnet.
+ * Devnet fee goes to a dedicated devnet fee wallet, separate from the test
+ * wallet, so test runs can watch the fee land exactly the way it will on
+ * mainnet. Its keypair file lives on the owner's disk (key inventory in
+ * PROJECT_STATE.md), so devnet fees stay recoverable.
  */
 export const DEV_FEE_WALLET = new PublicKey(
-  "4Z5iVtvydRcrMJdRbrXSpn3vhrxzLE8hZGnzm6ejMKpn"
+  "FXaMw3mBGkgKeu6wrhJCJCm1rKcMZcuMx6U19cvXAin4"
 );
 
 /**
