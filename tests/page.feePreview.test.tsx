@@ -220,4 +220,32 @@ describe("repair confirmation fee preview parity", () => {
     expect(transfers[0].lamports).toBe(feeAmountLamports(ELIGIBLE).toString());
     expect(transfers[0].note).toBe("1% success fee");
   });
+
+  it("quantifies the wallet's priority fee as an observed number in the network fee line", async () => {
+    // The site adds no priority fee itself - only the 5,000-lamport
+    // base. The WALLET adds the priority fee at signing, and Phantom's
+    // default has recently added about 75,000 lamports per transaction
+    // on every observed repair (16x the base). The line keeps our
+    // number honest and names the wallet's part as an observation,
+    // never a guarantee.
+    mocks.conn.getAccountInfo.mockResolvedValue({
+      lamports: 1,
+      owner: TOKEN_PROGRAM_ID,
+      executable: false,
+      data: Buffer.alloc(0),
+      rentEpoch: 0,
+    });
+
+    renderHomeWithScanResult();
+    openConfirmation();
+
+    await screen.findByText(/Service fee \(1% of recovered\)/);
+    const line = screen.getByText(/Network fee:/);
+    expect(line.textContent).toContain("0.000005");
+    expect(line.textContent).toMatch(
+      /plus the priority fee your wallet adds when signing \(with Phantom’s default settings that has recently been about 0\.000075 SOL per transaction\), all to the Solana network, not to us/
+    );
+    // The old unquantified wording is gone.
+    expect(screen.queryByText(/plus any priority fee your wallet/)).toBeNull();
+  });
 });
