@@ -633,6 +633,148 @@ describe("decodeRawTransaction version-1 message boundary", () => {
   });
 });
 
+describe("decodeRawTransaction version-1 transactions (SIMD-0385)", () => {
+  // v1 activates on mainnet 2026-09-09. The bundled @solana/web3.js cannot
+  // build or deserialize v1 messages (its deserializer asserts version 0),
+  // so the envelope is parsed here per the SIMD and these tests pin every
+  // field against REAL chain bytes rather than a hand-modeled shape.
+  //
+  // The fixture is a genuine devnet v1 transaction, signature
+  // 3bXSKQ8DKAphwBF6DNbNoSzm9YWcmzMRN7Lz1jKs7AxEwhXA5NFtX6VNfWR6oy4LKDTwMnrm6RsijSeY4CwFdVeu
+  // (block 495676584, success), fetched 2026-09-09 from
+  // api.devnet.solana.com with maxSupportedTransactionVersion: 1 and kept
+  // byte-for-byte in the getTransaction(base64) response shape. Its one
+  // instruction is a compute-budget style op, so it must decode cleanly
+  // AND produce no fee rows: an unrelated v1 transaction is not revenue.
+
+  const REAL_V1_BASE64 =
+    "gQEAAQwAAABZrn9Geyy9QOyQBlOi5POqdxw3lJ789VaPIeuAHVOy8QEDUqHvuOWhBkVUFQrt+G3XhJZCwpfE/NeVgktJghRKPjLze4W/dXluLiYNnl29YfRnmbkQ4yo2Nvk1Ei319ZiWnM5S8s5diwsp/V9N7L1deOZqhkue15uANDp/kdfN7/jHwFwVAAAAEAACARIAARY4/h1NIL8lJwAAAAAAAAAABIHOjW5o9tgS9W0eqKzf0ajmbl/fCnfUEsXpYHLPdsvdJ0fBGlaGNAfEO6u8Sy9f5PUxXWW/nI9ldj5EUhnnFgY=";
+  const REAL_V1_BLOCK_TIME = 1788965346;
+  const REAL_V1_ADDRESSES = [
+    "6ZZecuC9M7khPZzZZSN8o4vpa2bds6cFJiCSziVVf7e9",
+    "HPTKEmtGSTdAmnZUkTtMqr6VEQDgMrGmi4xiWgVA5JKu",
+    "EtQM4CYjv2rutiBkD4FDj5zFaPkxfQ9og6g2rzdu5hY2",
+  ];
+
+  function realV1Raw(overrides: Partial<RawTransaction> = {}): RawTransaction {
+    return {
+      blockTime: REAL_V1_BLOCK_TIME,
+      version: 1,
+      meta: {
+        err: null,
+        loadedAddresses: { readonly: [], writable: [] },
+        innerInstructions: [],
+        preBalances: [283149512403, 168249600, 833120],
+      },
+      transaction: [REAL_V1_BASE64, "base64"],
+      ...overrides,
+    };
+  }
+
+  /** Assemble a minimal well-formed v1 envelope by hand (the bundled
+   *  web3.js cannot compile one). Field layout per SIMD-0385:
+   *  version 0x81 | header(3) | configMask(u32) | lifetime(32) |
+   *  numInstructions | numAddresses | addresses (32 bytes each) |
+   *  config values (4 bytes per set mask bit, none here) |
+   *  per instruction: programIndex, accountCount, dataLength(u16 LE),
+   *  account indexes, data | signatures at the tail (never read). */
+  function buildV1RepairRaw(opts: {
+    feeLamports: number;
+    preBalances?: number[];
+  }): RawTransaction {
+    const payer = Keypair.generate().publicKey;
+    const tokenAccount = Keypair.generate().publicKey;
+    const owner = Keypair.generate().publicKey;
+    const addresses = [
+      payer,
+      tokenAccount,
+      owner,
+      new PublicKey(FEE_WALLET),
+      TOKEN_PROGRAM_ID,
+      SystemProgram.programId,
+    ];
+    const transferData = Buffer.alloc(12);
+    transferData.writeUInt32LE(2, 0); // SystemProgram transfer tag
+    transferData.writeBigUInt64LE(BigInt(opts.feeLamports), 4);
+    const instructions = [
+      { programIndex: 4, accountIndexes: [1, 2, 2], data: Buffer.from([9]) },
+      { programIndex: 5, accountIndexes: [0, 3], data: transferData },
+    ];
+    const parts: Buffer[] = [
+      Buffer.from([0x81]),
+      Buffer.from([1, 0, 0]), // header: 1 required signature
+      Buffer.from([0, 0, 0, 0]), // configMask: no config requests
+      Buffer.alloc(32, 7), // lifetime specifier
+      Buffer.from([instructions.length]),
+      Buffer.from([addresses.length]),
+      ...addresses.map((k) => k.toBuffer()),
+    ];
+    // The SIMD puts ALL instruction headers first, THEN all payloads.
+    const headers: Buffer[] = [];
+    const payloads: Buffer[] = [];
+    for (const ix of instructions) {
+      const len = Buffer.alloc(2);
+      len.writeUInt16LE(ix.data.length);
+      headers.push(Buffer.from([ix.programIndex, ix.accountIndexes.length]), len);
+      payloads.push(...ix.accountIndexes.map((a) => Buffer.from([a])), ix.data);
+    }
+    parts.push(...headers, ...payloads);
+    parts.push(Buffer.alloc(64)); // the one tail signature, unchecked
+    return {
+      blockTime: BLOCK_TIME,
+      version: 1,
+      meta: {
+        err: null,
+        loadedAddresses: { readonly: [], writable: [] },
+        innerInstructions: [],
+        preBalances: opts.preBalances ?? [1, 2_039_280, 1, 1, 1, 1],
+      },
+      transaction: [Buffer.concat(parts).toString("base64"), "base64"],
+    };
+  }
+
+  it("decodes a real v1 transaction byte-for-byte (chain fixture)", () => {
+    const decoded = decodeRawTransaction(realV1Raw());
+    expect(decoded).not.toBeNull();
+    expect(decoded!.blockTime).toBe(REAL_V1_BLOCK_TIME);
+    expect(decoded!.accountKeys).toEqual(REAL_V1_ADDRESSES);
+    expect(decoded!.instructions).toEqual([
+      {
+        programId: "EtQM4CYjv2rutiBkD4FDj5zFaPkxfQ9og6g2rzdu5hY2",
+        accountPubkeys: ["HPTKEmtGSTdAmnZUkTtMqr6VEQDgMrGmi4xiWgVA5JKu"],
+        data: new Uint8Array(Buffer.from("1638fe1d4d20bf2527000000000000000004", "hex")),
+      },
+    ]);
+  });
+
+  it("extracts no rows from an unrelated v1 transaction (no false positives)", () => {
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "real-devnet-v1", raw: realV1Raw() }],
+      FEE_WALLET
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("extracts a fee from a hand-built v1 repair transaction", () => {
+    const raw = buildV1RepairRaw({ feeLamports: 20_392 });
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "v1-repair", raw }],
+      FEE_WALLET
+    );
+    expect(rows).toEqual([
+      { signature: "v1-repair", blockTime: BLOCK_TIME, lamports: 20_392, onePercentMatch: true },
+    ]);
+  });
+
+  it("returns null when a v1 envelope is truncated mid-addresses", () => {
+    const bytes = Buffer.from(REAL_V1_BASE64, "base64");
+    const raw = realV1Raw({
+      transaction: [bytes.subarray(0, 100).toString("base64"), "base64"],
+    });
+    expect(decodeRawTransaction(raw)).toBeNull();
+  });
+});
+
 describe("formatBlockTime", () => {
   it("renders UTC with minutes precision", () => {
     const t = Math.floor(Date.UTC(2026, 7, 19, 3, 36, 41) / 1000);

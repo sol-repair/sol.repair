@@ -136,7 +136,7 @@ export type DecodedInstruction = {
  *  unexpected shape. */
 export type RawTransaction = {
   blockTime?: number | null;
-  /** null or "legacy" for legacy, 0 for versioned transactions. */
+  /** null or "legacy" for legacy, 0 or 1 for versioned transactions. */
   version?: number | string | null;
   meta?: {
     err?: unknown;
@@ -216,6 +216,101 @@ function resolveInstruction(
   return { programId, accountPubkeys, data };
 }
 
+/** Decode a SIMD-0385 version-1 transaction. The v1 envelope leads with
+ *  the version byte 0x81 and keeps signatures at the tail, so neither the
+ *  legacy compact-u16 signature prefix nor VersionedMessage.deserialize
+ *  (which asserts version 0) can see it, and the bundled web3.js has no
+ *  v1 support — the wire layout is parsed here exactly as the SIMD
+ *  specifies: header, config mask, lifetime specifier, static address
+ *  list (v1 has no lookup tables), config values (4 bytes per set mask
+ *  bit — the compute-budget fields v1 moved out of instructions; their
+ *  amounts never enter the fee definition, only their byte width
+ *  matters), then fixed-width instruction headers and payloads. Any
+ *  truncated or impossible shape returns null, matching the
+ *  null-on-garbage contract. */
+function decodeV1Transaction(
+  bytes: Buffer,
+  raw: RawTransaction
+): {
+  blockTime: number | null;
+  instructions: DecodedInstruction[];
+  accountKeys: string[];
+} | null {
+  try {
+    let offset = 1; // the 0x81 version byte, already checked by the caller
+    const u8 = () => {
+      if (offset >= bytes.length) throw new Error("truncated v1 envelope");
+      return bytes[offset++];
+    };
+    const u16 = () => {
+      if (offset + 2 > bytes.length) throw new Error("truncated v1 envelope");
+      const value = bytes.readUInt16LE(offset);
+      offset += 2;
+      return value;
+    };
+    const u32 = () => {
+      if (offset + 4 > bytes.length) throw new Error("truncated v1 envelope");
+      const value = bytes.readUInt32LE(offset);
+      offset += 4;
+      return value;
+    };
+    const take = (count: number) => {
+      if (offset + count > bytes.length) throw new Error("truncated v1 envelope");
+      const slice = bytes.subarray(offset, offset + count);
+      offset += count;
+      return slice;
+    };
+
+    const numRequiredSignatures = u8();
+    u8(); // numReadonlySignedAccounts
+    u8(); // numReadonlyUnsignedAccounts
+    if (numRequiredSignatures < 1) return null;
+    const configMask = u32();
+    take(32); // lifetime specifier (the recent blockhash by another name)
+    const numInstructions = u8();
+    const numAddresses = u8();
+    if (numAddresses < numRequiredSignatures) return null;
+    const keys: PublicKey[] = [];
+    for (let i = 0; i < numAddresses; i += 1) keys.push(new PublicKey(take(32)));
+    let mask = configMask;
+    let setBits = 0;
+    while (mask) {
+      setBits += mask & 1;
+      mask >>>= 1;
+    }
+    take(4 * setBits);
+    // The SIMD puts ALL instruction headers first, then ALL payloads:
+    // reading a payload directly after its header decodes any
+    // single-instruction transaction but misparses the second and later
+    // ones, so the headers are collected before any payload byte is read.
+    const headers: { programIdIndex: number; accountCount: number; dataLength: number }[] = [];
+    for (let i = 0; i < numInstructions; i += 1) {
+      headers.push({ programIdIndex: u8(), accountCount: u8(), dataLength: u16() });
+    }
+    const wire: { accounts?: number[]; data?: string; programIdIndex?: number }[] = [];
+    for (const { programIdIndex, accountCount, dataLength } of headers) {
+      const accounts: number[] = [];
+      for (let k = 0; k < accountCount; k += 1) accounts.push(u8());
+      wire.push({ programIdIndex, accounts, data: bs58.encode(take(dataLength)) });
+    }
+    const top = wire
+      .map((ix) => resolveInstruction(ix, keys))
+      .filter((ix): ix is DecodedInstruction => ix !== null);
+    const inner = (raw.meta?.innerInstructions ?? []).flatMap((group) =>
+      (group.instructions ?? [])
+        .map((ix) => resolveInstruction(ix, keys))
+        .filter((ix): ix is DecodedInstruction => ix !== null)
+    );
+    return {
+      blockTime: typeof raw.blockTime === "number" ? raw.blockTime : null,
+      instructions: [...top, ...inner],
+      accountKeys: keys.map((k) => k.toBase58()),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Decode a raw getTransaction(base64) response into the instructions the
  * fee definition cares about: top-level plus inner (CPI) instructions, in
@@ -246,8 +341,13 @@ export function decodeRawTransaction(raw: RawTransaction): {
   try {
     // The base64 payload is a full serialized transaction: a compact-u16
     // signature count, that many 64-byte signatures, then the message.
-    // VersionedMessage.deserialize expects the message bytes alone.
+    // VersionedMessage.deserialize expects the message bytes alone. The
+    // one exception is the SIMD-0385 v1 envelope, which leads with the
+    // version byte 0x81 (no signature prefix at the front) and cannot
+    // pass the deserializer (it asserts version 0), so it is intercepted
+    // and parsed by decodeV1Transaction below.
     const bytes = Buffer.from(txData[0], "base64");
+    if (bytes[0] === 0x81) return decodeV1Transaction(bytes, raw);
     const { value: signatureCount, bytesRead } = decodeLengthPrefix(bytes);
     const offset = bytesRead + signatureCount * 64;
     message = VersionedMessage.deserialize(bytes.subarray(offset));
