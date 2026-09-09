@@ -425,7 +425,7 @@ export function useRepairWallet() {
               : rejected
                 ? "Transaction cancelled. Nothing was sent."
                 : expired
-                  ? "The transaction expired while waiting for approval. Nothing was sent and nothing was lost. Please try again and approve promptly."
+                  ? "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly."
                   : message,
           });
         }

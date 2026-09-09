@@ -484,6 +484,11 @@ describe("useRepairWallet", () => {
     expect(result.current.error).toMatch(
       /expired while waiting for approval/i
     );
+    // The why in plain words: a user who is told only that it expired
+    // thinks the site is broken.
+    expect(result.current.error).toMatch(
+      /network moved on while the wallet window was open/i
+    );
     expect(result.current.error).not.toMatch(/Signature 5oMN/i);
     // Both attempts were used before giving up.
     expect(signCalls).toBe(2);
