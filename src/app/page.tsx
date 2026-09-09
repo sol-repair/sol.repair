@@ -149,6 +149,7 @@ export default function Home() {
     recoveredLamports,
     progress,
     error: repairError,
+    errorDetail: repairErrorDetail,
     repair,
     reset,
   } = useRepairWallet();
@@ -855,6 +856,19 @@ export default function Home() {
               <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-400">
                 <p className="font-medium">Repair failed</p>
                 <p className="mt-1 text-red-400/70">{repairError}</p>
+                {/* Raw library text for failures the copy does not
+                 *  explain: available to anyone who wants it, dumped on
+                 *  no one. */}
+                {repairErrorDetail && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs text-red-400/60">
+                      Technical details
+                    </summary>
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-red-400/50">
+                      {repairErrorDetail}
+                    </pre>
+                  </details>
+                )}
                 <button
                   onClick={() => {
                     reset();

@@ -494,6 +494,46 @@ describe("useRepairWallet", () => {
     expect(signCalls).toBe(2);
   });
 
+  it("keeps raw library errors out of the error line, moving them to errorDetail", async () => {
+    // Live-observed shape (Sep 8 mid-flight scenario): the send is
+    // refused with a raw SendTransactionError whose text ends with
+    // instructions written for developers. The main error line must be
+    // plain words; the raw text moves to errorDetail for the
+    // collapsible detail view instead of being dumped on the user.
+    const RAW = new Error(
+      "SendTransactionError: failed to send transaction: Transaction simulation failed: Error: Non-native account can only be closed if its balance is zero. Catch the `SendTransactionError` and call `getLogs()` on it for full details."
+    );
+    mocks.conn.sendRawTransaction.mockRejectedValue(RAW);
+    // The accounts are genuinely still open (the send never landed).
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe(
+      "The repair transaction did not go through. Nothing was closed. Run the repair again."
+    );
+    // The raw text is preserved, not hidden.
+    expect(result.current.errorDetail).toMatch(/SendTransactionError/);
+    expect(result.current.errorDetail).toMatch(/getLogs/);
+    // The user-facing line carries none of it.
+    expect(result.current.error).not.toMatch(/getLogs/);
+    expect(signCalls).toBe(1);
+  });
+
   it("retries only the still-open accounts after externally-partial closes", async () => {
     // External-audit 2026-09-02 hardening spec: a transaction is ATOMIC,
     // so verification reading 7-closed/13-open of a 20-account batch

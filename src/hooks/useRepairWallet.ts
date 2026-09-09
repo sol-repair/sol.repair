@@ -92,6 +92,10 @@ interface RepairState {
   /** Multi-transaction progress while awaiting approvals. */
   progress: RepairProgress | null;
   error: string | null;
+  /** Raw library error text when the failure was none of the known
+   *  kinds; rendered collapsed behind a toggle, never as the main
+   *  line. Null whenever the error copy already explains the cause. */
+  errorDetail: string | null;
 }
 
 const INITIAL_STATE: RepairState = {
@@ -103,6 +107,7 @@ const INITIAL_STATE: RepairState = {
   recoveredLamports: 0n,
   progress: null,
   error: null,
+  errorDetail: null,
 };
 
 /**
@@ -130,6 +135,13 @@ const MAX_ATTEMPTS = 2;
 function isBlockhashExpiry(message: string): boolean {
   return /blockhash|block height exceeded/i.test(message);
 }
+
+/** An error whose message is ALREADY user-facing copy, thrown by this
+ *  hook. Everything else that reaches the outer catch is raw library
+ *  or network text (developer instructions included): the page must
+ *  never print it as the main line, so it moves to errorDetail and is
+ *  rendered collapsed behind a toggle. */
+class FriendlyError extends Error {}
 
 export function useRepairWallet() {
   const { connection } = useConnection();
@@ -222,7 +234,7 @@ export function useRepairWallet() {
             const livePublicKey = livePublicKeyRef.current;
             if (!livePublicKey || !livePublicKey.equals(repairOwner)) {
               walletChanged = true;
-              throw new Error(
+              throw new FriendlyError(
                 "The connected wallet changed during the repair. Stopped before signing anything else. Reconnect the original wallet and run the repair again for the remaining accounts."
               );
             }
@@ -261,7 +273,7 @@ export function useRepairWallet() {
               // our app or the wallet's own submission.
               const signatureBytes = signed.signatures[0]?.signature;
               if (!signatureBytes) {
-                throw new Error(
+                throw new FriendlyError(
                   "Wallet returned a transaction without a signature. Nothing was sent."
                 );
               }
@@ -299,7 +311,7 @@ export function useRepairWallet() {
                 // Treat it as the failure it is; the shared catch then
                 // verifies on-chain and reports honestly.
                 if (confirmation.value.err) {
-                  throw new Error(
+                  throw new FriendlyError(
                     "The transaction was confirmed on-chain but failed. Nothing was closed and nothing was lost - run the repair again."
                   );
                 }
@@ -378,6 +390,7 @@ export function useRepairWallet() {
             recoveredLamports: recoveredOf(closedSoFar),
             progress: null,
             error: null,
+            errorDetail: null,
           });
         } catch (err) {
           // The run stopped - real error, expired blockhash (twice), a
@@ -412,6 +425,13 @@ export function useRepairWallet() {
           const closed = reportClosed.length;
           const partial = closed > 0;
 
+          // Raw library text only surfaces when the copy does not already
+          // explain the cause (rejected, expired, or thrown by this hook).
+          const rawDetail =
+            rejected || expired || err instanceof FriendlyError
+              ? null
+              : message;
+
           setState({
             status: "error",
             signature: confirmed[0] ?? null,
@@ -426,7 +446,10 @@ export function useRepairWallet() {
                 ? "Transaction cancelled. Nothing was sent."
                 : expired
                   ? "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly."
-                  : message,
+                  : err instanceof FriendlyError
+                    ? message
+                    : "The repair transaction did not go through. Nothing was closed. Run the repair again.",
+            errorDetail: rawDetail,
           });
         }
       } finally {
