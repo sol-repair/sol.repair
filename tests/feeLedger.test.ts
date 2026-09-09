@@ -385,9 +385,10 @@ describe("feeRowsFromRawTransactions 1% conformance (onePercentMatch)", () => {
 });
 
 describe("isKnownTestFee", () => {
-  it("tags the four known mainnet test signatures", () => {
+  it("tags the five known mainnet test signatures", () => {
     // Receipt-verified signatures: two Aug 19 self-tests, the Aug 29
-    // family test, and the Aug 30 owner self-test (CLUG close).
+    // family test, the Aug 30 owner self-test (CLUG close), and the
+    // Sep 4 owner test (Token-2022 close after a manual burn-to-zero).
     expect(
       isKnownTestFee(
         "mainnet-beta",
@@ -410,6 +411,12 @@ describe("isKnownTestFee", () => {
       isKnownTestFee(
         "mainnet-beta",
         "4BsA9nPxEePuHpNyN8KYzZYbCZyWVADojyiv4JvXvDxzpDt17Xq3n2Dc41fsqtaJH2FjYqhC5ectmUepbD2g9aAB"
+      )
+    ).toBe(true);
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "2EdGP7YSr2oKAtibpAFAnfUhAhsk8jFSaNKdUZz3z43wGrF9YR6BYvxePwhnrpx2PfhHbBE3bBCFTsbdybMauBww"
       )
     ).toBe(true);
   });

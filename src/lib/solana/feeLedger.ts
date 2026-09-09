@@ -98,6 +98,8 @@ const MAINNET_TEST_SIGNATURES: ReadonlySet<string> = new Set([
   "qsbutSckYFLtSXXV9ewBsWqoPMePdpFcafuCR8pEXeu9yVUQLaAEMVwxV3wEv1cchn6ge3LTFYSCKXjn97yznPQ",
   // Aug 30 owner self-test: CLUG Token-2022 close through the live site.
   "4BsA9nPxEePuHpNyN8KYzZYbCZyWVADojyiv4JvXvDxzpDt17Xq3n2Dc41fsqtaJH2FjYqhC5ectmUepbD2g9aAB",
+  // Sep 4 owner test: Token-2022 close after a manual burn-to-zero.
+  "2EdGP7YSr2oKAtibpAFAnfUhAhsk8jFSaNKdUZz3z43wGrF9YR6BYvxePwhnrpx2PfhHbBE3bBCFTsbdybMauBww",
 ]);
 
 /** True when a ledger row is a known test fee, not organic revenue. */
