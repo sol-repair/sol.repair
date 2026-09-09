@@ -62,3 +62,9 @@ next-env.d.ts
 
 # cache
 .cache/
+
+# local-only working directories (keypairs, research scratch). Never
+# tracked; on this machine also mirrored in .git/info/exclude, which is
+# why this line is belt-and-braces rather than redundant.
+/docs/
+/research/
