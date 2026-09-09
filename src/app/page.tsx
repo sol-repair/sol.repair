@@ -109,6 +109,14 @@ function short(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
+/** True when a scan error is the RPC throttling reads of the wallet.
+ *  Matched on anchored wordings only, never on a bare "429", because
+ *  base58 signatures embedded in error text can contain that digit run
+ *  and a misread here would hide the real error behind friendly copy. */
+function isRateLimitError(text: string): boolean {
+  return /rate limit|too many requests|responded with 429/i.test(text);
+}
+
 function AccountLink({ address, label }: { address: string; label?: string }) {
   const href = accountUrl(address);
   if (href === null) {
@@ -490,7 +498,21 @@ export default function Home() {
         {publicKey && scanError && (
           <div className="mt-4 rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-400">
             <p className="font-medium">Scan failed</p>
-            <p className="mt-1 text-red-400/70">{scanError}</p>
+            {isRateLimitError(scanError) ? (
+              <>
+                <p className="mt-1 text-red-400/70">
+                  The network is limiting how fast your wallet can be read.
+                  Wait a minute and scan again.
+                </p>
+                {/* The raw reply stays visible in small print: friendly
+                 *  words explain it, nothing is hidden. */}
+                <p className="mt-1 break-all text-xs text-red-400/50">
+                  {scanError}
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-red-400/70">{scanError}</p>
+            )}
           </div>
         )}
 
