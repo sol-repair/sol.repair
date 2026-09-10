@@ -1,0 +1,32 @@
+# Fee-ledger bell: an independent audit of the published fee rule,
+# running on GitHub's schedule instead of anyone's desktop. Silence is
+# healthy: a conforming ledger exits 0 and nothing happens. A fee that
+# is not exactly floor(1%) of the rent its closes freed exits 1, the
+# job fails, and GitHub emails the owner with the run's output naming
+# the signature and the amounts. Read-only spectator: reads public
+# chain data, touches nothing, has no secrets to hold.
+#
+# Scheduled workflows are auto-disabled by GitHub after 60 days of
+# repository inactivity; a push to any branch resets that clock.
+name: Fee ledger bell
+
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci
+      - run: node scripts/check-fee-ledger.mjs
