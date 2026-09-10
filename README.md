@@ -46,7 +46,9 @@ are listed separately, and test transactions are labeled as tests.
 
 The page is display only. It reads the chain in your browser and it
 never changes anything. It does not show the wallet addresses behind
-the fees, just the amounts and the signatures.
+the fees, just the amounts and the signatures. An automated audit
+re-checks the rule against the chain every six hours, so a fee that
+does not conform gets caught by more than one pair of eyes.
 
 ## What gets closed
 
@@ -110,10 +112,13 @@ isolated under src/lib/solana/, so moving to v2 later won't mean a rewrite.
 ## Layout
 
 ```
-src/app/         Next.js App Router pages and layout
-src/components/  UI components (wallet button, network badge)
-src/hooks/       React hooks for the scan and repair flow
-src/lib/solana/  Solana domain logic: scanning, eligibility, transactions
+src/app/          Next.js App Router pages and layout
+src/components/   UI components (wallet button, network badge)
+src/hooks/        React hooks for the scan and repair flow
+src/lib/security/ Content security policy builder
+src/lib/solana/   Solana domain logic: scanning, eligibility, transactions
+scripts/          Operator tooling: the fee-ledger audit script
+tests/            Vitest suite: units, chain fixtures, page and hook tests
 ```
 
 ## Security model
