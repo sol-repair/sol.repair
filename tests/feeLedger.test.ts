@@ -19,6 +19,7 @@ import {
   VersionedTransaction,
   type Message,
 } from "@solana/web3.js";
+import fc from "fast-check";
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
@@ -916,5 +917,169 @@ describe("per-transaction retry (stubbed transient RPC failure)", () => {
     await expect(
       fetchFeeLedgerPage("https://rpc.example", FEE_WALLET)
     ).rejects.toBeInstanceOf(LedgerFetchError);
+  });
+});
+
+describe("decodeRawTransaction v1 property tests (fast-check)", () => {
+  // The v1 decoder is a hand-rolled binary parser over network-derived
+  // bytes. Two fixtures pin two cases; properties pin the space:
+  // arbitrary bytes must never throw (the null-on-garbage contract),
+  // every spec-valid envelope must round-trip exactly (the property
+  // that would have caught the headers-first payload bug on day one),
+  // and truncation must behave exactly as the contract claims.
+
+  /** A spec-valid v1 envelope assembled per SIMD-0385. Returns the
+   *  wire bytes, the offset where the (unread) signature tail starts,
+   *  and the address list for round-trip comparison. */
+  function buildV1Envelope(params: {
+    addresses: PublicKey[];
+    configMask: number;
+    numRequiredSignatures: number;
+    instructions: { programIndex: number; accountIndexes: number[]; data: Uint8Array }[];
+  }): { bytes: Buffer; payloadEnd: number; addressStrings: string[] } {
+    const parts: Buffer[] = [
+      Buffer.from([0x81]),
+      Buffer.from([params.numRequiredSignatures, 0, 0]),
+      Buffer.from([params.configMask, 0, 0, 0]),
+      Buffer.alloc(32, 9), // lifetime specifier
+      Buffer.from([params.instructions.length]),
+      Buffer.from([params.addresses.length]),
+      ...params.addresses.map((k) => k.toBuffer()),
+    ];
+    if (params.configMask === 0x0c) {
+      const cuLimit = Buffer.alloc(4);
+      cuLimit.writeUInt32LE(1_400_000);
+      const dataLimit = Buffer.alloc(4);
+      dataLimit.writeUInt32LE(1_048_576);
+      parts.push(cuLimit, dataLimit);
+    }
+    const headers: Buffer[] = [];
+    const payloads: Buffer[] = [];
+    for (const ix of params.instructions) {
+      headers.push(Buffer.from([ix.programIndex, ix.accountIndexes.length]));
+      const len = Buffer.alloc(2);
+      len.writeUInt16LE(ix.data.length);
+      headers.push(len);
+      payloads.push(
+        ...ix.accountIndexes.map((a) => Buffer.from([a])),
+        Buffer.from(ix.data)
+      );
+    }
+    parts.push(...headers, ...payloads);
+    const beforeSignatures = Buffer.concat(parts);
+    const bytes = Buffer.concat([
+      beforeSignatures,
+      Buffer.alloc(params.numRequiredSignatures * 64),
+    ]);
+    return {
+      bytes,
+      payloadEnd: beforeSignatures.length,
+      addressStrings: params.addresses.map((k) => k.toBase58()),
+    };
+  }
+
+  const envelopeArb = fc
+    .record({
+      addresses: fc.array(
+        fc.uint8Array({ minLength: 32, maxLength: 32 }).map((b) => new PublicKey(Uint8Array.from(b))),
+        { minLength: 1, maxLength: 6 }
+      ),
+      configMask: fc.constantFrom(0, 0x0c),
+      numRequiredSignatures: fc.integer({ min: 1, max: 2 }),
+      instructions: fc.array(
+        fc.record({
+          programIndex: fc.integer({ min: 0, max: 5 }),
+          accountIndexes: fc.array(fc.integer({ min: 0, max: 5 }), { maxLength: 3 }),
+          data: fc.uint8Array({ minLength: 0, maxLength: 40 }),
+        }),
+        { minLength: 1, maxLength: 4 }
+      ),
+    })
+    .filter(
+      (p) =>
+        p.numRequiredSignatures <= p.addresses.length &&
+        p.instructions.every((ix) => ix.programIndex < p.addresses.length) &&
+        p.instructions.every((ix) => ix.accountIndexes.every((a) => a < p.addresses.length))
+    );
+
+  it("never throws on arbitrary bytes; non-null output is always well-formed", () => {
+    const shapeCheck = (decoded: ReturnType<typeof decodeRawTransaction>) => {
+      if (decoded === null) return;
+      expect(Array.isArray(decoded.instructions)).toBe(true);
+      expect(Array.isArray(decoded.accountKeys)).toBe(true);
+      for (const key of decoded.accountKeys) {
+        expect(() => new PublicKey(key)).not.toThrow();
+      }
+    };
+    // Plain garbage mostly exercises the legacy path; the biased
+    // variant (0x81 prefix) exercises the v1 parser on noise.
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 0, maxLength: 600 }), (bytes) => {
+        shapeCheck(
+          decodeRawTransaction({ transaction: [Buffer.from(bytes).toString("base64"), "base64"], meta: {} })
+        );
+      }),
+      { numRuns: 500 }
+    );
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 0, maxLength: 600 }), (bytes) => {
+        const prefixed = new Uint8Array([0x81, ...bytes]);
+        shapeCheck(
+          decodeRawTransaction({ transaction: [Buffer.from(prefixed).toString("base64"), "base64"], meta: {} })
+        );
+      }),
+      { numRuns: 500 }
+    );
+  });
+
+  it("round-trips every spec-valid envelope exactly", () => {
+    fc.assert(
+      fc.property(envelopeArb, (params) => {
+        const { bytes, addressStrings } = buildV1Envelope(params);
+        const decoded = decodeRawTransaction({
+          transaction: [bytes.toString("base64"), "base64"],
+          meta: { err: null, loadedAddresses: { readonly: [], writable: [] }, innerInstructions: [] },
+        });
+        expect(decoded).not.toBeNull();
+        expect(decoded!.accountKeys).toEqual(addressStrings);
+        expect(decoded!.instructions).toHaveLength(params.instructions.length);
+        decoded!.instructions.forEach((ix, i) => {
+          const generated = params.instructions[i];
+          expect(ix.programId).toBe(addressStrings[generated.programIndex]);
+          expect(ix.accountPubkeys).toEqual(
+            generated.accountIndexes.map((a) => addressStrings[a])
+          );
+          expect(ix.data).toEqual(new Uint8Array(generated.data));
+        });
+      }),
+      { numRuns: 250 }
+    );
+  });
+
+  it("truncating before the payload end is null; cutting into the unread signature tail still decodes", () => {
+    fc.assert(
+      fc.property(
+        envelopeArb,
+        fc.integer({ min: 0, max: 500 }),
+        (params, cutBias) => {
+          const { bytes, payloadEnd } = buildV1Envelope(params);
+          const cut = Math.round((cutBias / 500) * bytes.length);
+          const raw: RawTransaction = {
+            transaction: [bytes.subarray(0, cut).toString("base64"), "base64"],
+            meta: {},
+          };
+          const decoded = decodeRawTransaction(raw);
+          if (cut < payloadEnd) {
+            expect(decoded).toBeNull();
+          } else {
+            // Everything the decoder reads survives; the signature
+            // tail is never touched, so the envelope still parses.
+            expect(decoded).not.toBeNull();
+            expect(decoded!.accountKeys).toHaveLength(params.addresses.length);
+          }
+        }
+      ),
+      { numRuns: 250 }
+    );
   });
 });
