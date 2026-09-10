@@ -559,7 +559,8 @@ describe("fetchFeeLedgerPage pagination (stubbed RPC)", () => {
   });
 
   it("requests each transaction with maxSupportedTransactionVersion: 1", async () => {
-    // v1 transactions activate on mainnet 2026-09-09 (SIMD-0385). From
+    // v1 transactions activate on mainnet (SIMD-0385, announced for
+    // 2026-09-09; the on-chain gate account records the true date). From
     // that day, a getTransaction call pinned to version 0 errors when the
     // node returns a v1 transaction, which would fail the whole ledger
     // page. Version 1 is accepted by the public endpoints today and
@@ -614,7 +615,8 @@ describe("decodeRawTransaction malformed v0 envelope data", () => {
 });
 
 describe("decodeRawTransaction version-1 message boundary", () => {
-  // v1 transactions activate on mainnet 2026-09-09 (SIMD-0385). The
+  // v1 transactions activate on mainnet (SIMD-0385, announced for
+  // 2026-09-09; the on-chain gate account records the true date). The
   // bundled @solana/web3.js cannot build or decode v1 messages yet, but
   // its deserializer throws a version assert on the 0x81 prefix. The
   // function's null-on-garbage contract must hold for that shape too: an
@@ -635,7 +637,8 @@ describe("decodeRawTransaction version-1 message boundary", () => {
 });
 
 describe("decodeRawTransaction version-1 transactions (SIMD-0385)", () => {
-  // v1 activates on mainnet 2026-09-09. The bundled @solana/web3.js cannot
+  // v1 activates on mainnet (SIMD-0385, announced for 2026-09-09; the
+  // on-chain gate account records the true date). The bundled @solana/web3.js cannot
   // build or deserialize v1 messages (its deserializer asserts version 0),
   // so the envelope is parsed here per the SIMD and these tests pin every
   // field against REAL chain bytes rather than a hand-modeled shape.

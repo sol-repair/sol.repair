@@ -634,7 +634,8 @@ export async function fetchRawTransaction(
   // base64 encoding: the only transaction form the public endpoints still
   // serve. maxSupportedTransactionVersion lets versioned transactions
   // through instead of erroring: v1 transactions activate on mainnet
-  // 2026-09-09 (SIMD-0385), and a call pinned to 0 errors on them, which
+  // (SIMD-0385, announced for 2026-09-09; the on-chain gate account
+  // records the true date), and a call pinned to 0 errors on them, which
   // would fail the whole ledger page. Version 1 is accepted by the
   // endpoints today and returns legacy and v0 responses unchanged.
   const result = await rpcCall(endpoint, "getTransaction", [
