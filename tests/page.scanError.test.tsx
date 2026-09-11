@@ -107,6 +107,23 @@ describe("scan error box", () => {
     expect(screen.getByText(FRIENDLY)).toBeTruthy();
   });
 
+  it("does not treat a bare 429 inside error text as a rate limit", () => {
+    // Base58 signatures can contain the digit run 429, so the matcher is
+    // anchored to whole phrases. A signature inside an unrelated failure
+    // must keep today's raw rendering, not the friendly copy.
+    mocks.scan.error =
+      "error looking up account 5Kd4pTb429xVfJ8mWfPqZcRk2YuLgN7: account not found";
+    render(<Home />);
+
+    expect(screen.getByText("Scan failed")).toBeTruthy();
+    expect(screen.queryByText(FRIENDLY)).toBeNull();
+    expect(
+      screen.getByText(
+        /error looking up account 5Kd4pTb429xVfJ8mWfPqZcRk2YuLgN7/
+      )
+    ).toBeTruthy();
+  });
+
   it("keeps today's raw rendering for any other error", () => {
     mocks.scan.error = "Connection refused";
     render(<Home />);
