@@ -707,8 +707,9 @@ export default function Home() {
                     {lamportsToSol(5000n * BigInt(batchCount))} SOL base (
                     {batchCount} × 0.000005), plus the priority fee your
                     wallet adds when signing (with Phantom&rsquo;s default
-                    settings that has recently been about 0.000075 SOL per
-                    transaction), all to the Solana network, not to us
+                    settings that has recently run between about 0.000075
+                    and 0.00015 SOL per transaction), all to the Solana
+                    network, not to us
                   </p>
                   <p>
                     Your wallet needs this small balance before signing — the

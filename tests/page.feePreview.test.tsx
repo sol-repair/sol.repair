@@ -243,7 +243,7 @@ describe("repair confirmation fee preview parity", () => {
     const line = screen.getByText(/Network fee:/);
     expect(line.textContent).toContain("0.000005");
     expect(line.textContent).toMatch(
-      /plus the priority fee your wallet adds when signing \(with Phantom’s default settings that has recently been about 0\.000075 SOL per transaction\), all to the Solana network, not to us/
+      /plus the priority fee your wallet adds when signing \(with Phantom’s default settings that has recently run between about 0\.000075 and 0\.00015 SOL per transaction\), all to the Solana network, not to us/
     );
     // The old unquantified wording is gone.
     expect(screen.queryByText(/plus any priority fee your wallet/)).toBeNull();
