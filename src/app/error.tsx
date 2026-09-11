@@ -36,6 +36,15 @@ export default function ErrorBoundary({
         was signed or sent by this error. If a repair was in flight, scan
         your wallet again to see where it stands.
       </p>
+      <p className="mt-3 text-sm text-zinc-400">
+        If this keeps happening, tell us:{" "}
+        <a
+          href="mailto:admin@sol.repair"
+          className="text-zinc-200 underline decoration-zinc-600 underline-offset-2 hover:decoration-zinc-300"
+        >
+          admin@sol.repair
+        </a>
+      </p>
       <button
         type="button"
         onClick={() => retry()}

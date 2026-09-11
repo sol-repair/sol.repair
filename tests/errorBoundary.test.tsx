@@ -33,6 +33,10 @@ describe("the route error boundary", () => {
     // Mid-repair crashes are the confusing case; the copy has to point
     // at the rescan, the only truthful recovery.
     expect(screen.getByText(/scan your wallet again/i)).toBeTruthy();
+    // Option C of the error-capture decision: humans are the telemetry.
+    // The page asks to be told, via the published security contact.
+    expect(screen.getByText(/tell us/i)).toBeTruthy();
+    expect(screen.getByText(/admin@sol\.repair/i)).toBeTruthy();
   });
 
   it("retries the route when the recovery button is clicked", () => {
