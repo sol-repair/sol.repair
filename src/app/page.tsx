@@ -420,6 +420,36 @@ export default function Home() {
           You sign every transaction. Funds go straight to your wallet.
         </p>
 
+        {!publicKey && (
+          <div className="mb-8 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+              How it works
+            </p>
+            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-zinc-300">
+              <li>
+                Have a wallet handy: Phantom, Solflare, or Backpack. On a
+                computer it&rsquo;s a browser extension. On your phone, open
+                this page inside the Phantom app (the globe icon at the
+                bottom).
+              </li>
+              <li>
+                Connect read-only. Tap Select Wallet, pick your wallet,
+                approve the popup. This only lets the site see your accounts.
+                It cannot move anything.
+              </li>
+              <li>
+                Review your scan. The page lists your empty token accounts
+                and how much SOL each one has locked in it.
+              </li>
+              <li>
+                Sign only if you want to claim. You approve every transaction
+                in your own wallet, and the SOL goes back to you. Closing the
+                tab changes nothing.
+              </li>
+            </ol>
+          </div>
+        )}
+
         <div className="mb-8">
           <WalletButton />
           <p className="mt-3 text-center text-xs leading-relaxed text-zinc-400">
