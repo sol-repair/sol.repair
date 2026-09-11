@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 
 /**
- * How-it-works strip tests for the homepage (page.tsx).
+ * Cannot-do trust lines for the homepage (page.tsx).
  *
- * The first pre-launch tester (a phone-only Phantom user, relayed by the
- * owner) answered the site with "how do I use this with my wallet". The
- * page pitched the tool and then jumped straight to the wallet button
- * with no first-timer steps between them. The strip that fixes it must
- * always render for a disconnected visitor: four steps, plain language,
- * covering having a wallet, the read-only connect, the scan review, and
- * the fact that nothing happens without a signature.
+ * First-timers answer the page with "how do I use this with my wallet",
+ * and the trust half of that question is "what can this site touch".
+ * The three lines must stay receipt-backed by how the app actually
+ * works: it never asks for a private key or seed phrase, every SOL
+ * move is a transaction the wallet owner approves, and accounts whose
+ * required on-chain authority is not the owner are skipped, never
+ * force-closed.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -64,37 +64,36 @@ vi.mock("next/link", () => ({
 
 afterEach(cleanup);
 
-describe("homepage how-it-works strip guides a first-timer", () => {
-  it("renders all four steps when no wallet is connected", () => {
+describe("homepage cannot-do section is receipt-backed trust copy", () => {
+  it("renders all three limits when no wallet is connected", () => {
     render(<Home />);
 
-    expect(screen.getByText("How it works")).toBeTruthy();
+    expect(screen.getByText("What SOL.repair cannot do")).toBeTruthy();
+    expect(
+      screen.getByText(/It cannot access your private key or seed phrase/)
+    ).toBeTruthy();
     expect(
       screen.getByText(
-        /Have a wallet handy: Phantom, Solflare, or Backpack/
+        /It cannot move your funds without a transaction you approve in your wallet/
       )
     ).toBeTruthy();
     expect(
-      screen.getByText(/Connect to scan\. No transaction is signed/)
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Review your scan\. The page lists your empty token accounts/)
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Claim only if you want to\. Pick the accounts, review the fees/)
+      screen.getByText(
+        /It cannot close an account unless the required on-chain authority allows it/
+      )
     ).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the strip", () => {
+  it("keeps the owner's writing rules and exactly three limits", () => {
     render(<Home />);
 
-    // Scope to the strip card: the cannot-do list is also a list, but it
-    // is trust copy, not a step in the walkthrough.
-    const strip = screen.getByText("How it works").closest("div");
-    expect(strip).toBeTruthy();
-    const steps = within(strip as HTMLElement).getAllByRole("listitem");
-    expect(steps).toHaveLength(4);
-    const text = steps.map((el) => el.textContent ?? "").join(" ");
+    const section = screen
+      .getByText("What SOL.repair cannot do")
+      .closest("div");
+    expect(section).toBeTruthy();
+    const lines = within(section as HTMLElement).getAllByRole("listitem");
+    expect(lines).toHaveLength(3);
+    const text = lines.map((el) => el.textContent ?? "").join(" ");
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     expect(text.includes("!")).toBe(false);

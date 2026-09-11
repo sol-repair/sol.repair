@@ -5,10 +5,10 @@
  *
  * The network lowered the rent rate on 2026-09-04 (SIMD-0437 step 1,
  * mainnet epoch 1028), so a single "~0.002 SOL" figure no longer
- * describes new accounts (they hold 0.00186). The hero tagline and the
+ * describes new accounts (they hold 0.00186). The hero rent copy and the
  * example scan card must speak the same two-regime range wording as
- * the rent calculator on the guide page: about 0.00186 to 0.00204 SOL
- * per empty account, depending on when it was created.
+ * the rent calculator on the guide page: about 0.00186 to 0.00204 SOL,
+ * depending on when the accounts were created.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,10 +68,17 @@ describe("homepage rent copy matches the two-regime reality", () => {
     render(<Home />);
 
     const hero = screen.getByText(
-      /return your rent deposits: about 0\.00186 to 0\.00204 SOL per empty account, depending on when it was created/
+      /Most empty token accounts hold about 0\.00186 to 0\.00204 SOL, depending on when they were created/
     );
     expect(hero).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Recovered SOL is returned to the wallet that owns the account/
+      )
+    ).toBeTruthy();
     expect(screen.queryByText(/~0\.002 SOL rent/)).toBeNull();
+    // The instruction name was library jargon on a first-timer page.
+    expect(screen.queryByText(/createCloseAccountInstruction/)).toBeNull();
 
     // The owner's writing rules hold on the new copy.
     const text = hero.textContent ?? "";
@@ -86,8 +93,10 @@ describe("homepage rent copy matches the two-regime reality", () => {
     expect(screen.getAllByText("0.002039 SOL")).toHaveLength(2);
     expect(screen.getAllByText("0.001856 SOL")).toHaveLength(1);
     expect(
-      screen.getByText(/\+0\.005934 SOL recoverable · 1 transaction/)
+      screen.getByText(/0\.005934 SOL recoverable · 1 transaction/)
     ).toBeTruthy();
-    expect(screen.queryByText(/\+0\.006117/)).toBeNull();
+    // The old copy led with a plus on a figure that is not a gain.
+    expect(screen.queryByText(/\+0\.005934/)).toBeNull();
+    expect(screen.queryByText(/0\.006117/)).toBeNull();
   });
 });

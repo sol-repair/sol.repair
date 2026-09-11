@@ -398,26 +398,27 @@ export default function Home() {
           Reclaim SOL from empty token accounts.
         </h1>
         <p className="mb-2 text-zinc-300">
-          Close dusty SPL accounts and get your rent-exempt deposits back.
+          Close empty SPL and Token-2022 accounts and recover the SOL held in
+          them.
         </p>
         <p className="mb-8 text-zinc-300">
-          100% open source.{" "}
+          100% open source. 1% success fee, only when SOL is successfully
+          recovered.{" "}
           <a
             href="https://github.com/sol-repair/sol.repair"
             target="_blank"
             rel="noopener noreferrer"
             className="underline underline-offset-2 hover:text-zinc-200"
           >
-            Read the code
+            Verify exactly what the app does in the source code
           </a>
-          . 1% success fee.
+          .
         </p>
         <p className="mb-8 font-mono text-xs leading-relaxed text-zinc-400">
-          This tool batches createCloseAccountInstruction to return your
-          rent deposits: about 0.00186 to 0.00204 SOL per empty account,
-          depending on when it was created.
+          Most empty token accounts hold about 0.00186 to 0.00204 SOL,
+          depending on when they were created.
           <br />
-          You sign every transaction. Funds go straight to your wallet.
+          Recovered SOL is returned to the wallet that owns the account.
         </p>
 
         {!publicKey && (
@@ -433,18 +434,17 @@ export default function Home() {
                 bottom).
               </li>
               <li>
-                Connect read-only. Tap Select Wallet, pick your wallet,
-                approve the popup. This only lets the site see your accounts.
-                It cannot move anything.
+                Connect to scan. No transaction is signed. Connecting only
+                lets the site read your wallet address and its token
+                accounts.
               </li>
               <li>
                 Review your scan. The page lists your empty token accounts
                 and how much SOL each one has locked in it.
               </li>
               <li>
-                Sign only if you want to claim. You approve every transaction
-                in your own wallet, and the SOL goes back to you. Closing the
-                tab changes nothing.
+                Claim only if you want to. Pick the accounts, review the
+                fees, and approve each transaction yourself.
               </li>
             </ol>
           </div>
@@ -452,9 +452,6 @@ export default function Home() {
 
         <div className="mb-8">
           <WalletButton />
-          <p className="mt-3 text-center text-xs leading-relaxed text-zinc-400">
-            Read-only connection. Powered by @solana/wallet-adapter.
-          </p>
           <Link
             href="/fees"
             className="mt-3 flex w-full items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-800 hover:text-white"
@@ -506,8 +503,27 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-2 text-emerald-400">
-              +0.005934 SOL recoverable · 1 transaction
+              0.005934 SOL recoverable · 1 transaction
             </p>
+          </div>
+        )}
+
+        {!publicKey && (
+          <div className="mb-8 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+              What SOL.repair cannot do
+            </p>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-xs leading-relaxed text-zinc-400">
+              <li>It cannot access your private key or seed phrase.</li>
+              <li>
+                It cannot move your funds without a transaction you approve
+                in your wallet.
+              </li>
+              <li>
+                It cannot close an account unless the required on-chain
+                authority allows it.
+              </li>
+            </ul>
           </div>
         )}
 
