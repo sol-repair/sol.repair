@@ -100,6 +100,10 @@ const MAINNET_TEST_SIGNATURES: ReadonlySet<string> = new Set([
   "4BsA9nPxEePuHpNyN8KYzZYbCZyWVADojyiv4JvXvDxzpDt17Xq3n2Dc41fsqtaJH2FjYqhC5ectmUepbD2g9aAB",
   // Sep 4 owner test: Token-2022 close after a manual burn-to-zero.
   "2EdGP7YSr2oKAtibpAFAnfUhAhsk8jFSaNKdUZz3z43wGrF9YR6BYvxePwhnrpx2PfhHbBE3bBCFTsbdybMauBww",
+  // Sep 10 owner run: first mainnet revoke+close through the live site
+  // (staged delegate on the USDT account plus two staged empties;
+  // verified on chain to the lamport).
+  "2ZMJZDi7frGRw7GxBGwDfc2MYqbjzhobt4r2sGEWcxGevnonMyjAconXKpCw74kLBEb8mjcCckvp2aVTimFC1m55",
 ]);
 
 /** True when a ledger row is a known test fee, not organic revenue. */
