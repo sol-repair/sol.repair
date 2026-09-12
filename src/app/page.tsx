@@ -137,6 +137,49 @@ function AccountLink({ address, label }: { address: string; label?: string }) {
   );
 }
 
+/** Ticking elapsed-seconds counter for the in-flight repair states. A
+ *  changing number is the honest "not stuck" signal: real time passing,
+ *  no fake percentages, no countdown. */
+function ElapsedSeconds() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="shrink-0 font-mono text-xs tabular-nums text-zinc-400">
+      {seconds}s
+    </span>
+  );
+}
+
+/** Small accent spinner shown while the repair is in flight. Renders
+ *  static under reduced-motion; the counter still ticks as text. */
+function RepairSpinner() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0 animate-spin text-emerald-400 motion-reduce:animate-none"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
+  );
+}
+
 export default function Home() {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
@@ -843,20 +886,43 @@ export default function Home() {
               status === "awaiting-signature" ||
               status === "sending" ||
               status === "verifying") && (
-              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-4">
-                <p className="text-sm text-zinc-300">
-                  {status === "building" &&
-                    (progress && progress.total > 1
-                      ? `Preparing transaction ${progress.current} of ${progress.total}...`
-                      : "Building transaction...")}
-                  {status === "awaiting-signature" &&
-                    (progress && progress.total > 1
-                      ? `Check your wallet and approve transaction ${progress.current} of ${progress.total}.`
-                      : "Check your wallet. Phantom is asking you to approve.")}
-                  {status === "sending" && "Sending to the network..."}
-                  {status === "verifying" &&
-                    "Verifying the result on the blockchain..."}
-                </p>
+              <div
+                role="status"
+                className="rounded-lg border border-zinc-700 bg-zinc-950 p-4"
+              >
+                <div className="flex items-center gap-3">
+                  <RepairSpinner />
+                  <p className="min-w-0 flex-1 text-sm text-zinc-300">
+                    {status === "building" &&
+                      (progress && progress.total > 1
+                        ? `Preparing transaction ${progress.current} of ${progress.total}...`
+                        : "Building transaction...")}
+                    {status === "awaiting-signature" &&
+                      (progress && progress.total > 1
+                        ? `Check your wallet and approve transaction ${progress.current} of ${progress.total}.`
+                        : "Check your wallet. Phantom is asking you to approve.")}
+                    {status === "sending" &&
+                      "Approved. Sending to the network..."}
+                    {status === "verifying" &&
+                      "Sent. Waiting for the network to confirm it..."}
+                  </p>
+                  {(status === "sending" || status === "verifying") && (
+                    <ElapsedSeconds />
+                  )}
+                </div>
+                {(status === "sending" || status === "verifying") && (
+                  <div className="mt-2 space-y-1 text-xs leading-relaxed text-zinc-400">
+                    {progress && progress.total > 1 && (
+                      <p>
+                        Transaction {progress.current} of {progress.total}.
+                      </p>
+                    )}
+                    <p>
+                      Approved in your wallet. The network, not this page,
+                      does the confirming.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
