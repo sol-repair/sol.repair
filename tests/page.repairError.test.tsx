@@ -90,7 +90,7 @@ vi.mock("next/link", () => ({
 }));
 
 const GENERIC =
-  "The repair transaction did not go through. Nothing was closed. Run the repair again.";
+  "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open.";
 
 const RAW =
   "SendTransactionError: failed to send transaction: Transaction simulation failed: Error: Non-native account can only be closed if its balance is zero. Catch the `SendTransactionError` and call `getLogs()` on it for full details.";

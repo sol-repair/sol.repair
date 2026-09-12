@@ -524,7 +524,7 @@ describe("useRepairWallet", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.error).toBe(
-      "The repair transaction did not go through. Nothing was closed. Run the repair again."
+      "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open."
     );
     // The raw text is preserved, not hidden.
     expect(result.current.errorDetail).toMatch(/SendTransactionError/);

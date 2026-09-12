@@ -153,12 +153,15 @@ function ElapsedSeconds() {
   );
 }
 
-/** Small accent spinner shown while the repair is in flight. Renders
+/** Small spinner shown while the repair is in flight. Emerald for the
+ *  normal stages, amber for the uncertain chain-check stage. Renders
  *  static under reduced-motion; the counter still ticks as text. */
-function RepairSpinner() {
+function RepairSpinner({ tone = "emerald" }: { tone?: "emerald" | "amber" }) {
   return (
     <svg
-      className="h-4 w-4 shrink-0 animate-spin text-emerald-400 motion-reduce:animate-none"
+      className={`h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none ${
+        tone === "amber" ? "text-amber-400" : "text-emerald-400"
+      }`}
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
@@ -885,13 +888,14 @@ export default function Home() {
             {(status === "building" ||
               status === "awaiting-signature" ||
               status === "sending" ||
-              status === "verifying") && (
+              status === "verifying" ||
+              status === "checking") && (
               <div
                 role="status"
                 className="rounded-lg border border-zinc-700 bg-zinc-950 p-4"
               >
                 <div className="flex items-center gap-3">
-                  <RepairSpinner />
+                  <RepairSpinner tone={status === "checking" ? "amber" : "emerald"} />
                   <p className="min-w-0 flex-1 text-sm text-zinc-300">
                     {status === "building" &&
                       (progress && progress.total > 1
@@ -905,10 +909,12 @@ export default function Home() {
                       "Approved. Sending to the network..."}
                     {status === "verifying" &&
                       "Sent. Waiting for the network to confirm it..."}
+                    {status === "checking" &&
+                      "Checking the chain for what actually landed..."}
                   </p>
-                  {(status === "sending" || status === "verifying") && (
-                    <ElapsedSeconds />
-                  )}
+                  {(status === "sending" ||
+                    status === "verifying" ||
+                    status === "checking") && <ElapsedSeconds />}
                 </div>
                 {(status === "sending" || status === "verifying") && (
                   <div className="mt-2 space-y-1 text-xs leading-relaxed text-zinc-400">
@@ -971,6 +977,13 @@ export default function Home() {
               <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-400">
                 <p className="font-medium">Repair failed</p>
                 <p className="mt-1 text-red-400/70">{repairError}</p>
+                {/* The hook preserves the receipts of batches that already
+                 *  landed before the run stopped; show them so the count
+                 *  and the recovered SOL are independently checkable. */}
+                {signatures.length > 0 &&
+                  signatures.map((sig) => (
+                    <ExplorerLink key={sig} signature={sig} />
+                  ))}
                 {/* Raw library text for failures the copy does not
                  *  explain: available to anyone who wants it, dumped on
                  *  no one. */}

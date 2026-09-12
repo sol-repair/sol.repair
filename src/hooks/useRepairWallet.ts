@@ -66,6 +66,7 @@ type RepairStatus =
   | "awaiting-signature"
   | "sending"
   | "verifying"
+  | "checking"
   | "done"
   | "error";
 
@@ -322,7 +323,11 @@ export function useRepairWallet() {
                 // failed. The wallet may have submitted the transaction itself
                 // and it may have already landed. Ask the chain what actually
                 // happened.
-                setRunState({ status: "verifying", progress });
+                // Not "verifying": verifying is only for transactions this
+                // app knows were sent. Here the submission failed and the
+                // wallet may have submitted independently, so nothing
+                // about "sent" is proven yet. The UI must not say so.
+                setRunState({ status: "checking", progress });
 
                 const { closedPubkeys, stillOpenPubkeys } =
                   await verifyAccountsClosed(connection, batch);
@@ -407,7 +412,11 @@ export function useRepairWallet() {
           let closedPubkeys: string[] = [];
           let verifyFailed = false;
           try {
-            setRunState({ status: "verifying" });
+            // "checking", not "verifying": the run stopped for reasons that
+            // include cancellation and failures where nothing was sent.
+            // The UI must not claim "sent" while the chain is being asked
+            // what actually landed.
+            setRunState({ status: "checking" });
             const verified = await verifyAccountsClosed(connection, runAccounts);
             closedPubkeys = verified.closedPubkeys;
           } catch {
@@ -448,7 +457,7 @@ export function useRepairWallet() {
                   ? "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly."
                   : err instanceof FriendlyError
                     ? message
-                    : "The repair transaction did not go through. Nothing was closed. Run the repair again.",
+                    : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open.",
             errorDetail: rawDetail,
           });
         }
