@@ -61,7 +61,8 @@ const mocks = vi.hoisted(() => ({
     getAccountInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
-    confirmTransaction: vi.fn(),
+    getSignatureStatuses: vi.fn(),
+    getBlockHeight: vi.fn(),
     simulateTransaction: vi.fn(),
   },
 }));
@@ -211,7 +212,10 @@ describe("repair ceiling on the review and done screens", () => {
       lastValidBlockHeight: 1000,
     });
     mocks.conn.sendRawTransaction.mockResolvedValue("signed-tx-id");
-    mocks.conn.confirmTransaction.mockResolvedValue({ value: { err: null } });
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: null, confirmationStatus: "confirmed" }],
+    });
+    mocks.conn.getBlockHeight.mockResolvedValue(990);
     mocks.wallet.signTransaction = vi.fn(async (tx: Transaction) => {
       tx.sign(WALLET_KEYPAIR);
       return tx;

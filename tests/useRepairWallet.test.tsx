@@ -48,7 +48,8 @@ const mocks = vi.hoisted(() => ({
     getMultipleAccountsInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
-    confirmTransaction: vi.fn(),
+    getSignatureStatuses: vi.fn(),
+    getBlockHeight: vi.fn(),
   },
 }));
 
@@ -95,7 +96,13 @@ describe("useRepairWallet", () => {
       lastValidBlockHeight: 1000,
     });
     mocks.conn.sendRawTransaction.mockResolvedValue("signed-tx-id");
-    mocks.conn.confirmTransaction.mockResolvedValue({ value: { err: null } });
+    // Confirmation is HTTP-polled (getSignatureStatuses); the default mock
+    // answers "confirmed" on the first poll, below the blockhash expiry
+    // height, so the ordinary path never loops.
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: null, confirmationStatus: "confirmed" }],
+    });
+    mocks.conn.getBlockHeight.mockResolvedValue(990);
     mocks.conn.getMultipleAccountsInfo.mockImplementation(
       async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
     );
@@ -178,12 +185,16 @@ describe("useRepairWallet", () => {
       return tx;
     });
 
-    // Park confirmation so the test controls when batch 1 finishes.
-    let releaseConfirm!: (value: { value: { err: null } }) => void;
-    const confirmParked = new Promise<{ value: { err: null } }>((resolve) => {
+    // Park confirmation polling so the test controls when batch 1 finishes.
+    let releaseConfirm!: (value: {
+      value: Array<{ err: null; confirmationStatus: string }>;
+    }) => void;
+    const confirmParked = new Promise<{
+      value: Array<{ err: null; confirmationStatus: string }>;
+    }>((resolve) => {
       releaseConfirm = resolve;
     });
-    mocks.conn.confirmTransaction.mockReturnValue(confirmParked);
+    mocks.conn.getSignatureStatuses.mockReturnValue(confirmParked);
 
     const { result, rerender } = renderHook(() => useRepairWallet());
 
@@ -209,7 +220,9 @@ describe("useRepairWallet", () => {
     // Batch 1 confirms; the run reaches batch 2's identity check with
     // the committed switch visible and stops before signing again.
     await act(async () => {
-      releaseConfirm({ value: { err: null } });
+      releaseConfirm({
+        value: [{ err: null, confirmationStatus: "confirmed" }],
+      });
       await p;
     });
 
@@ -243,12 +256,16 @@ describe("useRepairWallet", () => {
     });
     mocks.holder.signTransaction = signer;
 
-    // Park confirmation so the test controls when batch 1 finishes.
-    let releaseConfirm!: (value: { value: { err: null } }) => void;
-    const confirmParked = new Promise<{ value: { err: null } }>((resolve) => {
+    // Park confirmation polling so the test controls when batch 1 finishes.
+    let releaseConfirm!: (value: {
+      value: Array<{ err: null; confirmationStatus: string }>;
+    }) => void;
+    const confirmParked = new Promise<{
+      value: Array<{ err: null; confirmationStatus: string }>;
+    }>((resolve) => {
       releaseConfirm = resolve;
     });
-    mocks.conn.confirmTransaction.mockReturnValue(confirmParked);
+    mocks.conn.getSignatureStatuses.mockReturnValue(confirmParked);
 
     const { result, rerender } = renderHook(() => useRepairWallet());
 
@@ -272,7 +289,9 @@ describe("useRepairWallet", () => {
     });
 
     await act(async () => {
-      releaseConfirm({ value: { err: null } });
+      releaseConfirm({
+        value: [{ err: null, confirmationStatus: "confirmed" }],
+      });
       await p;
     });
 
@@ -282,23 +301,23 @@ describe("useRepairWallet", () => {
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("retries with a fresh blockhash when confirmation rejects with the real expiry message", async () => {
-    // web3.js 1.98.4 reports a transaction that outlived its blockhash
-    // during CONFIRMATION as TransactionExpiredBlockheightExceededError:
-    // "Signature <sig> has expired: block height exceeded." The retry
-    // used to match only /blockhash/i, which misses this wording, so the
-    // automatic fresh-blockhash retry never fired for the most common
-    // expiry shape and the user got a dead stop instead of one more
+  it("retries with a fresh blockhash when the poll reports expiry", async () => {
+    // A transaction that outlives its blockhash during confirmation must
+    // surface as an expiry-shaped error so the automatic fresh-blockhash
+    // retry fires; matching only one library's wording historically left
+    // the most common expiry shape a dead stop instead of one more
     // approval prompt.
-    const EXPIRED = new Error(
-      "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
-    );
-    let confirmCalls = 0;
-    mocks.conn.confirmTransaction.mockImplementation(async () => {
-      confirmCalls += 1;
-      if (confirmCalls === 1) throw EXPIRED;
-      return { value: { err: null } };
+    // Poll 1 sees no status while the blockhash expires, so the bounded
+    // poll throws the expiry-shaped error and the retry machinery treats
+    // it exactly as the web3.js confirmation path did. Poll 2, on the
+    // fresh blockhash, confirms.
+    let pollCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) return { value: [null] };
+      return { value: [{ err: null, confirmationStatus: "confirmed" }] };
     });
+    mocks.conn.getBlockHeight.mockResolvedValue(1001);
     // On the failed first attempt the accounts are genuinely still open.
     mocks.conn.getMultipleAccountsInfo.mockImplementation(
       async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
@@ -321,7 +340,7 @@ describe("useRepairWallet", () => {
     // The user was asked to sign exactly twice: the expired attempt
     // plus the fresh-blockhash retry.
     expect(signCalls).toBe(2);
-    expect(confirmCalls).toBe(2);
+    expect(pollCalls).toBe(2);
   });
 
   it("reports honest partial progress when the final verification itself fails", async () => {
@@ -347,7 +366,9 @@ describe("useRepairWallet", () => {
     // Batch 1 confirms normally (no verification runs on the success
     // path). The only getMultipleAccountsInfo caller in this scenario is the
     // catch path's final verification - make it fail.
-    mocks.conn.confirmTransaction.mockResolvedValue({ value: { err: null } });
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: null, confirmationStatus: "confirmed" }],
+    });
     mocks.conn.getMultipleAccountsInfo.mockRejectedValue(
       new Error("RPC unavailable")
     );
@@ -374,18 +395,19 @@ describe("useRepairWallet", () => {
   });
 
   it("does not re-sign a confirm-time expiry when the chain already closed the accounts", async () => {
-    // The expiry idempotency proof (R4-1). confirmTransaction bounded by
-    // lastValidBlockHeight can throw "block height exceeded" in the very
+    // The expiry idempotency proof (R4-1). The bounded confirmation poll can
+    // throw "block height exceeded" in the very
     // instant the transaction landed in one of the final valid blocks: the
     // poll read stale state and gave up, but the chain moved. The retry
     // path must ask the chain FIRST - verifyAccountsClosed - and only
     // rebuild + re-sign a batch the chain still reports open. If that
     // guard ever regresses, the repair would ask the wallet for a second
     // signature to redo work that already happened.
-    const EXPIRED = new Error(
-      "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
-    );
-    mocks.conn.confirmTransaction.mockRejectedValue(EXPIRED);
+    // The poll never finds a status and the blockhash height passes: the
+    // bounded poll throws the expiry-shaped error, exactly as web3.js's
+    // bounded confirmation did.
+    mocks.conn.getSignatureStatuses.mockResolvedValue({ value: [null] });
+    mocks.conn.getBlockHeight.mockResolvedValue(1001);
     // The chain says the account is already closed: the wallet submitted
     // the transaction itself and it landed before the expiry surfaced.
     mocks.conn.getMultipleAccountsInfo.mockImplementation(
@@ -419,16 +441,18 @@ describe("useRepairWallet", () => {
   });
 
   it("treats a confirmation that resolves with an on-chain error as a failure", async () => {
-    // web3.js 1.98.4's blockhash-expiry branch can RESOLVE (not reject)
-    // with the transaction's on-chain error in value.err: when the expiry
-    // promise wins the race but the re-check poll then finds the
-    // transaction at target commitment, the strategy resolves with
-    // { value: { err } } unchecked. A landed-and-failed transaction is
-    // atomic - nothing closed, nothing moved - and must never be booked
-    // as a landed repair with success copy.
-    mocks.conn.confirmTransaction.mockResolvedValue({
-      context: { slot: 123 },
-      value: { err: { InstructionError: [0, { Custom: 311 }] } },
+    // A confirmation poll can observe the transaction landed WITH an
+    // on-chain error: status.err set at confirmed commitment. A
+    // landed-and-failed transaction is atomic - nothing closed, nothing
+    // moved - and must never be booked as a landed repair with success
+    // copy.
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [
+        {
+          err: { InstructionError: [0, { Custom: 311 }] },
+          confirmationStatus: "confirmed",
+        },
+      ],
     });
     // The accounts are genuinely still open (the transaction failed).
     mocks.conn.getMultipleAccountsInfo.mockImplementation(
@@ -458,10 +482,11 @@ describe("useRepairWallet", () => {
   });
 
   it("reports the friendly expired message when both attempts expire", async () => {
-    const EXPIRED = new Error(
-      "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
-    );
-    mocks.conn.confirmTransaction.mockRejectedValue(EXPIRED);
+    // The poll never finds a status and the blockhash height passes: the
+    // bounded poll throws the expiry-shaped error, exactly as web3.js's
+    // bounded confirmation did.
+    mocks.conn.getSignatureStatuses.mockResolvedValue({ value: [null] });
+    mocks.conn.getBlockHeight.mockResolvedValue(1001);
     mocks.conn.getMultipleAccountsInfo.mockImplementation(
       async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
     );
@@ -555,17 +580,17 @@ describe("useRepairWallet", () => {
         )
     );
 
-    let confirmCalls = 0;
-    mocks.conn.confirmTransaction.mockImplementation(async () => {
-      confirmCalls += 1;
-      if (confirmCalls === 1) {
-        throw new Error(
-          "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
-        );
+    let pollCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) {
+        // No status yet; the height check then throws the expiry error.
+        return { value: [null] };
       }
       // The reconciled 13-account retry lands cleanly.
-      return { value: { err: null } };
+      return { value: [{ err: null, confirmationStatus: "confirmed" }] };
     });
+    mocks.conn.getBlockHeight.mockResolvedValue(1001);
 
     // Capture what each approval actually contained: close count and the
     // fee transfer lamports. In this web3.js build the System transfer's
@@ -606,7 +631,7 @@ describe("useRepairWallet", () => {
     expect(result.current.status).toBe("done");
     expect(result.current.closedCount).toBe(20);
     expect(result.current.recoveredLamports).toBe(20n * 2039280n);
-    expect(confirmCalls).toBe(2);
+    expect(pollCalls).toBe(2);
   });
 
   it("still reports honestly when the reconciled retry also fails", async () => {
@@ -625,19 +650,21 @@ describe("useRepairWallet", () => {
         )
     );
 
-    let confirmCalls = 0;
+    let pollCalls = 0;
     let lastCloses = 0;
-    mocks.conn.confirmTransaction.mockImplementation(async () => {
-      confirmCalls += 1;
-      if (confirmCalls === 1) {
-        throw new Error(
-          "Signature 5oMNkAGaQ0BsTQ6tCbKWZPaD9q4x5Vp…the signature has expired: block height exceeded."
-        );
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) {
+        // No status yet; the height check then throws the expiry error.
+        return { value: [null] };
       }
+      // The reconciled retry's confirmation query itself fails with a
+      // non-expiry error: not retryable, not a landed failure.
       throw new Error(
         "Transaction 62hkW… failed: TransactionExecutionError: InstructionError { Custom: 3 }"
       );
     });
+    mocks.conn.getBlockHeight.mockResolvedValue(1001);
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
       lastCloses = tx.instructions.filter((ix) =>
         ix.programId.toBase58().startsWith("Token")

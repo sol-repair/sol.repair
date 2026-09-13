@@ -45,6 +45,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
+import type { Connection } from "@solana/web3.js";
 
 import {
   buildCloseAccountInstructions,
@@ -135,6 +136,58 @@ const MAX_ATTEMPTS = 2;
  *  the repair on the second. */
 function isBlockhashExpiry(message: string): boolean {
   return /blockhash|block height exceeded/i.test(message);
+}
+
+/** Interval between getSignatureStatuses polls during confirmation. */
+const CONFIRM_POLL_INTERVAL_MS = 1500;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Confirm a sent transaction by polling getSignatureStatuses over HTTP,
+ * bounded by the blockhash the transaction was built with. This replaces
+ * web3.js's websocket-based confirmTransaction, which cannot run on
+ * failover provider endpoints that lack subscription support.
+ *
+ * Throws:
+ *   - FriendlyError when the poll observes the transaction landed WITH an
+ *     on-chain error. A landed-and-failed transaction reverted atomically:
+ *     nothing closed, nothing moved. The shared catch verifies on-chain
+ *     and reports honestly.
+ *   - a blockhash-expiry error, worded so isBlockhashExpiry matches, when
+ *     the blockhash died before any status appeared: the retry machinery
+ *     treats it exactly as the previous confirmation path did.
+ */
+async function confirmByPolling(
+  connection: Connection,
+  signature: string,
+  lastValidBlockHeight: number
+): Promise<void> {
+  for (;;) {
+    const statuses = await connection.getSignatureStatuses([signature], {
+      searchTransactionHistory: false,
+    });
+    const status = statuses.value[0];
+    if (status?.err) {
+      throw new FriendlyError(
+        "The transaction was confirmed on-chain but failed. Nothing was closed and nothing was lost - run the repair again."
+      );
+    }
+    if (
+      status?.confirmationStatus === "confirmed" ||
+      status?.confirmationStatus === "finalized"
+    ) {
+      return;
+    }
+    const blockHeight = await connection.getBlockHeight({
+      commitment: "confirmed",
+    });
+    if (blockHeight > lastValidBlockHeight) {
+      throw new Error("Blockhash block height exceeded");
+    }
+    await sleep(CONFIRM_POLL_INTERVAL_MS);
+  }
 }
 
 /** An error whose message is ALREADY user-facing copy, thrown by this
@@ -291,31 +344,18 @@ export function useRepairWallet() {
                   signed.serialize()
                 );
 
-                // 4. Wait for confirmation. Passing the blockhash +
-                //    lastValidBlockHeight (rather than just the signature)
-                //    bounds the wait: confirmation ends once the blockhash
-                //    expires, instead of polling indefinitely.
-                const confirmation = await connection.confirmTransaction(
-                  {
-                    signature: sentSignature,
-                    blockhash: transaction.recentBlockhash!,
-                    lastValidBlockHeight: transaction.lastValidBlockHeight!,
-                  },
-                  "confirmed"
+                // 4. Wait for confirmation by polling getSignatureStatuses
+                //    over HTTP. The websocket-based confirmTransaction is
+                //    endpoint-bound: failover provider endpoints (e.g.
+                //    Alchemy devnet) do not support signatureSubscribe, so
+                //    a repair would hang there. Polling is bounded by the
+                //    same lastValidBlockHeight the transaction was built
+                //    with, so it can never wait indefinitely.
+                await confirmByPolling(
+                  connection,
+                  sentSignature,
+                  transaction.lastValidBlockHeight!
                 );
-                // The normal confirmation path rejects failed transactions,
-                // but web3.js's blockhash-expiry branch RESOLVES with the
-                // on-chain error in value.err instead (expiry won the
-                // race, the re-check poll then found the transaction at
-                // target commitment). A landed-and-failed transaction
-                // reverted atomically: nothing closed, nothing moved.
-                // Treat it as the failure it is; the shared catch then
-                // verifies on-chain and reports honestly.
-                if (confirmation.value.err) {
-                  throw new FriendlyError(
-                    "The transaction was confirmed on-chain but failed. Nothing was closed and nothing was lost - run the repair again."
-                  );
-                }
 
                 batchLanded = true;
               } catch (sendError) {
