@@ -139,3 +139,23 @@ export const RPC_ENDPOINTS: string[] = getRpcEndpoints(
  * consumers (the wallet provider, the fee ledger) keep this contract.
  */
 export const RPC_ENDPOINT: string = RPC_ENDPOINTS[0];
+
+/**
+ * Origins of every endpoint in the active list, for the CSP connect-src
+ * allowlist: the browser must be able to reach the primary AND every
+ * documented failover target. Malformed entries contribute nothing.
+ */
+export function getRpcEndpointOrigins(): string[] {
+  const origins = new Set<string>();
+  for (const endpoint of RPC_ENDPOINTS) {
+    try {
+      const origin = new URL(endpoint).origin;
+      if (origin.startsWith("http://") || origin.startsWith("https://")) {
+        origins.add(origin);
+      }
+    } catch {
+      // A malformed endpoint contributes nothing to the allowlist.
+    }
+  }
+  return [...origins];
+}

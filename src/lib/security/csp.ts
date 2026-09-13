@@ -21,14 +21,28 @@ const PUBLIC_RPC_ORIGINS = [
 export function buildCspHeader({
   isDev = false,
   providerRpcEndpoint,
+  providerRpcEndpoints = [],
 }: {
   isDev?: boolean;
   providerRpcEndpoint?: string;
+  /** Origins of every endpoint in the active network's ordered list, so
+   *  provider failover targets stay callable from the browser. */
+  providerRpcEndpoints?: string[];
 } = {}): string {
   const connectOrigins = new Set<string>(["'self'", ...PUBLIC_RPC_ORIGINS]);
   if (providerRpcEndpoint) {
     try {
       const origin = new URL(providerRpcEndpoint).origin;
+      if (origin.startsWith("http://") || origin.startsWith("https://")) {
+        connectOrigins.add(origin);
+      }
+    } catch {
+      // A malformed endpoint contributes nothing to the allowlist.
+    }
+  }
+  for (const endpoint of providerRpcEndpoints) {
+    try {
+      const origin = new URL(endpoint).origin;
       if (origin.startsWith("http://") || origin.startsWith("https://")) {
         connectOrigins.add(origin);
       }

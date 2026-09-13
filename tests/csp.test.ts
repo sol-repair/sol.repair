@@ -54,4 +54,26 @@ describe("buildCspHeader", () => {
     const devnetMatches = header.split(" ").filter((t) => t.includes("api.devnet")).length;
     expect(devnetMatches).toBe(1);
   });
+
+  it("adds every origin from the provider endpoint list", () => {
+    const header = buildCspHeader({
+      providerRpcEndpoints: [
+        "https://solana-devnet.g.alchemy.com/v2/key",
+        "https://api.devnet.solana.com",
+      ],
+    });
+    expect(header).toContain("https://solana-devnet.g.alchemy.com");
+    expect(header).toContain("https://api.devnet.solana.com");
+    // No duplicate when a list entry matches a public origin.
+    const devnetMatches = header.split(" ").filter((t) => t.includes("api.devnet")).length;
+    expect(devnetMatches).toBe(1);
+  });
+
+  it("drops malformed entries from the provider endpoint list", () => {
+    const header = buildCspHeader({
+      providerRpcEndpoints: ["not a url", "https://good.test/v2/k"],
+    });
+    expect(header).toContain("https://good.test");
+    expect(header).not.toContain("not a url");
+  });
 });

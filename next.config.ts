@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { buildCspHeader } from "./src/lib/security/csp";
+import { getRpcEndpointOrigins } from "./src/lib/solana/connection";
 
 const nextConfig: NextConfig = {
   async headers() {
@@ -16,7 +17,10 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: buildCspHeader({
               isDev: process.env.NODE_ENV === "development",
-              providerRpcEndpoint: process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT,
+              // Every origin in the active network's ordered endpoint
+              // list: the browser must reach the primary and each
+              // documented failover target.
+              providerRpcEndpoints: getRpcEndpointOrigins(),
             }),
           },
           { key: "X-Frame-Options", value: "DENY" },
