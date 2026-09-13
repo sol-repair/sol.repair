@@ -61,13 +61,21 @@ const PUBLIC_ENDPOINTS: Record<SolanaNetwork, string> = {
  * Set per deployment via Vercel env vars. Values are quota keys and ship
  * to the browser (NEXT_PUBLIC_ prefix), exactly like the legacy single
  * endpoint they extend.
+ *
+ * IMPORTANT: these are read as LITERAL process.env references at module
+ * scope, because Next.js inlines only literal NEXT_PUBLIC_* references
+ * into the browser bundle - dynamic access (env[variableKey]) compiles
+ * to undefined in the client and the list would silently degrade to the
+ * public endpoint.
  */
-const ENV_VAR_BY_NETWORK: Record<SolanaNetwork, string> = {
-  localhost: "NEXT_PUBLIC_LOCALHOST_RPC_ENDPOINTS",
-  devnet: "NEXT_PUBLIC_DEVNET_RPC_ENDPOINTS",
-  "mainnet-beta": "NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS",
-  testnet: "NEXT_PUBLIC_TESTNET_RPC_ENDPOINTS",
+const CONFIGURED_LISTS: Record<SolanaNetwork, string | undefined> = {
+  localhost: process.env.NEXT_PUBLIC_LOCALHOST_RPC_ENDPOINTS,
+  devnet: process.env.NEXT_PUBLIC_DEVNET_RPC_ENDPOINTS,
+  "mainnet-beta": process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS,
+  testnet: process.env.NEXT_PUBLIC_TESTNET_RPC_ENDPOINTS,
 };
+
+const LEGACY_MAINNET_ENDPOINT = process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT;
 
 /**
  * Split a comma-separated endpoint list: trimmed, empties dropped,
@@ -86,7 +94,7 @@ export function parseEndpointList(raw: string | undefined): string[] {
 
 /**
  * The network's ordered endpoint list. Entries, in order:
- *   1. the network's NEXT_PUBLIC_<NETWORK>_RPC_ENDPOINTS list, if set
+ *   1. the network's configured provider list, if set
  *   2. mainnet only: the legacy NEXT_PUBLIC_MAINNET_RPC_ENDPOINT single
  *      override, kept working until deployments move to the list variable
  *   3. the public cluster endpoint, always last, so a misconfigured
@@ -98,12 +106,13 @@ export function parseEndpointList(raw: string | undefined): string[] {
  */
 export function getRpcEndpoints(
   network: SolanaNetwork,
-  env: Record<string, string | undefined>
+  configuredLists: Partial<Record<SolanaNetwork, string | undefined>>,
+  legacyMainnetEndpoint: string | undefined
 ): string[] {
-  const configured = parseEndpointList(env[ENV_VAR_BY_NETWORK[network]]);
+  const configured = parseEndpointList(configuredLists[network]);
   const legacy =
     network === "mainnet-beta"
-      ? parseEndpointList(env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT)
+      ? parseEndpointList(legacyMainnetEndpoint)
       : [];
   const out: string[] = [];
   for (const endpoint of [...configured, ...legacy, PUBLIC_ENDPOINTS[network]]) {
@@ -119,7 +128,11 @@ export function getRpcEndpoints(
  * tracked follow-up - today the list defines the order deployments
  * prefer, with the public endpoint as the built-in safety net).
  */
-export const RPC_ENDPOINTS: string[] = getRpcEndpoints(SOLANA_NETWORK, process.env);
+export const RPC_ENDPOINTS: string[] = getRpcEndpoints(
+  SOLANA_NETWORK,
+  CONFIGURED_LISTS,
+  LEGACY_MAINNET_ENDPOINT
+);
 
 /**
  * The primary endpoint: the first entry of the ordered list. Existing

@@ -48,40 +48,53 @@ describe("parseEndpointList", () => {
 
 describe("getRpcEndpoints", () => {
   it("puts the configured provider list first and the public endpoint last", () => {
-    const endpoints = getRpcEndpoints("devnet", {
-      NEXT_PUBLIC_DEVNET_RPC_ENDPOINTS: "https://prov.test",
-    });
+    const endpoints = getRpcEndpoints(
+      "devnet",
+      { devnet: "https://prov.test" },
+      undefined
+    );
     expect(endpoints).toEqual(["https://prov.test", DEVNET_PUBLIC]);
   });
 
   it("never lets a mainnet override reach another network", () => {
-    const endpoints = getRpcEndpoints("devnet", {
-      NEXT_PUBLIC_MAINNET_RPC_ENDPOINT: "https://mainnet-provider.test",
-      NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS: "https://mainnet-list.test",
-    });
+    const endpoints = getRpcEndpoints(
+      "devnet",
+      {
+        devnet: undefined,
+        "mainnet-beta": "https://mainnet-list.test",
+      },
+      "https://mainnet-legacy.test"
+    );
     expect(endpoints).toEqual([DEVNET_PUBLIC]);
   });
 
   it("mainnet falls back to the legacy single endpoint, then the public one", () => {
-    const endpoints = getRpcEndpoints("mainnet-beta", {
-      NEXT_PUBLIC_MAINNET_RPC_ENDPOINT: "https://legacy.test",
-    });
+    const endpoints = getRpcEndpoints(
+      "mainnet-beta",
+      { "mainnet-beta": undefined },
+      "https://legacy.test"
+    );
     expect(endpoints).toEqual(["https://legacy.test", MAINNET_PUBLIC]);
   });
 
   it("mainnet prefers the list variable over the legacy one", () => {
-    const endpoints = getRpcEndpoints("mainnet-beta", {
-      NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS: "https://list.test",
-      NEXT_PUBLIC_MAINNET_RPC_ENDPOINT: "https://legacy.test",
-    });
-    expect(endpoints).toEqual(["https://list.test", "https://legacy.test", MAINNET_PUBLIC]);
+    const endpoints = getRpcEndpoints(
+      "mainnet-beta",
+      { "mainnet-beta": "https://list.test" },
+      "https://legacy.test"
+    );
+    expect(endpoints).toEqual([
+      "https://list.test",
+      "https://legacy.test",
+      MAINNET_PUBLIC,
+    ]);
   });
 
   it("defaults every network to its public endpoint", () => {
-    expect(getRpcEndpoints("devnet", {})).toEqual([DEVNET_PUBLIC]);
-    expect(getRpcEndpoints("mainnet-beta", {})).toEqual([MAINNET_PUBLIC]);
-    expect(getRpcEndpoints("localhost", {})).toEqual(["http://localhost:8899"]);
-    expect(getRpcEndpoints("testnet", {})).toEqual(["https://api.testnet.solana.com"]);
+    expect(getRpcEndpoints("devnet", {}, undefined)).toEqual([DEVNET_PUBLIC]);
+    expect(getRpcEndpoints("mainnet-beta", {}, undefined)).toEqual([MAINNET_PUBLIC]);
+    expect(getRpcEndpoints("localhost", {}, undefined)).toEqual(["http://localhost:8899"]);
+    expect(getRpcEndpoints("testnet", {}, undefined)).toEqual(["https://api.testnet.solana.com"]);
   });
 });
 
