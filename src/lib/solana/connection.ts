@@ -44,9 +44,9 @@ export const NETWORK_LABEL: string =
 export const IS_MAINNET: boolean = SOLANA_NETWORK === "mainnet-beta";
 
 /**
- * Public Solana endpoints, used by default for every network. The mainnet
- * build can be pointed at a dedicated RPC instead; see MAINNET_RPC_ENDPOINT
- * below.
+ * Public Solana endpoints, the always-present last entry of every
+ * network's endpoint list. The mainnet build can be pointed at dedicated
+ * providers instead; see getRpcEndpoints below.
  */
 const PUBLIC_ENDPOINTS: Record<SolanaNetwork, string> = {
   // Local test validator (solana-test-validator). For development only.
@@ -57,15 +57,72 @@ const PUBLIC_ENDPOINTS: Record<SolanaNetwork, string> = {
 };
 
 /**
- * Optional dedicated RPC endpoint for the mainnet build. The public
- * mainnet endpoint is rate limited per IP and flaky under load, so
- * production points at a provider endpoint (set via Vercel env vars)
- * instead. Devnet and localhost always use the public endpoints: this
- * override can never redirect a devnet build at mainnet.
+ * Comma-separated provider endpoint lists, ordered most-preferred first.
+ * Set per deployment via Vercel env vars. Values are quota keys and ship
+ * to the browser (NEXT_PUBLIC_ prefix), exactly like the legacy single
+ * endpoint they extend.
  */
-const MAINNET_RPC_ENDPOINT = process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT;
+const ENV_VAR_BY_NETWORK: Record<SolanaNetwork, string> = {
+  localhost: "NEXT_PUBLIC_LOCALHOST_RPC_ENDPOINTS",
+  devnet: "NEXT_PUBLIC_DEVNET_RPC_ENDPOINTS",
+  "mainnet-beta": "NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS",
+  testnet: "NEXT_PUBLIC_TESTNET_RPC_ENDPOINTS",
+};
 
-export const RPC_ENDPOINT: string =
-  IS_MAINNET && MAINNET_RPC_ENDPOINT
-    ? MAINNET_RPC_ENDPOINT
-    : PUBLIC_ENDPOINTS[SOLANA_NETWORK];
+/**
+ * Split a comma-separated endpoint list: trimmed, empties dropped,
+ * duplicates removed, order preserved.
+ */
+export function parseEndpointList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed === "" || out.includes(trimmed)) continue;
+    out.push(trimmed);
+  }
+  return out;
+}
+
+/**
+ * The network's ordered endpoint list. Entries, in order:
+ *   1. the network's NEXT_PUBLIC_<NETWORK>_RPC_ENDPOINTS list, if set
+ *   2. mainnet only: the legacy NEXT_PUBLIC_MAINNET_RPC_ENDPOINT single
+ *      override, kept working until deployments move to the list variable
+ *   3. the public cluster endpoint, always last, so a misconfigured
+ *      provider degrades to the public endpoint instead of nothing
+ *
+ * A network can never inherit another network's override: the list is
+ * keyed by the network, and the legacy mainnet variable is read only
+ * when the network is mainnet-beta.
+ */
+export function getRpcEndpoints(
+  network: SolanaNetwork,
+  env: Record<string, string | undefined>
+): string[] {
+  const configured = parseEndpointList(env[ENV_VAR_BY_NETWORK[network]]);
+  const legacy =
+    network === "mainnet-beta"
+      ? parseEndpointList(env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT)
+      : [];
+  const out: string[] = [];
+  for (const endpoint of [...configured, ...legacy, PUBLIC_ENDPOINTS[network]]) {
+    if (!out.includes(endpoint)) out.push(endpoint);
+  }
+  return out;
+}
+
+/**
+ * The active network's ordered endpoint list. The first entry is the
+ * primary connection used by the wallet provider and every RPC read;
+ * the rest are documented failover targets (per-call failover is a
+ * tracked follow-up - today the list defines the order deployments
+ * prefer, with the public endpoint as the built-in safety net).
+ */
+export const RPC_ENDPOINTS: string[] = getRpcEndpoints(SOLANA_NETWORK, process.env);
+
+/**
+ * The primary endpoint: the first entry of the ordered list. Existing
+ * consumers (the wallet provider, the fee ledger) keep this contract.
+ */
+export const RPC_ENDPOINT: string = RPC_ENDPOINTS[0];
