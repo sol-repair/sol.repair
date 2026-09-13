@@ -781,37 +781,69 @@ export default function Home() {
                   </p>
                 )}
 
-                <div className="mt-3 space-y-1 rounded-md border border-zinc-800 bg-black/40 p-3 font-mono text-xs text-zinc-400">
-                  <p>Accounts being closed: {runAccounts.length}</p>
+                {/* The headline: the number a returning user is here
+                 *  for, before any caveat. */}
+                <div className="mt-4">
+                  <p className="text-2xl font-semibold tracking-tight text-emerald-400">
+                    ~{lamportsToSol(runLamports)} SOL
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-400">
+                    returning to your wallet
+                  </p>
+                </div>
+
+                {/* Ledger rows: aligned label/value pairs, one fact per
+                 *  row; the caveats that used to live inside these
+                 *  lines are compact footnotes below. */}
+                <div className="mt-4 space-y-2 rounded-md border border-zinc-800 bg-black/40 p-3 text-sm">
+                  <p className="flex items-baseline justify-between gap-3">
+                    <span className="text-zinc-400">
+                      Accounts being closed:
+                    </span>
+                    <span className="font-mono text-zinc-100">
+                      {runAccounts.length}
+                    </span>
+                  </p>
                   {revokeCount > 0 && (
-                    <p>
+                    <p className="text-xs leading-relaxed text-zinc-400">
                       Delegated accounts in this run: {revokeCount}. Each
                       gets a revoke instruction first so the delegate is
                       cleared before the close.
                     </p>
                   )}
-                  <p>
-                    Total SOL returning to your wallet: ~
-                    {lamportsToSol(runLamports)} SOL
+                  {feeReady ? (
+                    <p className="flex items-baseline justify-between gap-3">
+                      <span className="text-zinc-400">
+                        Service fee (1% of recovered):
+                      </span>
+                      <span className="font-mono text-zinc-100">
+                        ~{lamportsToSol(serviceFeeLamports)} SOL
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-zinc-400">
+                      Service fee: none on this repair (the fee account is
+                      not ready yet)
+                    </p>
+                  )}
+                  <p className="flex items-baseline justify-between gap-3">
+                    <span className="text-zinc-400">Network fee:</span>
+                    <span className="text-right font-mono text-zinc-100">
+                      ~{lamportsToSol(5000n * BigInt(batchCount))} SOL base (
+                      {batchCount} × 0.000005)
+                    </span>
                   </p>
-                  <p>
-                    Network fee: ~
-                    {lamportsToSol(5000n * BigInt(batchCount))} SOL base (
-                    {batchCount} × 0.000005), plus the priority fee your
-                    wallet adds when signing (with Phantom&rsquo;s default
-                    settings that has recently run between about 0.000075
-                    and 0.00015 SOL per transaction), all to the Solana
-                    network, not to us
+                  <p className="border-t border-zinc-800 pt-2 text-xs leading-relaxed text-zinc-500">
+                    Plus the priority fee your wallet adds when signing.
+                    With Phantom&rsquo;s default settings that has recently
+                    run between about 0.000075 and 0.00015 SOL per
+                    transaction.
                   </p>
-                  <p>
-                    Your wallet needs this small balance before signing — the
+                  <p className="text-xs leading-relaxed text-zinc-500">
+                    Network fees go to the Solana network, not to us. Your
+                    wallet needs this small balance before signing. The
                     network fee can&rsquo;t be paid from the rent being
                     recovered.
-                  </p>
-                  <p>
-                    {feeReady
-                      ? `Service fee (1% of recovered): ~${lamportsToSol(serviceFeeLamports)} SOL, one transfer to the published fee address`
-                      : "Service fee: none on this repair (the fee account is not ready yet)"}
                   </p>
                 </div>
 

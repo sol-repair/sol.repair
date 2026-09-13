@@ -162,18 +162,17 @@ describe("repair ceiling on the review and done screens", () => {
         /Run the repair again after it finishes to close the remaining 150 accounts\./
       )
     ).toBeTruthy();
-    expect(screen.getByText("Accounts being closed: 100")).toBeTruthy();
+    const closedRow = screen.getByText(/Accounts being closed:/).closest("p");
+    expect(closedRow?.textContent).toContain("100");
 
     // Transaction count, network fee, and service fee are computed over
     // the capped run (5 batches), not the full 250-account selection
     // (which would be 13 batches).
     expect(screen.getByText(/\(5 × 0\.000005\)/)).toBeTruthy();
-    const feeLine = screen.getByText(
-      (content) =>
-        content.includes(`~${lamportsToSol(EXPECTED_SERVICE_FEE)} SOL`) &&
-        content.includes("1% of recovered")
+    const feeRow = screen.getByText(/1% of recovered/).closest("p");
+    expect(feeRow?.textContent).toContain(
+      `~${lamportsToSol(EXPECTED_SERVICE_FEE)} SOL`
     );
-    expect(feeLine).toBeTruthy();
   });
 
   it("changes nothing under the ceiling", async () => {
@@ -194,7 +193,8 @@ describe("repair ceiling on the review and done screens", () => {
 
     await screen.findByText(/Service fee: none on this repair/);
     expect(screen.getByText(/closing 2 empty token accounts/)).toBeTruthy();
-    expect(screen.getByText("Accounts being closed: 2")).toBeTruthy();
+    const closedRow = screen.getByText(/Accounts being closed:/).closest("p");
+    expect(closedRow?.textContent).toContain("2");
     expect(screen.queryByText(/first 100/)).toBeNull();
     expect(screen.queryByText(/remaining/)).toBeNull();
   });

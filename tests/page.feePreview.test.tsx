@@ -37,6 +37,7 @@ import Home from "../src/app/page";
 import { feeAmountLamports, getFeeRecipient } from "../src/lib/solana/fees";
 import {
   TOKEN_PROGRAM_ID,
+  lamportsToSol,
   type ClosableAccount,
   type ScanResult,
 } from "../src/lib/solana/tokenAccounts";
@@ -240,11 +241,27 @@ describe("repair confirmation fee preview parity", () => {
     openConfirmation();
 
     await screen.findByText(/Service fee \(1% of recovered\)/);
-    const line = screen.getByText(/Network fee:/);
-    expect(line.textContent).toContain("0.000005");
-    expect(line.textContent).toMatch(
-      /plus the priority fee your wallet adds when signing \(with Phantom’s default settings that has recently run between about 0\.000075 and 0\.00015 SOL per transaction\), all to the Solana network, not to us/
+    // The headline: the recoverable amount, big and green, with its
+    // label - the one number a returning user is here for.
+    const headline = screen
+      .getByText(/returning to your wallet/)
+      .closest("div");
+    expect(headline?.textContent).toContain(
+      `~${lamportsToSol(2n * 2039280n)} SOL`
     );
+    // Fee rows are aligned label/value pairs; the value carries the math.
+    const networkRow = screen.getByText(/Network fee:/).closest("p");
+    expect(networkRow?.textContent).toContain("0.000005");
+    expect(networkRow?.textContent).toContain("(1 × 0.000005)");
+    // The priority-fee detail is its own compact footnote under the rows,
+    // no longer a run-on sentence inside the fee row.
+    const priority = screen.getByText(/priority fee your wallet adds when signing/);
+    expect(priority.textContent).toMatch(
+      /between about 0\.000075 and 0\.00015 SOL per transaction/
+    );
+    expect(
+      screen.getByText(/Network fees go to the Solana network, not to us/)
+    ).toBeTruthy();
     // The old unquantified wording is gone.
     expect(screen.queryByText(/plus any priority fee your wallet/)).toBeNull();
   });
