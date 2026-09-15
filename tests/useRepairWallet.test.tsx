@@ -481,6 +481,40 @@ describe("useRepairWallet", () => {
     expect(result.current.error).not.toMatch(/expired while waiting/i);
   });
 
+  it("retries with a fresh blockhash when the wallet refuses a stale transaction", async () => {
+    // Live-observed shape (Sep 14 devnet): Phantom simulates the
+    // transaction BEFORE showing the prompt, and on a hot cluster that
+    // simulation can outlive the blockhash window - the adapter then
+    // rejects signing with an expiry-shaped error and no prompt ever
+    // showed. That refusal must feed the same fresh-blockhash retry as
+    // a failed send, not dead-stop the repair after zero prompts.
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      if (signCalls === 1) {
+        throw new Error("Transaction expired");
+      }
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+    // The chain says the accounts are genuinely still open.
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    // The refusal was retried with a fresh blockhash and landed.
+    expect(result.current.status).toBe("done");
+    expect(signCalls).toBe(2);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.getLatestBlockhash).toHaveBeenCalledTimes(2);
+  });
+
   it("reports the friendly expired message when both attempts expire", async () => {
     // The poll never finds a status and the blockhash height passes: the
     // bounded poll throws the expiry-shaped error, exactly as web3.js's

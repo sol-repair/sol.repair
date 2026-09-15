@@ -26,9 +26,11 @@
  *   3. The signed transaction is sent to the network
  *   4. We wait for confirmation
  *   5. If the blockhash expired (the user sat on the approval popup while
- *      the network moved on), we rebuild with a FRESH blockhash and ask for
- *      one more signature. The signed transaction cannot be reused - a new
- *      blockhash changes the bytes - so Phantom prompts again.
+ *      the network moved on, or the wallet refused to sign because its
+ *      own pre-prompt simulation outlived the window), we rebuild with a
+ *      FRESH blockhash and ask for one more signature. The signed
+ *      transaction cannot be reused - a new blockhash changes the bytes -
+ *      so Phantom prompts again.
  *
  * Submission race handling: some wallets (notably Phantom when confirming a
  * transaction that failed the wallet's internal simulation) submit the signed
@@ -121,21 +123,24 @@ const INITIAL_STATE: RepairState = {
  */
 export const MAX_ACCOUNTS_PER_RUN = 100;
 
-// One retry per batch: a blockhash lives ~60-90s. If the user sits on the
-// wallet approval popup that long (easy on a slow network), the transaction
-// is dead on arrival and the only fix is a fresh blockhash and a new
-// signature.
+// One retry per batch: a blockhash lives 150 slots, which is roughly
+// 30-90 seconds depending on the cluster's slot pace (devnet has run
+// hot at ~5 slots per second; mainnet runs ~400ms slots). If the
+// approval popup - or the wallet's own pre-prompt simulation - outlives
+// that window, the transaction is dead on arrival and the only fix is a
+// fresh blockhash and a new signature.
 const MAX_ATTEMPTS = 2;
 
-/** web3.js reports a spent blockhash two different ways: "Blockhash
- *  not found" when the RPC rejects the submission outright, and
- *  "Signature ... has expired: block height exceeded." when the
- *  transaction dies while awaiting confirmation (the common shape
- *  when the user sat on the approval). Both must trigger the
- *  fresh-blockhash retry; matching only the first used to dead-stop
- *  the repair on the second. */
+/** A spent blockhash surfaces with several wordings: "Blockhash not
+ *  found" when the RPC rejects the submission outright, "Signature
+ *  ... has expired: block height exceeded." when the transaction dies
+ *  while awaiting confirmation, and Phantom's "Transaction expired" /
+ *  "TransactionExpiredBlockheightExceededError" when its pre-prompt
+ *  simulation outlived the window and it refuses to sign at all. All
+ *  of them must trigger the fresh-blockhash retry; matching only some
+ *  of these shapes historically dead-stopped the repair on the rest. */
 function isBlockhashExpiry(message: string): boolean {
-  return /blockhash|block height exceeded/i.test(message);
+  return /blockhash|block height|blockheight|expired/i.test(message);
 }
 
 /** Interval between getSignatureStatuses polls during confirmation. */
@@ -305,40 +310,48 @@ export function useRepairWallet() {
             if (fee) instructions.push(fee);
             const progress = { current: b + 1, total: batches.length };
             let batchLanded = false;
+            // The signature that identifies the transaction this batch
+            // actually landed with, when one exists. Null when the batch
+            // was closed by something else entirely (a wallet-refusal
+            // attempt never signed, then the chain check found the
+            // accounts already closed).
+            let landedSignature: string | null = null;
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS && !batchLanded; attempt++) {
-              // 1. Assemble the unsigned transaction (fresh blockhash each
-              //    attempt - this is the whole point of the retry).
-              setRunState({ status: "building", progress });
-              const transaction = await buildTransaction(
-                connection,
-                repairOwner,
-                instructions
-              );
-
-              // 2. Hand the unsigned transaction to the wallet for signing.
-              //    This is where Phantom pops up and the user clicks Approve.
-              //    Nothing is signed until the user explicitly approves.
-              setRunState({ status: "awaiting-signature", progress });
-              const signed = await signer(transaction);
-
-              // The signature is derived from the signed payload itself, so it
-              // identifies this exact transaction no matter who submits it -
-              // our app or the wallet's own submission.
-              const signatureBytes = signed.signatures[0]?.signature;
-              if (!signatureBytes) {
-                throw new FriendlyError(
-                  "Wallet returned a transaction without a signature. Nothing was sent."
-                );
-              }
-              const signature = bs58.encode(signatureBytes);
-              setRunState({
-                status: "sending",
-                signature: confirmed[0] ?? signature,
-                signatures: [...confirmed],
-              });
-
               try {
+                // 1. Assemble the unsigned transaction (fresh blockhash
+                //    each attempt - this is the whole point of the retry).
+                setRunState({ status: "building", progress });
+                const transaction = await buildTransaction(
+                  connection,
+                  repairOwner,
+                  instructions
+                );
+
+                // 2. Hand the unsigned transaction to the wallet for
+                //    signing. This is where Phantom pops up and the user
+                //    clicks Approve. Nothing is signed until the user
+                //    explicitly approves.
+                setRunState({ status: "awaiting-signature", progress });
+                const signed = await signer(transaction);
+
+                // The signature is derived from the signed payload itself,
+                // so it identifies this exact transaction no matter who
+                // submits it - our app or the wallet's own submission.
+                const signatureBytes = signed.signatures[0]?.signature;
+                if (!signatureBytes) {
+                  throw new FriendlyError(
+                    "Wallet returned a transaction without a signature. Nothing was sent."
+                  );
+                }
+                const signature = bs58.encode(signatureBytes);
+                landedSignature = signature;
+                setRunState({
+                  status: "sending",
+                  signature: confirmed[0] ?? signature,
+                  signatures: [...confirmed],
+                });
+
                 // 3. Send the signed transaction to the network.
                 const sentSignature = await connection.sendRawTransaction(
                   signed.serialize()
@@ -358,32 +371,41 @@ export function useRepairWallet() {
                 );
 
                 batchLanded = true;
-              } catch (sendError) {
-                // Our submission failed - but that may not mean the repair
-                // failed. The wallet may have submitted the transaction itself
-                // and it may have already landed. Ask the chain what actually
-                // happened.
+              } catch (attemptError) {
+                // A failed attempt covers more than a failed send. The
+                // wallet may have submitted the transaction itself before
+                // our send ran (some wallets do, when their own
+                // simulation failed), or it may have refused to sign at
+                // all because its pre-prompt simulation outlived the
+                // blockhash window - the adapter rejects with an
+                // expiry-shaped error and no prompt ever showed. Every
+                // shape gets the same honest treatment: ask the chain
+                // what actually happened, and retry with a fresh
+                // blockhash when the failure was expiry-shaped.
                 // Not "verifying": verifying is only for transactions this
-                // app knows were sent. Here the submission failed and the
-                // wallet may have submitted independently, so nothing
-                // about "sent" is proven yet. The UI must not say so.
+                // app knows were sent. Here the submission may have failed
+                // or never happened, and the wallet may have submitted
+                // independently, so nothing about "sent" is proven yet.
+                // The UI must not say so.
                 setRunState({ status: "checking", progress });
 
                 const { closedPubkeys, stillOpenPubkeys } =
                   await verifyAccountsClosed(connection, batch);
 
                 if (closedPubkeys.length === batch.length) {
-                  // Everything in this batch is closed. The repair succeeded;
-                  // our submission simply lost the race. Fall through to the
-                  // bookkeeping below (a break here would skip it).
+                  // Everything in this batch is closed. The repair
+                  // succeeded; our submission simply lost the race (or the
+                  // wallet refused this attempt while something else
+                  // closed the accounts). Fall through to the bookkeeping
+                  // below (a break here would skip it).
                   batchLanded = true;
                 } else {
-                  // Not landed. An expired blockhash is retryable with a fresh
-                  // one; anything else fails this batch.
+                  // Not landed. An expired blockhash is retryable with a
+                  // fresh one; anything else fails this batch.
                   const message =
-                    sendError instanceof Error
-                      ? sendError.message
-                      : String(sendError);
+                    attemptError instanceof Error
+                      ? attemptError.message
+                      : String(attemptError);
                   if (
                     attempt < MAX_ATTEMPTS &&
                     isBlockhashExpiry(message)
@@ -406,14 +428,17 @@ export function useRepairWallet() {
                       ? buildFeeTransfer(repairOwner, stillOpenBatch)
                       : null;
                     if (retryFee) instructions.push(retryFee);
+                    // Nothing landed with the refused attempt's bytes; a
+                    // retry that lands carries its own signature.
+                    landedSignature = null;
                     continue;
                   }
-                  throw sendError;
+                  throw attemptError;
                 }
               }
 
               if (batchLanded) {
-                confirmed.push(signature);
+                if (landedSignature) confirmed.push(landedSignature);
                 for (const a of batch) closedSoFar.add(a.pubkey);
                 setRunState({
                   signatures: [...confirmed],
