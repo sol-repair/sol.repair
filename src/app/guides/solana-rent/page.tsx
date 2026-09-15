@@ -37,9 +37,11 @@ export default function SolanaRentGuide() {
               account, always enough to cover the storage. This is called
               rent-exempt. For a standard token account created before
               September 4, 2026, that minimum is 2,039,280 lamports, about
-              0.00204 SOL. The network lowered the rate that day, so
-              accounts created after hold 1,855,569 lamports, about 0.00186
-              SOL.
+              0.00204 SOL. The network lowered the rate that day, and has
+              lowered it again since. An account created after September 4
+              but before the most recent cut holds 1,855,569 lamports,
+              about 0.00186 SOL, and one created today holds 1,488,440
+              lamports, about 0.00149 SOL.
             </p>
             <p className="mt-2">
               The important part: it is a deposit. It does not get spent while
@@ -56,7 +58,7 @@ export default function SolanaRentGuide() {
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">
                 <span className="text-zinc-500">Empty token account</span>
                 <br />
-                holds about 0.00186 to 0.00204 SOL of rent
+                holds about 0.00149 to 0.00208 SOL of rent
               </div>
               <div className="text-center text-zinc-600">↓</div>
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">
@@ -91,8 +93,8 @@ export default function SolanaRentGuide() {
             <p>
               The deposit comes from a network parameter, lamports per byte,
               and the network lowers it from time to time. Mainnet lowered it
-              on September 4, 2026, which is why there are two values on this
-              page. If it changes again, this page changes with it.
+              on September 4, 2026, and lowered it again since. If it changes
+              again, this page changes with it.
             </p>
           </section>
 

@@ -5,9 +5,10 @@
  * rent-exempt minimums for a standard 165-byte token account, read
  * straight from the chain (getMinimumBalanceForRentExemption). The
  * network lowered the rent rate on 2026-09-04 (SIMD-0437 step 1,
- * mainnet epoch 1028), so the minimum has a legacy value for accounts
- * created before that date and a current value for newer ones. Both
- * are pinned by tests and move together with the guide copy.
+ * mainnet epoch 1028) and lowered it again in a second step-down, so
+ * the minimum has a legacy value for the oldest accounts and a
+ * current value for newer ones. Both are pinned by tests and move
+ * together with the guide copy.
  *
  * No React in this file. Pure math, importable from tests.
  */
@@ -16,9 +17,9 @@
  *  mainnet epoch 1028 (2026-09-04). Re-verified 2026-09-03. */
 export const TOKEN_ACCOUNT_RENT_LAMPORTS_LEGACY = 2_039_280;
 
-/** Rent-exempt minimum after SIMD-0437 step 1 went live at mainnet
- *  epoch 1028 (2026-09-04). Read directly from the chain that day. */
-export const TOKEN_ACCOUNT_RENT_LAMPORTS_CURRENT = 1_855_569;
+/** Rent-exempt minimum after the second SIMD-0437 step-down. Read
+ *  directly from the chain on 2026-09-14 at slot 447,121,307. */
+export const TOKEN_ACCOUNT_RENT_LAMPORTS_CURRENT = 1_488_440;
 
 /** A count the calculator will actually stand behind. Fewer than one
  *  account is not a wallet, and six figures of empty accounts has

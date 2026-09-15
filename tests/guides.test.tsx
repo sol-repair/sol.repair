@@ -48,11 +48,12 @@ describe("guide pages render with their content", () => {
     expect(screen.getByText(/deposit, not a fee/i)).toBeTruthy();
     expect(screen.getByLabelText(/empty token accounts/i)).toBeTruthy();
     expect(screen.getByText(/0.0203928 SOL/)).toBeTruthy();
-    expect(screen.getByText(/0.01855569/)).toBeTruthy();
+    expect(screen.getByText(/0.0148844/)).toBeTruthy();
     expect(screen.getByText(/1,855,569/)).toBeTruthy();
+    expect(screen.getByText(/1,488,440/)).toBeTruthy();
     expect(screen.getByText(/Mainnet lowered it on September 4, 2026/)).toBeTruthy();
     expect(
-      screen.getByText(/holds about 0\.00186 to 0\.00204 SOL of rent/)
+      screen.getByText(/holds about 0\.00149 to 0\.00208 SOL of rent/)
     ).toBeTruthy();
     expect(screen.queryByText(/holds about 0\.002 SOL of rent/)).toBeNull();
   });

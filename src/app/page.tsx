@@ -461,7 +461,7 @@ export default function Home() {
           .
         </p>
         <p className="mb-8 font-mono text-xs leading-relaxed text-zinc-400">
-          Most empty token accounts hold about 0.00186 to 0.00204 SOL,
+          Most empty token accounts hold about 0.00149 to 0.00208 SOL,
           depending on when they were created.
           <br />
           Recovered SOL is returned to the wallet that owns the account.
@@ -535,7 +535,7 @@ export default function Home() {
                   </span>
                 </span>
                 <span className="whitespace-nowrap text-zinc-400">
-                  0.002039 SOL
+                  0.002074 SOL
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-3">
@@ -544,12 +544,12 @@ export default function Home() {
                   <span>5wNtY…vB7u · mint 6hGfA…kL1o</span>
                 </span>
                 <span className="whitespace-nowrap text-zinc-400">
-                  0.001856 SOL
+                  0.001488 SOL
                 </span>
               </div>
             </div>
             <p className="mt-2 text-emerald-400">
-              0.005934 SOL recoverable · 1 transaction
+              0.005601 SOL recoverable · 1 transaction
             </p>
           </div>
         )}

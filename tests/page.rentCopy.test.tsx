@@ -4,11 +4,12 @@
  * Rent-copy tests for the homepage (page.tsx).
  *
  * The network lowered the rent rate on 2026-09-04 (SIMD-0437 step 1,
- * mainnet epoch 1028), so a single "~0.002 SOL" figure no longer
- * describes new accounts (they hold 0.00186). The hero rent copy and the
- * example scan card must speak the same two-regime range wording as
- * the rent calculator on the guide page: about 0.00186 to 0.00204 SOL,
- * depending on when the accounts were created.
+ * mainnet epoch 1028) and lowered it again later (read from the chain
+ * 2026-09-14), so a single "~0.002 SOL" figure no longer describes
+ * new accounts. The hero rent copy and the example scan card must
+ * speak the same range wording as the rent calculator on the guide
+ * page: about 0.00149 to 0.00208 SOL, depending on when the accounts
+ * were created.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,7 +69,7 @@ describe("homepage rent copy matches the two-regime reality", () => {
     render(<Home />);
 
     const hero = screen.getByText(
-      /Most empty token accounts hold about 0\.00186 to 0\.00204 SOL, depending on when they were created/
+      /Most empty token accounts hold about 0\.00149 to 0\.00208 SOL, depending on when they were created/
     );
     expect(hero).toBeTruthy();
     expect(
@@ -87,16 +88,17 @@ describe("homepage rent copy matches the two-regime reality", () => {
     expect(text.includes("!")).toBe(false);
   });
 
-  it("example scan card shows both regimes with the corrected total", () => {
+  it("example scan card spans legacy and current regimes with the corrected total", () => {
     render(<Home />);
 
-    expect(screen.getAllByText("0.002039 SOL")).toHaveLength(2);
-    expect(screen.getAllByText("0.001856 SOL")).toHaveLength(1);
+    expect(screen.getAllByText("0.002039 SOL")).toHaveLength(1);
+    expect(screen.getAllByText("0.002074 SOL")).toHaveLength(1);
+    expect(screen.getAllByText("0.001488 SOL")).toHaveLength(1);
     expect(
-      screen.getByText(/0\.005934 SOL recoverable · 1 transaction/)
+      screen.getByText(/0\.005601 SOL recoverable · 1 transaction/)
     ).toBeTruthy();
     // The old copy led with a plus on a figure that is not a gain.
     expect(screen.queryByText(/\+0\.005934/)).toBeNull();
-    expect(screen.queryByText(/0\.006117/)).toBeNull();
+    expect(screen.queryByText(/0\.005934/)).toBeNull();
   });
 });
