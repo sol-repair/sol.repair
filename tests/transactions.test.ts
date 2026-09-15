@@ -1,18 +1,62 @@
 /**
  * Tests for transaction assembly helpers in transactions.ts:
- * the batching cap and the network fee estimate. The cap numbers
- * come from the measured packet budget (see the module comments):
- * 20 closes per transaction with headroom for wallet-added
- * instructions.
+ * the batching cap, the network fee estimate, and the blockhash
+ * commitment buildTransaction asks for. The cap numbers come from
+ * the measured packet budget (see the module comments): 20 closes
+ * per transaction with headroom for wallet-added instructions.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+} from "@solana/web3.js";
 
 import {
   MAX_CLOSE_INSTRUCTIONS_PER_TX,
+  buildTransaction,
   chunkInstructions,
   estimateNetworkFee,
 } from "../src/lib/solana/transactions";
+
+describe("buildTransaction", () => {
+  it("fetches the blockhash at confirmed commitment", async () => {
+    // getLatestBlockhash defaults to finalized, and a finalized
+    // blockhash is several seconds behind the tip - under congestion,
+    // far enough that the transaction's approval window is already
+    // partly (or fully) spent before the wallet prompt even opens.
+    // The confirmed blockhash carries the full window, which is all
+    // the time the user gets to review and approve in the wallet.
+    const getLatestBlockhash = vi.fn().mockResolvedValue({
+      blockhash: PublicKey.default.toBase58(),
+      lastValidBlockHeight: 1000,
+    });
+    const connection = {
+      getLatestBlockhash,
+    } as unknown as Connection;
+
+    const payer = Keypair.generate();
+    const transaction = await buildTransaction(
+      connection,
+      payer.publicKey,
+      [
+        SystemProgram.transfer({
+          fromPubkey: payer.publicKey,
+          toPubkey: Keypair.generate().publicKey,
+          lamports: 0,
+        }),
+      ]
+    );
+
+    expect(getLatestBlockhash).toHaveBeenCalledWith("confirmed");
+    expect(transaction.recentBlockhash).toBe(
+      PublicKey.default.toBase58()
+    );
+    expect(transaction.lastValidBlockHeight).toBe(1000);
+  });
+});
 
 describe("chunkInstructions", () => {
   it("empty list -> no chunks", () => {

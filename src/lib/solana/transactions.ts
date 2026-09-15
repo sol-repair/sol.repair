@@ -34,8 +34,13 @@ export async function buildTransaction(
   payer: PublicKey,
   instructions: TransactionInstruction[]
 ): Promise<Transaction> {
+  // Confirmed, not the finalized default: a finalized blockhash is
+  // several seconds behind the tip (further under congestion), so the
+  // transaction's approval window is already partly spent before the
+  // wallet prompt opens. Confirmed keeps the full 150-slot window for
+  // the user to review and approve.
   const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash();
+    await connection.getLatestBlockhash("confirmed");
 
   const transaction = new Transaction({
     feePayer: payer,
