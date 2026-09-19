@@ -38,9 +38,11 @@ export const DEV_FEE_WALLET = new PublicKey(
 
 /**
  * Mainnet fee wallet (Ledger). Fees stay off on mainnet until this address
- * has seen its first deposit: a transfer to an address that has never
- * existed on-chain fails the transaction, so feeAccountReady checks for it
- * at repair time and the fee is skipped until it exists.
+ * has seen its first deposit: the network allows a transfer into an address
+ * that has never existed, but it rejects an account ENDING below the
+ * rent-exempt minimum, and the 1% fee is far below that minimum, so a
+ * fee-sized first transfer would fail on chain. feeAccountReady checks for
+ * the deposit at repair time and the fee is skipped until it lands.
  */
 export const MAINNET_FEE_WALLET = new PublicKey(
   "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K"
@@ -60,10 +62,14 @@ export function isFeeEnabled(): boolean {
 }
 
 /**
- * A transfer can only target an account that already exists on-chain, so a
- * brand new fee address needs one small first deposit before fees can land.
- * Returns false until then, and callers skip the fee. The repair itself
- * never depends on the fee, so a missing fee account must not break it.
+ * A brand new fee address needs a first deposit before fees can land: a
+ * transfer into an address that has never existed is allowed, but the
+ * network rejects an account ending below the rent-exempt minimum, and the
+ * 1% fee is far below it. Verified by simulation 2026-09-19: a 5,000-lamport
+ * transfer into a fresh address fails with InsufficientFundsForRent while
+ * the rent-exempt minimum succeeds. So this checks that the fee address
+ * exists, and callers skip the fee until it does. The repair itself never
+ * depends on the fee, so a missing fee account must not break it.
  */
 export async function feeAccountReady(
   connection: Connection
