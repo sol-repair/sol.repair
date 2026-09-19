@@ -386,12 +386,14 @@ describe("feeRowsFromRawTransactions 1% conformance (onePercentMatch)", () => {
 });
 
 describe("isKnownTestFee", () => {
-  it("tags the six known mainnet test signatures", () => {
+  it("tags the seven known mainnet test signatures", () => {
     // Receipt-verified signatures: two Aug 19 self-tests, the Aug 29
     // family test, the Aug 30 owner self-test (CLUG close), the
     // Sep 4 owner test (Token-2022 close after a manual burn-to-zero),
-    // and the Sep 10 first mainnet revoke+close run (staged delegate
-    // plus two staged empties, verified on chain to the lamport).
+    // the Sep 10 first mainnet revoke+close run (staged delegate
+    // plus two staged empties, verified on chain to the lamport),
+    // and the Sep 12 owner self-cleanup (two empty Token-2022
+    // accounts closed from his phone, verified on chain).
     expect(
       isKnownTestFee(
         "mainnet-beta",
@@ -426,6 +428,12 @@ describe("isKnownTestFee", () => {
       isKnownTestFee(
         "mainnet-beta",
         "2ZMJZDi7frGRw7GxBGwDfc2MYqbjzhobt4r2sGEWcxGevnonMyjAconXKpCw74kLBEb8mjcCckvp2aVTimFC1m55"
+      )
+    ).toBe(true);
+    expect(
+      isKnownTestFee(
+        "mainnet-beta",
+        "2V4dcrHEApzHDS9PqxWo1KeeK8a3HvVLyPsxVfq3yEktjdqH8NX77nzGZVT4QXTaVy8sWvszA8xDx8N2UrYGfrcw"
       )
     ).toBe(true);
   });

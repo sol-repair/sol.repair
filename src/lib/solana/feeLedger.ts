@@ -104,6 +104,10 @@ const MAINNET_TEST_SIGNATURES: ReadonlySet<string> = new Set([
   // (staged delegate on the USDT account plus two staged empties;
   // verified on chain to the lamport).
   "2ZMJZDi7frGRw7GxBGwDfc2MYqbjzhobt4r2sGEWcxGevnonMyjAconXKpCw74kLBEb8mjcCckvp2aVTimFC1m55",
+  // Sep 12 owner self-cleanup: two empty Token-2022 accounts closed
+  // through the live site from his phone, verified on chain to the
+  // lamport (fee exactly floor(1%) of the freed rent).
+  "2V4dcrHEApzHDS9PqxWo1KeeK8a3HvVLyPsxVfq3yEktjdqH8NX77nzGZVT4QXTaVy8sWvszA8xDx8N2UrYGfrcw",
 ]);
 
 /** True when a ledger row is a known test fee, not organic revenue. */
