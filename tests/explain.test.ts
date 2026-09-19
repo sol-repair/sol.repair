@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { Keypair } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   explainDecodedTransaction,
   explainInstruction,
 } from "@/lib/solana/explain";
+import { decodeRawTransaction } from "@/lib/solana/feeLedger";
+import {
+  buildLegacyRaw,
+  buildV0LoadedAddressesRaw,
+  buildV1RepairRaw,
+  closeIx,
+  FEE_WALLET,
+  realV1Raw,
+  REAL_V1_BLOCK_TIME,
+  systemTransfer as systemTransferIx,
+} from "./fixtures/rawTransactions";
 import type { DecodedInstruction } from "@/lib/solana/feeLedger";
 import {
   TOKEN_2022_PROGRAM_ID,
@@ -13,7 +24,6 @@ import {
 /* Synthetic but well-formed addresses; never parsed, only echoed. */
 const OWNER = "OwnerGoKfWgbarzvZufmPcHrB2LTNaCGPmHztT8cVCXmAkGCobqjATx";
 const DESTINATION = "Dest4dRkBVcNtCkVBz6CJzgN8NW9XP8ycTmvzdnwYxQHZvj5SJe";
-const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 const TOKEN_ACCOUNT =
   "ToknAcctFake9VtCUqmtexyXYzoHqP2bWczm8VqVkMPXhTPwFTqAgREk5p";
 /* A real program this tool deliberately does not model: the Lighthouse
@@ -302,6 +312,64 @@ describe("explainInstruction compute budget", () => {
     const result = explainInstruction(computeIx(0x16, [1, 2, 3, 4]));
     expect(result.limitation).toBe("unknown-instruction");
     expect(result.text).toContain("compute budget");
+  });
+});
+
+describe("explainDecodedTransaction over real and shared wire bytes", () => {
+  it("explains the real devnet v1 transaction as an honest unknown", () => {
+    const decoded = decodeRawTransaction(realV1Raw());
+    expect(decoded).not.toBeNull();
+    const explained = explainDecodedTransaction(decoded!);
+    expect(explained.blockTime).toBe(REAL_V1_BLOCK_TIME);
+    expect(explained.instructions).toHaveLength(1);
+    expect(explained.instructions[0].limitation).toBe("unknown-program");
+    expect(explained.instructions[0].text).toContain("cannot describe");
+  });
+
+  it("explains a legacy repair end to end (closes and the fee transfer)", () => {
+    const { raw } = buildLegacyRaw([
+      closeIx(),
+      closeIx("token-2022"),
+      systemTransferIx(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const explained = explainDecodedTransaction(decoded!);
+    expect(explained.instructions).toHaveLength(3);
+    expect(explained.instructions[0].text).toContain("Close the token account");
+    expect(explained.instructions[0].text).toContain("classic token program");
+    expect(explained.instructions[1].text).toContain("Token-2022");
+    const transfer = explained.instructions[2];
+    expect(transfer.limitation).toBeNull();
+    expect(transfer.text).toContain("0.000020392 SOL");
+    expect(transfer.text).toContain(FEE_WALLET);
+  });
+
+  it("explains a hand-built v1 repair (close and fee transfer)", () => {
+    const raw = buildV1RepairRaw({ feeLamports: 20_392 });
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const explained = explainDecodedTransaction(decoded!);
+    expect(explained.instructions).toHaveLength(2);
+    expect(explained.instructions[0].text).toContain("Close the token account");
+    const transfer = explained.instructions[1];
+    expect(transfer.limitation).toBeNull();
+    expect(transfer.text).toContain("0.000020392 SOL");
+    expect(transfer.text).toContain(FEE_WALLET);
+  });
+
+  it("names accounts that exist only through address lookup tables", () => {
+    const { raw, loadedAccount, loadedDestination } =
+      buildV0LoadedAddressesRaw();
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const explained = explainDecodedTransaction(decoded!);
+    expect(explained.instructions).toHaveLength(1);
+    const line = explained.instructions[0];
+    expect(line.limitation).toBeNull();
+    expect(line.text).toContain("Close the token account");
+    expect(line.text).toContain(loadedAccount);
+    expect(line.text).toContain(loadedDestination);
   });
 });
 

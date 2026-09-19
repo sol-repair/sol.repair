@@ -166,6 +166,15 @@ export function buildV0LoadedAddressesRaw(): {
     Buffer.from([0x02, 0x03, 0x00]), // account indexes: into the loaded region
     Buffer.from([0x01]), // data length
     Buffer.from([9]), // CloseAccount
+    // The address table lookup section the v0 format requires after the
+    // instructions: one table providing two writable entries. web3.js
+    // cross-checks its count against meta.loadedAddresses before it will
+    // resolve any loaded key, so this section must be present.
+    Buffer.from([0x01]), // lookup table count
+    Buffer.alloc(32, 9), // the lookup table account (contents never read)
+    Buffer.from([0x02]), // two writable indexes in that table
+    Buffer.from([0x00, 0x01]),
+    Buffer.from([0x00]), // zero readonly indexes
   ]);
   const serialized = Buffer.concat([
     Buffer.from([0x01]), // one signature
