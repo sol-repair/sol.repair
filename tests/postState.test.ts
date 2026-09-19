@@ -311,6 +311,64 @@ describe("analyzeLeftBehind system and unknown programs", () => {
   });
 });
 
+describe("analyzeLeftBehind grounds repeated unknown lines", () => {
+  it("merges four unknowns from one program into one counted line", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [0, 1, 2, 3].map(() =>
+        tokenIx(TOKEN_2022_PROGRAM, 2, ["a", "b", "c"])
+      ),
+      failed: false,
+    });
+    expect(analysis.effects).toHaveLength(1);
+    expect(analysis.effects[0].text).toBe(
+      "4 instructions from the Token-2022 program ran that this tool does not fully analyze. What they left behind is not known."
+    );
+    expect(analysis.headline).toBe(
+      "This transaction left 4 lasting changes. Read each one below."
+    );
+  });
+
+  it("merges multiple instructions from an unknown program", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        { programId: LIGHTHOUSE, accountPubkeys: ["x"], data: new Uint8Array([1]) },
+        { programId: LIGHTHOUSE, accountPubkeys: ["x"], data: new Uint8Array([2]) },
+      ],
+      failed: false,
+    });
+    expect(analysis.effects).toHaveLength(1);
+    expect(analysis.effects[0].text).toBe(
+      `This tool cannot analyze 2 instructions from program ${LIGHTHOUSE}. What they left behind is not known.`
+    );
+  });
+
+  it("keeps the headline count on findings, not on merged lines", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        tokenIx(SPL_TOKEN_PROGRAM, 2, ["a", "b", "c"]),
+        tokenIx(SPL_TOKEN_PROGRAM, 2, ["a", "b", "c"]),
+        { programId: LIGHTHOUSE, accountPubkeys: ["x"], data: new Uint8Array([1]) },
+      ],
+      failed: false,
+    });
+    expect(analysis.effects).toHaveLength(2);
+    expect(analysis.headline).toBe(
+      "This transaction left 3 lasting changes. Read each one below."
+    );
+  });
+
+  it("leaves a single unknown as the existing sentence", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [tokenIx(SPL_TOKEN_PROGRAM, 2, ["a", "b", "c"])],
+      failed: false,
+    });
+    expect(analysis.effects).toHaveLength(1);
+    expect(analysis.effects[0].text).toBe(
+      "An instruction from the classic token program ran that this tool does not fully analyze. What it left behind is not known."
+    );
+  });
+});
+
 describe("analyzeLeftBehind against real library-built instructions", () => {
   it("analyzes an approve built by the shipped spl-token library through the real wire", () => {
     const source = Keypair.generate().publicKey;

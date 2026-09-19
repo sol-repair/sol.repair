@@ -74,4 +74,19 @@ describe("homepage links to the transaction explainer", () => {
     });
     expect(link.getAttribute("href")).toBe("/understand");
   });
+
+  it("surfaces the explainer in its own section with a working link", () => {
+    render(<Home />);
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: /understand a transaction/i,
+      })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/never asks for an approval/i)
+    ).toBeTruthy();
+    const link = screen.getByRole("link", { name: /open the explainer/i });
+    expect(link.getAttribute("href")).toBe("/understand");
+  });
 });

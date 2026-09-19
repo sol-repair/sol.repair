@@ -65,6 +65,13 @@ export type CapabilityEffect = {
   severity: "info" | "warning" | "danger";
 };
 
+/** Internal: findings that carry a plural template merge with identical
+ *  siblings into one counted line, so a wall of near-identical unknown
+ *  sentences reads as a summary. Never exposed to the page. */
+type Finding = CapabilityEffect & {
+  groupPlural?: (count: number) => string;
+};
+
 export type LeftBehindVerdict =
   | "failed"
   | "normal"
@@ -94,21 +101,25 @@ function formatSol(lamports: bigint): string {
   return trimmed ? `${whole}.${trimmed}` : `${whole}`;
 }
 
-function unrecognized(label: string): CapabilityEffect {
+function unrecognized(label: string): Finding {
   return {
     severity: "warning",
     text: `An instruction from ${label} ran that this tool does not fully analyze. What it left behind is not known.`,
+    groupPlural: (count) =>
+      `${count} instructions from ${label} ran that this tool does not fully analyze. What they left behind is not known.`,
   };
 }
 
-function cannotAnalyzeProgram(programId: string): CapabilityEffect {
+function cannotAnalyzeProgram(programId: string): Finding {
   return {
     severity: "warning",
     text: `This tool cannot analyze program ${programId}. What this instruction left behind is not known.`,
+    groupPlural: (count) =>
+      `This tool cannot analyze ${count} instructions from program ${programId}. What they left behind is not known.`,
   };
 }
 
-function tokenEffect(ix: DecodedInstruction): CapabilityEffect[] {
+function tokenEffect(ix: DecodedInstruction): Finding[] {
   const { data, accountPubkeys } = ix;
   const tag = data.byteLength >= 1 ? data[0] : -1;
   const u64At = (offset: number): bigint | null =>
@@ -222,7 +233,7 @@ function tokenEffect(ix: DecodedInstruction): CapabilityEffect[] {
   return [unrecognized(TOKEN_LABELS[ix.programId] ?? "the token program")];
 }
 
-function systemEffect(ix: DecodedInstruction): CapabilityEffect[] {
+function systemEffect(ix: DecodedInstruction): Finding[] {
   const { data, accountPubkeys } = ix;
   if (data.byteLength >= 4) {
     const tag = new DataView(
@@ -272,7 +283,7 @@ export function analyzeLeftBehind(input: {
     };
   }
 
-  const effects: CapabilityEffect[] = [];
+  const findings: Finding[] = [];
   for (const ix of input.instructions) {
     if (ix.programId === COMPUTE_BUDGET_PROGRAM_ID) {
       // The documented exception: compute budget instructions configure
@@ -280,23 +291,54 @@ export function analyzeLeftBehind(input: {
       continue;
     }
     if (ix.programId === SYSTEM_PROGRAM_ID) {
-      effects.push(...systemEffect(ix));
+      findings.push(...systemEffect(ix));
       continue;
     }
     if (ix.programId === SPL_TOKEN || ix.programId === TOKEN_2022) {
-      effects.push(...tokenEffect(ix));
+      findings.push(...tokenEffect(ix));
       continue;
     }
-    effects.push(cannotAnalyzeProgram(ix.programId));
+    findings.push(cannotAnalyzeProgram(ix.programId));
   }
 
-  const verdict: LeftBehindVerdict = effects.some((e) => e.severity === "danger")
+  // Repeated unknown lines merge into one counted line so the panel reads
+  // as a summary rather than a wall of near-identical sentences. The
+  // headline still counts individual findings, never merged lines.
+  const lines: { severity: CapabilityEffect["severity"]; singular: string }[] =
+    [];
+  const counts = new Map<string, number>();
+  for (const finding of findings) {
+    if (finding.groupPlural) {
+      const seen = counts.get(finding.text);
+      if (seen !== undefined) {
+        counts.set(finding.text, seen + 1);
+        continue;
+      }
+      counts.set(finding.text, 1);
+    }
+    lines.push({ severity: finding.severity, singular: finding.text });
+  }
+  const effects: CapabilityEffect[] = lines.map((line) => {
+    const n = counts.get(line.singular) ?? 1;
+    if (n === 1) return { severity: line.severity, text: line.singular };
+    const template = findings.find(
+      (f) => f.text === line.singular && f.groupPlural
+    )?.groupPlural;
+    return {
+      severity: line.severity,
+      text: template ? template(n) : line.singular,
+    };
+  });
+
+  const verdict: LeftBehindVerdict = findings.some(
+    (e) => e.severity === "danger"
+  )
     ? "danger"
-    : effects.some((e) => e.severity === "warning")
+    : findings.some((e) => e.severity === "warning")
       ? "warning"
       : "normal";
 
-  const count = effects.length;
+  const count = findings.length;
   const plural = count === 1 ? "change" : "changes";
   let headline: string;
   if (verdict === "danger") {

@@ -253,22 +253,27 @@ export default function UnderstandPage() {
                 Signed {formatBlockTime(state.explained.blockTime)}
               </p>
             </div>
-            <div className={VERDICT_PANEL_CLASS[state.analysis.verdict]}>
-              <p className={VERDICT_HEADLINE_CLASS[state.analysis.verdict]}>
-                {state.analysis.headline}
+            <div className="space-y-2">
+              <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">
+                Left behind
               </p>
-              {state.analysis.effects.length > 0 && (
-                <ul className="mt-3 space-y-2">
-                  {state.analysis.effects.map((effect, index) => (
-                    <li
-                      key={index}
-                      className={EFFECT_CLASS[effect.severity]}
-                    >
-                      {effect.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div className={VERDICT_PANEL_CLASS[state.analysis.verdict]}>
+                <p className={VERDICT_HEADLINE_CLASS[state.analysis.verdict]}>
+                  {state.analysis.headline}
+                </p>
+                {state.analysis.effects.length > 0 && (
+                  <ul className="mt-3 space-y-2">
+                    {state.analysis.effects.map((effect, index) => (
+                      <li
+                        key={index}
+                        className={EFFECT_CLASS[effect.severity]}
+                      >
+                        {effect.text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
             {state.analysis.verdict === "failed" ? (
               <p className="text-sm text-zinc-500">
@@ -276,7 +281,10 @@ export default function UnderstandPage() {
                 them took effect.
               </p>
             ) : (
-              <>
+              <div className="space-y-2">
+                <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">
+                  Instructions
+                </p>
                 <p className="text-sm text-zinc-300">
                   This transaction contains{" "}
                   {state.explained.instructions.length}{" "}
@@ -303,7 +311,7 @@ export default function UnderstandPage() {
                     </li>
                   ))}
                 </ol>
-              </>
+              </div>
             )}
           </section>
         )}

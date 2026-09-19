@@ -175,10 +175,12 @@ export function WalletRecentTransactions({
             <li key={item.signature}>
               <button
                 onClick={() => onSelect(item.signature)}
-                className="w-full rounded px-2 py-2 text-left font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-800/60"
+                className="flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-800/60"
               >
-                {item.signature.slice(0, 8)}…{item.signature.slice(-4)}
-                <span className="ml-3 text-zinc-500">
+                <span className="truncate">
+                  {item.signature.slice(0, 8)}…{item.signature.slice(-4)}
+                </span>
+                <span className="shrink-0 tabular-nums text-zinc-500">
                   {formatBlockTime(item.blockTime)}
                 </span>
               </button>

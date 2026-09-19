@@ -31,6 +31,7 @@ import {
 } from "@/lib/solana/transactions";
 import Link from "next/link";
 import GuidesSection from "@/components/GuidesSection";
+import UnderstandSection from "@/components/UnderstandSection";
 
 /** One entry in the raw transaction inspector. Close, revoke, and fee
  *  entries share the program/instruction fields and differ in the rest. */
@@ -1043,6 +1044,8 @@ export default function Home() {
             )}
           </div>
         )}
+
+        <UnderstandSection />
 
         <GuidesSection />
 
