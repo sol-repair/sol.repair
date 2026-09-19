@@ -26,8 +26,33 @@ import {
 } from "@/lib/solana/feeLedger";
 import { explainDecodedTransaction } from "@/lib/solana/explain";
 import type { ExplainedTransaction } from "@/lib/solana/explain";
+import { analyzeLeftBehind } from "@/lib/solana/postState";
+import type { CapabilityEffect, LeftBehindAnalysis } from "@/lib/solana/postState";
 
 const SIGNATURE_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+
+/* Verdict styling: the panel border and headline color follow the worst
+ * finding. A failed transaction is amber (notice it) with neutral body
+ * copy, because its message is that nothing happened. */
+const VERDICT_PANEL_CLASS: Record<LeftBehindAnalysis["verdict"], string> = {
+  failed: "rounded border border-zinc-800 bg-zinc-900/50 p-4",
+  normal: "rounded border border-zinc-800 bg-zinc-900/50 p-4",
+  warning: "rounded border border-amber-900/60 bg-amber-950/20 p-4",
+  danger: "rounded border border-red-900/60 bg-red-950/20 p-4",
+};
+
+const VERDICT_HEADLINE_CLASS: Record<LeftBehindAnalysis["verdict"], string> = {
+  failed: "text-sm font-medium text-amber-400",
+  normal: "text-sm font-medium text-zinc-200",
+  warning: "text-sm font-medium text-amber-400",
+  danger: "text-sm font-medium text-red-400",
+};
+
+const EFFECT_CLASS: Record<CapabilityEffect["severity"], string> = {
+  info: "text-sm leading-relaxed text-zinc-400",
+  warning: "text-sm leading-relaxed text-amber-300",
+  danger: "text-sm leading-relaxed text-red-300",
+};
 
 type ExplainState =
   | { kind: "idle" }
@@ -36,7 +61,12 @@ type ExplainState =
   | { kind: "not-found" }
   | { kind: "unreadable" }
   | { kind: "error"; detail: string }
-  | { kind: "done"; signature: string; explained: ExplainedTransaction };
+  | {
+      kind: "done";
+      signature: string;
+      explained: ExplainedTransaction;
+      analysis: LeftBehindAnalysis;
+    };
 
 const ENDPOINT = IS_MAINNET
   ? FEE_LEDGER_ENDPOINTS["mainnet-beta"]
@@ -67,6 +97,10 @@ export default function UnderstandPage() {
         kind: "done",
         signature: signatureInput,
         explained: explainDecodedTransaction(decoded),
+        analysis: analyzeLeftBehind({
+          instructions: decoded.instructions,
+          failed: raw.meta?.err != null,
+        }),
       });
     } catch (error) {
       setState({
@@ -173,32 +207,58 @@ export default function UnderstandPage() {
                 Signed {formatBlockTime(state.explained.blockTime)}
               </p>
             </div>
-            <p className="text-sm text-zinc-300">
-              This transaction contains{" "}
-              {state.explained.instructions.length}{" "}
-              {state.explained.instructions.length === 1
-                ? "instruction"
-                : "instructions"}
-              . Every sentence below is generated from the
-              transaction&rsquo;s own bytes.
-            </p>
-            <ol className="space-y-2">
-              {state.explained.instructions.map((instruction, index) => (
-                <li
-                  key={index}
-                  className={
-                    instruction.limitation === null
-                      ? "rounded border border-zinc-800 bg-zinc-900/50 p-3 text-sm leading-relaxed text-zinc-200"
-                      : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-500"
-                  }
-                >
-                  <span className="mr-2 font-mono text-xs text-zinc-500">
-                    {index + 1}.
-                  </span>
-                  {instruction.text}
-                </li>
-              ))}
-            </ol>
+            <div className={VERDICT_PANEL_CLASS[state.analysis.verdict]}>
+              <p className={VERDICT_HEADLINE_CLASS[state.analysis.verdict]}>
+                {state.analysis.headline}
+              </p>
+              {state.analysis.effects.length > 0 && (
+                <ul className="mt-3 space-y-2">
+                  {state.analysis.effects.map((effect, index) => (
+                    <li
+                      key={index}
+                      className={EFFECT_CLASS[effect.severity]}
+                    >
+                      {effect.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {state.analysis.verdict === "failed" ? (
+              <p className="text-sm text-zinc-500">
+                The instructions it attempted are not shown, because none of
+                them took effect.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-zinc-300">
+                  This transaction contains{" "}
+                  {state.explained.instructions.length}{" "}
+                  {state.explained.instructions.length === 1
+                    ? "instruction"
+                    : "instructions"}
+                  . Every sentence below is generated from the
+                  transaction&rsquo;s own bytes.
+                </p>
+                <ol className="space-y-2">
+                  {state.explained.instructions.map((instruction, index) => (
+                    <li
+                      key={index}
+                      className={
+                        instruction.limitation === null
+                          ? "rounded border border-zinc-800 bg-zinc-900/50 p-3 text-sm leading-relaxed text-zinc-200"
+                          : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-500"
+                      }
+                    >
+                      <span className="mr-2 font-mono text-xs text-zinc-500">
+                        {index + 1}.
+                      </span>
+                      {instruction.text}
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
           </section>
         )}
       </div>

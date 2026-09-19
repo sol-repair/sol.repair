@@ -13,7 +13,12 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import {
+  AuthorityType,
+  createApproveInstruction,
+  createSetAuthorityInstruction,
+} from "@solana/spl-token";
 
 vi.mock("@/lib/solana/feeLedger", async (importOriginal) => {
   const actual =
@@ -97,6 +102,77 @@ describe("understand page outcomes", () => {
     expect(closeLines).toHaveLength(2);
     expect(await screen.findByText(/0\.000020392 SOL/)).toBeTruthy();
     expect(await screen.findByText(new RegExp(FEE_WALLET))).toBeTruthy();
+  });
+
+  it("shows the left-behind verdict panel above the instructions", async () => {
+    const { raw } = buildLegacyRaw([
+      closeIx(),
+      closeIx("token-2022"),
+      systemTransferIx(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/granted no new permissions/i)
+    ).toBeTruthy();
+    expect(
+      await screen.findAllByText(/was closed\. Any permissions on it ended/i)
+    ).toHaveLength(2);
+  });
+
+  it("reports a failed transaction as having changed nothing", async () => {
+    const { raw } = buildLegacyRaw([closeIx()], {
+      err: { InstructionError: [0, { Custom: 1 }] },
+    });
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/This transaction failed on chain/i)
+    ).toBeTruthy();
+    expect(screen.queryByText(/was closed/i)).toBeNull();
+  });
+
+  it("warns through the panel when an approve granted a spending permission", async () => {
+    const { raw } = buildLegacyRaw([
+      createApproveInstruction(
+        Keypair.generate().publicKey,
+        Keypair.generate().publicKey,
+        Keypair.generate().publicKey,
+        500n
+      ),
+    ]);
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/left 1 lasting change/i)
+    ).toBeTruthy();
+    expect(
+      await screen.findByText(/can now spend up to 500 base units/i)
+    ).toBeTruthy();
+  });
+
+  it("shows the danger headline when an owner authority was handed over", async () => {
+    const { raw } = buildLegacyRaw([
+      createSetAuthorityInstruction(
+        Keypair.generate().publicKey,
+        Keypair.generate().publicKey,
+        AuthorityType.AccountOwner,
+        Keypair.generate().publicKey,
+        []
+      ),
+    ]);
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/hands control of a token account/i)
+    ).toBeTruthy();
+    expect(
+      await screen.findByText(/The account owner of token account/i)
+    ).toBeTruthy();
   });
 
   it("says honestly when no transaction was found on this network", async () => {
