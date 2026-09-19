@@ -37,12 +37,9 @@ function routePaths(): string[] {
 
 /** Routes that are deliberately NOT in the sitemap yet. Every entry needs
  *  a reason; when a page goes public it joins the sitemap and leaves this
- *  list in the same commit. */
-const INTENTIONALLY_UNLISTED = [
-  // Quiet-shipped (M2): the transaction explainer has no inbound links and
-  // no sitemap entry until the suite is announced (M4).
-  "/understand",
-];
+ *  list in the same commit. Empty today: the explainer went public in
+ *  M4c, so every route now belongs in the map. */
+const INTENTIONALLY_UNLISTED: string[] = [];
 
 function sitemapPaths(): string[] {
   return sitemap()

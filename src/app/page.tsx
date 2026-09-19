@@ -1065,6 +1065,13 @@ export default function Home() {
             </Link>
             {" · "}
             <Link
+              href="/understand"
+              className="underline underline-offset-2 hover:text-zinc-400"
+            >
+              Understand a transaction
+            </Link>
+            {" · "}
+            <Link
               href="/terms"
               className="underline underline-offset-2 hover:text-zinc-400"
             >
