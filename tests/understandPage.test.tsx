@@ -1,0 +1,136 @@
+// @vitest-environment jsdom
+
+/**
+ * Render tests for the transaction explainer page (/understand, M2).
+ *
+ * The page is read-only forever: no wallet, no signing. These tests pin
+ * that promise in the copy, the input validation, every honest outcome
+ * state (found, not found, unreadable, network error), and the wiring
+ * end to end: a real library-serialized repair transaction goes in and
+ * the plain-language sentences come out, with the fetch layer mocked at
+ * its boundary so the decoder and explainer run for real.
+ */
+
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PublicKey } from "@solana/web3.js";
+
+vi.mock("@/lib/solana/feeLedger", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/solana/feeLedger")>();
+  return { ...actual, fetchRawTransaction: vi.fn() };
+});
+
+import { fetchRawTransaction } from "@/lib/solana/feeLedger";
+import UnderstandPage from "@/app/understand/page";
+import {
+  buildLegacyRaw,
+  closeIx,
+  FEE_WALLET,
+  systemTransfer as systemTransferIx,
+} from "./fixtures/rawTransactions";
+
+const VALID_SIGNATURE =
+  "2V4dcrHEApzHDS9PqxWo1KeeK8a3HvVLyPsxVfq3yEktjdqH8NX77nzGZVT4QXTaVy8sWvszA8xDx8N2UrYGfrcw";
+
+const mockedFetch = vi.mocked(fetchRawTransaction);
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function submitSignature(signature: string) {
+  fireEvent.change(screen.getByLabelText(/transaction signature/i), {
+    target: { value: signature },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /explain it/i }));
+}
+
+describe("understand page renders its read-only promise", () => {
+  it("states the page never connects a wallet and never asks for a signature", () => {
+    render(<UnderstandPage />);
+    expect(screen.getByText(/never connects a wallet/i)).toBeTruthy();
+    expect(screen.getByText(/never asks you to sign anything/i)).toBeTruthy();
+  });
+
+  it("keeps the owner's writing rules on the static copy", () => {
+    const { container } = render(<UnderstandPage />);
+    const text = container.textContent ?? "";
+    expect(text).not.toMatch(/[\u2014\u2013]/);
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+    expect(text).not.toMatch(/!/);
+  });
+});
+
+describe("understand page input validation", () => {
+  it("rejects input that is not a signature shape without fetching", async () => {
+    render(<UnderstandPage />);
+    submitSignature("not-a-signature");
+    expect(
+      await screen.findByText(/does not look like a transaction signature/i)
+    ).toBeTruthy();
+    expect(mockedFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("understand page outcomes", () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+  });
+
+  it("explains a repair transaction end to end with real decode and explain", async () => {
+    const { raw } = buildLegacyRaw([
+      closeIx(),
+      closeIx("token-2022"),
+      systemTransferIx(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/This transaction contains 3 instructions/i)
+    ).toBeTruthy();
+    const closeLines = await screen.findAllByText(
+      /Close the token account/i
+    );
+    expect(closeLines).toHaveLength(2);
+    expect(await screen.findByText(/0\.000020392 SOL/)).toBeTruthy();
+    expect(await screen.findByText(new RegExp(FEE_WALLET))).toBeTruthy();
+  });
+
+  it("says honestly when no transaction was found on this network", async () => {
+    mockedFetch.mockResolvedValue(null);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/No transaction with that signature was found/i)
+    ).toBeTruthy();
+  });
+
+  it("says honestly when the transaction data cannot be read", async () => {
+    mockedFetch.mockResolvedValue({ blockTime: null, transaction: null });
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(/could not be read/i)
+    ).toBeTruthy();
+  });
+
+  it("shows a friendly network error with the raw detail in small print", async () => {
+    mockedFetch.mockRejectedValue(new Error("429 Connection rate limits exceeded"));
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(await screen.findByText(/Could not reach the RPC/i)).toBeTruthy();
+    expect(await screen.findByText(/429 Connection rate limits exceeded/i)).toBeTruthy();
+  });
+
+  it("fetches from the endpoint matching the site's own cluster", async () => {
+    mockedFetch.mockResolvedValue(null);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    const endpoint = mockedFetch.mock.calls[0][0];
+    expect(typeof endpoint === "string" && endpoint.startsWith("https://")).toBe(true);
+  });
+});

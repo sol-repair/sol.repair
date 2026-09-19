@@ -35,6 +35,15 @@ function routePaths(): string[] {
   return routes.sort();
 }
 
+/** Routes that are deliberately NOT in the sitemap yet. Every entry needs
+ *  a reason; when a page goes public it joins the sitemap and leaves this
+ *  list in the same commit. */
+const INTENTIONALLY_UNLISTED = [
+  // Quiet-shipped (M2): the transaction explainer has no inbound links and
+  // no sitemap entry until the suite is announced (M4).
+  "/understand",
+];
+
 function sitemapPaths(): string[] {
   return sitemap()
     .map((entry) => {
@@ -45,8 +54,10 @@ function sitemapPaths(): string[] {
 }
 
 describe("sitemap stays in sync with the app's routes", () => {
-  it("lists every page the app serves", () => {
-    expect(sitemapPaths()).toEqual(routePaths());
+  it("lists every page the app serves, except the declared quiet routes", () => {
+    expect(sitemapPaths()).toEqual(
+      routePaths().filter((route) => !INTENTIONALLY_UNLISTED.includes(route))
+    );
   });
 
   it("carries a last-modified date and the site base on every entry", () => {
