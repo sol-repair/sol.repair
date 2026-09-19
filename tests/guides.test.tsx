@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import RandomTokensGuide from "@/app/guides/random-tokens/page";
 import SolanaRentGuide from "@/app/guides/solana-rent/page";
 import CloseTokenAccountsGuide from "@/app/guides/close-token-accounts/page";
+import WhatDidIJustSignGuide from "@/app/guides/what-did-i-just-sign/page";
 import GuidesIndexPage from "@/app/guides/page";
 import GuidesSection from "@/components/GuidesSection";
 import { GUIDES } from "@/lib/guides";
@@ -23,6 +24,7 @@ const PAGES = [
   { name: "random-tokens", Component: RandomTokensGuide },
   { name: "solana-rent", Component: SolanaRentGuide },
   { name: "close-token-accounts", Component: CloseTokenAccountsGuide },
+  { name: "what-did-i-just-sign", Component: WhatDidIJustSignGuide },
   { name: "guides index", Component: GuidesIndexPage },
   { name: "guides section", Component: GuidesSection },
 ];
@@ -30,6 +32,28 @@ const PAGES = [
 afterEach(cleanup);
 
 describe("guide pages render with their content", () => {
+  it("what did I just sign guide explains instructions and lasting permissions", () => {
+    render(<WhatDidIJustSignGuide />);
+    expect(
+      screen.getByRole("heading", { level: 1, name: /what did i just sign/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/the network runs them in order/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/last is not what a transaction did for you, but what it left behind/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Wallets add their own instructions when you sign/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/it describes, it does not accuse/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /open the explainer/i })
+    ).toBeTruthy();
+  });
+
   it("random tokens guide answers the question in its headline", () => {
     render(<RandomTokensGuide />);
     expect(
@@ -130,11 +154,12 @@ describe("owner writing rules hold mechanically", () => {
 });
 
 describe("the guide list is a single source", () => {
-  it("holds exactly the three published guides", () => {
+  it("holds exactly the four published guides", () => {
     expect(GUIDES.map((g) => g.href)).toEqual([
       "/guides/random-tokens",
       "/guides/solana-rent",
       "/guides/close-token-accounts",
+      "/guides/what-did-i-just-sign",
     ]);
     for (const guide of GUIDES) {
       expect(guide.title.length).toBeGreaterThan(0);

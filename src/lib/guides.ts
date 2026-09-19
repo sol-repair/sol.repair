@@ -26,4 +26,10 @@ export const GUIDES: Guide[] = [
     summary:
       "The steps and the checklist, whether you use this tool or any other.",
   },
+  {
+    href: "/guides/what-did-i-just-sign",
+    title: "What did I just sign?",
+    summary:
+      "How to read a transaction: the steps it runs, and the permissions it can leave behind.",
+  },
 ];
