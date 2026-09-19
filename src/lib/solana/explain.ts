@@ -37,6 +37,8 @@ const PROGRAM_LABELS: Record<string, string> = {
 
 /* Wire tags this slice decodes. Everything else in a known program is an
  * honest unknown-instruction until a later slice adds it with fixtures. */
+const SYSTEM_CREATE_ACCOUNT_TAG = 0;
+const SYSTEM_ASSIGN_TAG = 1;
 const SYSTEM_TRANSFER_TAG = 2;
 const TOKEN_TRANSFER_TAG = 3;
 const TOKEN_APPROVE_TAG = 4;
@@ -123,6 +125,34 @@ function explainSystemInstruction(
     const lamports = readU64LE(data.subarray(4));
     return {
       text: `Transfer ${formatLamports(lamports)} SOL from ${accountPubkeys[0]} to ${accountPubkeys[1]}.`,
+      limitation: null,
+    };
+  }
+  // Layouts verified against the shipped web3.js builders (wire audit):
+  // createAccount is u32 tag 0, u64 lamports at 4, u64 space at 12, and a
+  // 32-byte owner program at 20 (52 bytes); assign is u32 tag 1 with the
+  // 32-byte program at 4 (36 bytes). The post-state panel already reads
+  // both, so the instruction list must agree with it.
+  if (
+    data.byteLength >= 52 &&
+    readU32LE(data) === SYSTEM_CREATE_ACCOUNT_TAG &&
+    accountPubkeys.length >= 2
+  ) {
+    const lamports = readU64LE(data.subarray(4));
+    const owner = bs58.encode(data.subarray(20, 52));
+    return {
+      text: `Create a new account ${accountPubkeys[1]} with ${formatLamports(lamports)} SOL, owned by program ${owner}.`,
+      limitation: null,
+    };
+  }
+  if (
+    data.byteLength >= 36 &&
+    readU32LE(data) === SYSTEM_ASSIGN_TAG &&
+    accountPubkeys.length >= 1
+  ) {
+    const program = bs58.encode(data.subarray(4, 36));
+    return {
+      text: `Reassign account ${accountPubkeys[0]} to program ${program}.`,
       limitation: null,
     };
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   explainDecodedTransaction,
   explainInstruction,
@@ -161,6 +161,71 @@ describe("explainInstruction", () => {
     });
     expect(result.limitation).toBe("unknown-instruction");
     expect(result.text).toContain("classic token program");
+  });
+
+  it("explains a system account creation with the amount and owner program", () => {
+    const ownerProgram = Keypair.generate();
+    const data = new Uint8Array(52);
+    new DataView(data.buffer).setUint32(0, 0, true);
+    new DataView(data.buffer).setBigUint64(4, 2_039_280n, true);
+    new DataView(data.buffer).setBigUint64(12, 165n, true);
+    data.set(ownerProgram.publicKey.toBytes(), 20);
+    const result = explainInstruction({
+      programId: SYSTEM_PROGRAM,
+      accountPubkeys: [OWNER, DESTINATION],
+      data,
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Create a new account ${DESTINATION} with 0.00203928 SOL, owned by program ${ownerProgram.publicKey.toBase58()}.`
+    );
+  });
+
+  it("explains reassigning an account to a program", () => {
+    const ownerProgram = Keypair.generate();
+    const data = new Uint8Array(36);
+    new DataView(data.buffer).setUint32(0, 1, true);
+    data.set(ownerProgram.publicKey.toBytes(), 4);
+    const result = explainInstruction({
+      programId: SYSTEM_PROGRAM,
+      accountPubkeys: [OWNER],
+      data,
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Reassign account ${OWNER} to program ${ownerProgram.publicKey.toBase58()}.`
+    );
+  });
+
+  it("decodes system create and assign built by the shipped library through the real wire", () => {
+    const account = Keypair.generate();
+    const ownerProgram = Keypair.generate();
+    const { raw } = buildLegacyRaw([
+      SystemProgram.createAccount({
+        fromPubkey: Keypair.generate().publicKey,
+        newAccountPubkey: account.publicKey,
+        lamports: 2_039_280,
+        space: 165,
+        programId: ownerProgram.publicKey,
+      }),
+      SystemProgram.assign({
+        accountPubkey: account.publicKey,
+        programId: ownerProgram.publicKey,
+      }),
+    ]);
+    const decoded = decodeRawTransaction(raw)!;
+    const explained = explainDecodedTransaction(decoded);
+    expect(explained.instructions).toHaveLength(2);
+    expect(explained.instructions[0].limitation).toBeNull();
+    expect(explained.instructions[0].text).toContain("0.00203928 SOL");
+    expect(explained.instructions[0].text).toContain(
+      ownerProgram.publicKey.toBase58()
+    );
+    expect(explained.instructions[1].limitation).toBeNull();
+    expect(explained.instructions[1].text).toContain("Reassign account");
+    expect(explained.instructions[1].text).toContain(
+      account.publicKey.toBase58()
+    );
   });
 });
 
