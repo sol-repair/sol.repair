@@ -34,9 +34,11 @@ const CONNECT_FAILED_MESSAGE =
 /**
  * The wallet picker. Picking a wallet only selects it; the green
  * connect button does the connecting, so the user always taps a
- * button that says what the tap does.
+ * button that says what the tap does. Exported so other read-only
+ * surfaces (the transaction explainer's recent-transactions walk)
+ * reuse the exact same picker instead of growing a second one.
  */
-function WalletPicker({
+export function WalletPicker({
   onClose,
 }: {
   onClose: () => void;

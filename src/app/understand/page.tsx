@@ -17,6 +17,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { NetworkBadge } from "@/components/NetworkBadge";
+import { WalletRecentTransactions } from "@/components/WalletRecentTransactions";
 import { IS_MAINNET } from "@/lib/solana/connection";
 import {
   FEE_LEDGER_ENDPOINTS,
@@ -133,6 +134,51 @@ export default function UnderstandPage() {
           never asks you to sign anything. Anything it cannot describe says
           so instead of guessing.
         </p>
+
+        <details className="mb-6 rounded border border-zinc-800 bg-zinc-900/30 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-300">
+            How to read this
+          </summary>
+          <ul className="mt-3 space-y-2 text-sm leading-relaxed text-zinc-400">
+            <li>
+              Nothing on this page can sign anything. Connecting a wallet
+              only reads the public list of transactions that mention your
+              address, and the page never asks for an approval.
+            </li>
+            <li>
+              The panel above the instruction list is the important part.
+              It names every lasting change the transaction made: which
+              permissions now exist, who holds them, and what ended.
+            </li>
+            <li>
+              Amber means something could not be fully analyzed. Wallets add
+              their own instructions when they sign, for example fee
+              settings and safety checks. Those are not part of the app you
+              used, this tool cannot describe them, and honest reporting
+              keeps the panel amber even on an innocent transaction.
+            </li>
+            <li>
+              Red appears in exactly one case: a transaction that hands
+              ownership of a token account to a different address. If that
+              was not intended, the previous owner may no longer control
+              that account.
+            </li>
+            <li>
+              A transaction that failed on chain is reported as changed
+              nothing, because a failed transaction has no effects.
+            </li>
+          </ul>
+        </details>
+
+        <div className="mb-6">
+          <WalletRecentTransactions
+            endpoint={ENDPOINT}
+            onSelect={(chosen) => {
+              setSignature(chosen);
+              void explain(chosen);
+            }}
+          />
+        </div>
 
         <form
           className="mb-6 flex flex-col gap-3 sm:flex-row"

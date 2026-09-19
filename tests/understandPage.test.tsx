@@ -20,13 +20,25 @@ import {
   createSetAuthorityInstruction,
 } from "@solana/spl-token";
 
+const mocks = vi.hoisted(() => ({
+  wallet: {} as Record<string, unknown>,
+}));
+
+vi.mock("@solana/wallet-adapter-react", () => ({
+  useWallet: () => mocks.wallet,
+}));
+
 vi.mock("@/lib/solana/feeLedger", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/solana/feeLedger")>();
-  return { ...actual, fetchRawTransaction: vi.fn() };
+  return {
+    ...actual,
+    fetchRawTransaction: vi.fn(),
+    fetchFeeSignatures: vi.fn(),
+  };
 });
 
-import { fetchRawTransaction } from "@/lib/solana/feeLedger";
+import { fetchRawTransaction, fetchFeeSignatures } from "@/lib/solana/feeLedger";
 import UnderstandPage from "@/app/understand/page";
 import {
   buildLegacyRaw,
@@ -39,6 +51,23 @@ const VALID_SIGNATURE =
   "2V4dcrHEApzHDS9PqxWo1KeeK8a3HvVLyPsxVfq3yEktjdqH8NX77nzGZVT4QXTaVy8sWvszA8xDx8N2UrYGfrcw";
 
 const mockedFetch = vi.mocked(fetchRawTransaction);
+const mockedSignatureList = vi.mocked(fetchFeeSignatures);
+
+function disconnectedWallet(): Record<string, unknown> {
+  return {
+    wallet: null,
+    wallets: [],
+    connect: vi.fn(),
+    connected: false,
+    connecting: false,
+    disconnect: vi.fn(),
+    publicKey: null,
+  };
+}
+
+beforeEach(() => {
+  mocks.wallet = disconnectedWallet();
+});
 
 afterEach(() => {
   cleanup();
@@ -65,6 +94,25 @@ describe("understand page renders its read-only promise", () => {
     expect(text).not.toMatch(/[\u2014\u2013]/);
     expect(text).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
     expect(text).not.toMatch(/!/);
+  });
+
+  it("explains how to read the page, including wallet-added instructions", () => {
+    render(<UnderstandPage />);
+    expect(screen.getByText(/how to read this/i)).toBeTruthy();
+    expect(
+      screen.getByText(/Nothing on this page can sign anything\./i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Wallets add their own instructions when they sign/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /hands ownership of a token account to a different address/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/failed on chain is reported as changed nothing/i)
+    ).toBeTruthy();
   });
 });
 
@@ -173,6 +221,36 @@ describe("understand page outcomes", () => {
     expect(
       await screen.findByText(/The account owner of token account/i)
     ).toBeTruthy();
+  });
+
+  it("lists the connected wallet's recent transactions and explains a chosen one", async () => {
+    mocks.wallet = {
+      wallet: { adapter: { name: "Phantom" } },
+      wallets: [],
+      connect: vi.fn(),
+      connected: true,
+      connecting: false,
+      disconnect: vi.fn(),
+      publicKey: Keypair.generate().publicKey,
+    };
+    mockedSignatureList.mockResolvedValue([
+      {
+        signature: VALID_SIGNATURE,
+        blockTime: 1789215763,
+      },
+    ]);
+    const { raw } = buildLegacyRaw([
+      closeIx(),
+      systemTransferIx(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    const row = await screen.findByRole("button", { name: /2V4dcrHE/ });
+    fireEvent.click(row);
+    expect(
+      await screen.findByText(/This transaction contains 2 instructions/i)
+    ).toBeTruthy();
+    expect(await screen.findByText(/0\.000020392 SOL/)).toBeTruthy();
   });
 
   it("says honestly when no transaction was found on this network", async () => {
