@@ -13,7 +13,6 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
-  Transaction,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -21,6 +20,22 @@ import {
 } from "@solana/web3.js";
 import fc from "fast-check";
 import { describe, expect, it, vi, afterEach } from "vitest";
+
+import {
+  BLOCK_TIME,
+  buildLegacyRaw,
+  buildV0Raw,
+  buildV1RepairRaw,
+  closeIx,
+  FEE_WALLET,
+  REAL_V1_ADDRESSES,
+  REAL_V1_BASE64,
+  REAL_V1_BLOCK_TIME,
+  RECENT_BLOCKHASH,
+  realV1Raw,
+  systemTransfer,
+  systemTransferWithSeed,
+} from "./fixtures/rawTransactions";
 
 import {
   LedgerFetchError,
@@ -32,97 +47,9 @@ import {
   isKnownTestFee,
   type RawTransaction,
 } from "@/lib/solana/feeLedger";
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@/lib/solana/tokenAccounts";
+import { TOKEN_PROGRAM_ID } from "@/lib/solana/tokenAccounts";
 
-const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 const SOMEONE_ELSE = Keypair.generate().publicKey;
-const RECENT_BLOCKHASH = "11111111111111111111111111111111";
-const BLOCK_TIME = 1755577001;
-
-function systemTransfer(to: PublicKey, lamports: number): TransactionInstruction {
-  return SystemProgram.transfer({
-    fromPubkey: Keypair.generate().publicKey,
-    toPubkey: to,
-    lamports,
-  });
-}
-
-function systemTransferWithSeed(to: PublicKey, lamports: number): TransactionInstruction {
-  // web3.js v1.x builds a TransferWithSeed whenever `basePubkey` is present
-  // on SystemProgram.transfer params; there is no separate builder anymore.
-  return SystemProgram.transfer({
-    fromPubkey: Keypair.generate().publicKey,
-    basePubkey: Keypair.generate().publicKey,
-    seed: "fees",
-    toPubkey: to,
-    lamports,
-    programId: SystemProgram.programId,
-  });
-}
-
-function closeIx(
-  program: "spl" | "token-2022" = "spl",
-  data: Buffer = Buffer.from([9])
-): TransactionInstruction {
-  return new TransactionInstruction({
-    keys: [
-      { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
-      { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
-      { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
-    ],
-    programId: program === "spl" ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID,
-    data,
-  });
-}
-
-type WireInstruction = { programIdIndex?: number; accounts?: number[]; data?: string };
-
-/** Build a raw getTransaction(base64) response for a legacy transaction. The
- *  compiled message is returned too so tests can move a compiled
- *  instruction into meta.innerInstructions (the exact CPI wire shape). */
-function buildLegacyRaw(
-  instructions: TransactionInstruction[],
-  opts: { err?: unknown; inner?: WireInstruction[] } = {}
-): { raw: RawTransaction; message: Message } {
-  const tx = new Transaction({
-    feePayer: Keypair.generate().publicKey,
-    recentBlockhash: RECENT_BLOCKHASH,
-  });
-  for (const ix of instructions) tx.add(ix);
-  const message = tx.compileMessage();
-  const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
-  return {
-    raw: {
-      blockTime: BLOCK_TIME,
-      version: null,
-      meta: {
-        err: opts.err ?? null,
-        innerInstructions: opts.inner ? [{ index: 0, instructions: opts.inner }] : [],
-      },
-      transaction: [serialized.toString("base64"), "base64"],
-    },
-    message,
-  };
-}
-
-function buildV0Raw(instructions: TransactionInstruction[]): RawTransaction {
-  const message = new TransactionMessage({
-    payerKey: Keypair.generate().publicKey,
-    recentBlockhash: RECENT_BLOCKHASH,
-    instructions,
-  }).compileToV0Message();
-  const serialized = new VersionedTransaction(message).serialize();
-  return {
-    blockTime: BLOCK_TIME,
-    version: 0,
-    meta: {
-      err: null,
-      loadedAddresses: { readonly: [], writable: [] },
-      innerInstructions: [],
-    },
-    transaction: [Buffer.from(serialized).toString("base64"), "base64"],
-  };
-}
 
 describe("feeRowsFromRawTransactions", () => {
   it("extracts a fee transfer from a repair transaction (token-2022 receipt)", () => {
@@ -667,91 +594,9 @@ describe("decodeRawTransaction version-1 transactions (SIMD-0385)", () => {
   // instruction is a compute-budget style op, so it must decode cleanly
   // AND produce no fee rows: an unrelated v1 transaction is not revenue.
 
-  const REAL_V1_BASE64 =
-    "gQEAAQwAAABZrn9Geyy9QOyQBlOi5POqdxw3lJ789VaPIeuAHVOy8QEDUqHvuOWhBkVUFQrt+G3XhJZCwpfE/NeVgktJghRKPjLze4W/dXluLiYNnl29YfRnmbkQ4yo2Nvk1Ei319ZiWnM5S8s5diwsp/V9N7L1deOZqhkue15uANDp/kdfN7/jHwFwVAAAAEAACARIAARY4/h1NIL8lJwAAAAAAAAAABIHOjW5o9tgS9W0eqKzf0ajmbl/fCnfUEsXpYHLPdsvdJ0fBGlaGNAfEO6u8Sy9f5PUxXWW/nI9ldj5EUhnnFgY=";
-  const REAL_V1_BLOCK_TIME = 1788965346;
-  const REAL_V1_ADDRESSES = [
-    "6ZZecuC9M7khPZzZZSN8o4vpa2bds6cFJiCSziVVf7e9",
-    "HPTKEmtGSTdAmnZUkTtMqr6VEQDgMrGmi4xiWgVA5JKu",
-    "EtQM4CYjv2rutiBkD4FDj5zFaPkxfQ9og6g2rzdu5hY2",
-  ];
-
-  function realV1Raw(overrides: Partial<RawTransaction> = {}): RawTransaction {
-    return {
-      blockTime: REAL_V1_BLOCK_TIME,
-      version: 1,
-      meta: {
-        err: null,
-        loadedAddresses: { readonly: [], writable: [] },
-        innerInstructions: [],
-        preBalances: [283149512403, 168249600, 833120],
-      },
-      transaction: [REAL_V1_BASE64, "base64"],
-      ...overrides,
-    };
-  }
-
-  /** Assemble a minimal well-formed v1 envelope by hand (the bundled
-   *  web3.js cannot compile one). Field layout per SIMD-0385:
-   *  version 0x81 | header(3) | configMask(u32) | lifetime(32) |
-   *  numInstructions | numAddresses | addresses (32 bytes each) |
-   *  config values (4 bytes per set mask bit, none here) |
-   *  per instruction: programIndex, accountCount, dataLength(u16 LE),
-   *  account indexes, data | signatures at the tail (never read). */
-  function buildV1RepairRaw(opts: {
-    feeLamports: number;
-    preBalances?: number[];
-  }): RawTransaction {
-    const payer = Keypair.generate().publicKey;
-    const tokenAccount = Keypair.generate().publicKey;
-    const owner = Keypair.generate().publicKey;
-    const addresses = [
-      payer,
-      tokenAccount,
-      owner,
-      new PublicKey(FEE_WALLET),
-      TOKEN_PROGRAM_ID,
-      SystemProgram.programId,
-    ];
-    const transferData = Buffer.alloc(12);
-    transferData.writeUInt32LE(2, 0); // SystemProgram transfer tag
-    transferData.writeBigUInt64LE(BigInt(opts.feeLamports), 4);
-    const instructions = [
-      { programIndex: 4, accountIndexes: [1, 2, 2], data: Buffer.from([9]) },
-      { programIndex: 5, accountIndexes: [0, 3], data: transferData },
-    ];
-    const parts: Buffer[] = [
-      Buffer.from([0x81]),
-      Buffer.from([1, 0, 0]), // header: 1 required signature
-      Buffer.from([0, 0, 0, 0]), // configMask: no config requests
-      Buffer.alloc(32, 7), // lifetime specifier
-      Buffer.from([instructions.length]),
-      Buffer.from([addresses.length]),
-      ...addresses.map((k) => k.toBuffer()),
-    ];
-    // The SIMD puts ALL instruction headers first, THEN all payloads.
-    const headers: Buffer[] = [];
-    const payloads: Buffer[] = [];
-    for (const ix of instructions) {
-      const len = Buffer.alloc(2);
-      len.writeUInt16LE(ix.data.length);
-      headers.push(Buffer.from([ix.programIndex, ix.accountIndexes.length]), len);
-      payloads.push(...ix.accountIndexes.map((a) => Buffer.from([a])), ix.data);
-    }
-    parts.push(...headers, ...payloads);
-    parts.push(Buffer.alloc(64)); // the one tail signature, unchecked
-    return {
-      blockTime: BLOCK_TIME,
-      version: 1,
-      meta: {
-        err: null,
-        loadedAddresses: { readonly: [], writable: [] },
-        innerInstructions: [],
-        preBalances: opts.preBalances ?? [1, 2_039_280, 1, 1, 1, 1],
-      },
-      transaction: [Buffer.concat(parts).toString("base64"), "base64"],
-    };
-  }
+  // The fixture helpers (realV1Raw, buildV1RepairRaw, the embedded chain
+  // bytes) live in ./fixtures/rawTransactions, shared with the explainer
+  // tests so both run against the same shapes.
 
   it("decodes a real v1 transaction byte-for-byte (chain fixture)", () => {
     const decoded = decodeRawTransaction(realV1Raw());
