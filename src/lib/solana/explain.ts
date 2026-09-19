@@ -17,6 +17,8 @@
  *   transaction; UNDERSTAND is read-only forever.
  */
 
+import bs58 from "bs58";
+
 import type { DecodedInstruction } from "./feeLedger";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "./tokenAccounts";
 
@@ -165,14 +167,11 @@ function explainTokenInstruction(
     const granting = data[2] === 1;
     if (!kind) return unrecognizedInstruction(label);
     if (granting && data.byteLength >= 35) {
-      // The new authority is a raw 32-byte key at offset 3; show the first
-      // bytes honestly rather than fabricating a base58 form here.
-      const raw = data.subarray(3, 35);
-      const shown = Array.from(raw.slice(0, 8), (b) =>
-        b.toString(16).padStart(2, "0")
-      ).join("");
+      // The new authority is a raw 32-byte key at offset 3; base58 is how
+      // anyone recognizes an address, so encode it rather than showing hex.
+      const newAuthority = bs58.encode(data.subarray(3, 35));
       return {
-        text: `Change the ${kind} of ${accountPubkeys[0]} to a new address (starting with bytes ${shown}).`,
+        text: `Change the ${kind} of ${accountPubkeys[0]} to ${newAuthority}.`,
         limitation: null,
       };
     }

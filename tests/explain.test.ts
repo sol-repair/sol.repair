@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Keypair } from "@solana/web3.js";
 import {
   explainDecodedTransaction,
   explainInstruction,
@@ -185,17 +186,18 @@ describe("explainInstruction token table", () => {
   });
 
   it("explains setting an authority to a new address, the dangerous class", () => {
-    const newAuthority = Array.from({ length: 32 }, (_, i) => i + 1);
+    const newAuthority = Keypair.generate();
     const result = explainInstruction(
       tokenIx(SPL_TOKEN_PROGRAM, 6, [TOKEN_ACCOUNT, OWNER], undefined, [
         2,
         1,
-        ...newAuthority,
+        ...newAuthority.publicKey.toBytes(),
       ])
     );
     expect(result.limitation).toBeNull();
-    expect(result.text).toContain("Change the account owner authority");
-    expect(result.text).toContain(TOKEN_ACCOUNT);
+    expect(result.text).toBe(
+      `Change the account owner authority of ${TOKEN_ACCOUNT} to ${newAuthority.publicKey.toBase58()}.`
+    );
   });
 
   it("explains removing an authority (option byte 0)", () => {
