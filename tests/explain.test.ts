@@ -49,6 +49,39 @@ function closeAccount(
   };
 }
 
+/** Token-program wire shape: one tag byte, then the payload (u64 LE or
+ *  nothing), exactly as the token programs serialize instructions. */
+function tokenIx(
+  programId: string,
+  tag: number,
+  accountPubkeys: string[],
+  u64Payload?: bigint,
+  extraBytes?: number[]
+): DecodedInstruction {
+  const data = new Uint8Array(
+    u64Payload === undefined && extraBytes === undefined
+      ? 1
+      : 1 + (u64Payload === undefined ? 0 : 8) + (extraBytes?.length ?? 0)
+  );
+  data[0] = tag;
+  if (u64Payload !== undefined) {
+    new DataView(data.buffer).setBigUint64(1, u64Payload, true);
+  }
+  if (extraBytes) data.set(extraBytes, 1 + (u64Payload === undefined ? 0 : 8));
+  return { programId, accountPubkeys, data };
+}
+
+const COMPUTE_BUDGET_PROGRAM =
+  "ComputeBudget111111111111111111111111111111";
+
+function computeIx(tag: number, payload: number[]): DecodedInstruction {
+  return {
+    programId: COMPUTE_BUDGET_PROGRAM,
+    accountPubkeys: [],
+    data: new Uint8Array([tag, ...payload]),
+  };
+}
+
 describe("explainInstruction", () => {
   it("explains a system transfer with the amount and both addresses", () => {
     const result = explainInstruction(
@@ -117,6 +150,154 @@ describe("explainInstruction", () => {
     });
     expect(result.limitation).toBe("unknown-instruction");
     expect(result.text).toContain("classic token program");
+  });
+});
+
+describe("explainInstruction token table", () => {
+  it("explains a token transfer in base units", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 3, [TOKEN_ACCOUNT, DESTINATION], 2500000000n)
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Transfer 2500000000 base units of the token in account ${TOKEN_ACCOUNT} to account ${DESTINATION}.`
+    );
+  });
+
+  it("explains an approve (granting a delegate spending permission)", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 4, [TOKEN_ACCOUNT, DESTINATION], 1000000n)
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Let ${DESTINATION} spend up to 1000000 base units from token account ${TOKEN_ACCOUNT}.`
+    );
+  });
+
+  it("explains a revoke (removing a delegate), the instruction the repair uses", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 5, [TOKEN_ACCOUNT, OWNER])
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Remove the delegate (all spending permission) from token account ${TOKEN_ACCOUNT}.`
+    );
+  });
+
+  it("explains setting an authority to a new address, the dangerous class", () => {
+    const newAuthority = Array.from({ length: 32 }, (_, i) => i + 1);
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 6, [TOKEN_ACCOUNT, OWNER], undefined, [
+        2,
+        1,
+        ...newAuthority,
+      ])
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toContain("Change the account owner authority");
+    expect(result.text).toContain(TOKEN_ACCOUNT);
+  });
+
+  it("explains removing an authority (option byte 0)", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 6, [TOKEN_ACCOUNT, OWNER], undefined, [
+        3,
+        0,
+      ])
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Remove the close authority from ${TOKEN_ACCOUNT}.`
+    );
+  });
+
+  it("explains an unknown authority type honestly rather than guessing", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 6, [TOKEN_ACCOUNT, OWNER], undefined, [
+        9,
+        0,
+      ])
+    );
+    expect(result.limitation).toBe("unknown-instruction");
+  });
+
+  it("explains minting new tokens", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 7, [DESTINATION, TOKEN_ACCOUNT, OWNER], 500n)
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Create 500 new base units of the token mint ${DESTINATION} into account ${TOKEN_ACCOUNT}.`
+    );
+  });
+
+  it("explains burning tokens", () => {
+    const result = explainInstruction(
+      tokenIx(TOKEN_2022_PROGRAM, 8, [TOKEN_ACCOUNT, OWNER], 100n)
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Destroy 100 base units in token account ${TOKEN_ACCOUNT}.`
+    );
+  });
+
+  it("explains a checked transfer with the mint and decimals", () => {
+    const data = new Uint8Array(10);
+    data[0] = 12;
+    data[1] = 6;
+    new DataView(data.buffer).setBigUint64(2, 42n, true);
+    const result = explainInstruction({
+      programId: SPL_TOKEN_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT, DESTINATION, OWNER],
+      data,
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Transfer 42 base units (6 decimals) of mint ${DESTINATION} from account ${TOKEN_ACCOUNT} to account ${OWNER}.`
+    );
+  });
+
+  it("explains freezing an account", () => {
+    const result = explainInstruction(
+      tokenIx(TOKEN_2022_PROGRAM, 10, [TOKEN_ACCOUNT, OWNER])
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Freeze token account ${TOKEN_ACCOUNT}. Only its freeze authority can do this, and a frozen account cannot send or receive tokens.`
+    );
+  });
+
+  it("falls back honestly when a known tag arrives with too few accounts", () => {
+    const result = explainInstruction(
+      tokenIx(SPL_TOKEN_PROGRAM, 3, [TOKEN_ACCOUNT], 1n)
+    );
+    expect(result.limitation).toBe("unknown-instruction");
+  });
+});
+
+describe("explainInstruction compute budget", () => {
+  it("explains a compute unit price offer", () => {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, 375000n, true);
+    const result = explainInstruction(computeIx(3, Array.from(bytes)));
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      "Offer a priority fee of 375000 micro-lamports per compute unit."
+    );
+  });
+
+  it("explains a compute unit limit", () => {
+    const result = explainInstruction(
+      computeIx(2, [0x40, 0x0d, 0x03, 0x00])
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe("Set the compute unit limit to 200000.");
+  });
+
+  it("says honestly when it cannot decode a compute budget instruction", () => {
+    const result = explainInstruction(computeIx(0x16, [1, 2, 3, 4]));
+    expect(result.limitation).toBe("unknown-instruction");
+    expect(result.text).toContain("compute budget");
   });
 });
 

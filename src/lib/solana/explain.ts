@@ -36,7 +36,23 @@ const PROGRAM_LABELS: Record<string, string> = {
 /* Wire tags this slice decodes. Everything else in a known program is an
  * honest unknown-instruction until a later slice adds it with fixtures. */
 const SYSTEM_TRANSFER_TAG = 2;
+const TOKEN_TRANSFER_TAG = 3;
+const TOKEN_APPROVE_TAG = 4;
+const TOKEN_REVOKE_TAG = 5;
+const TOKEN_SET_AUTHORITY_TAG = 6;
+const TOKEN_MINT_TO_TAG = 7;
+const TOKEN_BURN_TAG = 8;
 const TOKEN_CLOSE_ACCOUNT_TAG = 9;
+const TOKEN_FREEZE_TAG = 10;
+const TOKEN_TRANSFER_CHECKED_TAG = 12;
+
+/* SetAuthority authority types shared by both token programs. */
+const AUTHORITY_LABELS: Record<number, string> = {
+  0: "mint authority",
+  1: "freeze authority",
+  2: "account owner authority",
+  3: "close authority",
+};
 
 /** Why an instruction has no full explanation. Null means fully decoded. */
 export type InstructionLimitation =
@@ -116,17 +132,119 @@ function explainTokenInstruction(
   label: string
 ): ExplainedInstruction {
   const { data, accountPubkeys } = instruction;
-  if (
-    data.byteLength === 1 &&
-    data[0] === TOKEN_CLOSE_ACCOUNT_TAG &&
-    accountPubkeys.length >= 2
-  ) {
+  const tag = data.byteLength >= 1 ? data[0] : -1;
+  const u64At = (offset: number): bigint | null =>
+    data.byteLength >= offset + 8
+      ? readU64LE(data.subarray(offset))
+      : null;
+  const accounts = (n: number): string[] | null =>
+    accountPubkeys.length >= n ? accountPubkeys.slice(0, n) : null;
+
+  if (tag === TOKEN_TRANSFER_TAG && u64At(1) !== null && accounts(2)) {
+    const [a, b] = accountPubkeys;
+    return {
+      text: `Transfer ${u64At(1)} base units of the token in account ${a} to account ${b}.`,
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_APPROVE_TAG && u64At(1) !== null && accounts(2)) {
+    const [source, delegate] = accountPubkeys;
+    return {
+      text: `Let ${delegate} spend up to ${u64At(1)} base units from token account ${source}.`,
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_REVOKE_TAG && accounts(1)) {
+    return {
+      text: `Remove the delegate (all spending permission) from token account ${accountPubkeys[0]}.`,
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_SET_AUTHORITY_TAG && data.byteLength >= 3 && accounts(1)) {
+    const kind = AUTHORITY_LABELS[data[1]];
+    const granting = data[2] === 1;
+    if (!kind) return unrecognizedInstruction(label);
+    if (granting && data.byteLength >= 35) {
+      // The new authority is a raw 32-byte key at offset 3; show the first
+      // bytes honestly rather than fabricating a base58 form here.
+      const raw = data.subarray(3, 35);
+      const shown = Array.from(raw.slice(0, 8), (b) =>
+        b.toString(16).padStart(2, "0")
+      ).join("");
+      return {
+        text: `Change the ${kind} of ${accountPubkeys[0]} to a new address (starting with bytes ${shown}).`,
+        limitation: null,
+      };
+    }
+    if (!granting) {
+      return {
+        text: `Remove the ${kind} from ${accountPubkeys[0]}.`,
+        limitation: null,
+      };
+    }
+    return unrecognizedInstruction(label);
+  }
+  if (tag === TOKEN_MINT_TO_TAG && u64At(1) !== null && accounts(2)) {
+    const [mint, destination] = accountPubkeys;
+    return {
+      text: `Create ${u64At(1)} new base units of the token mint ${mint} into account ${destination}.`,
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_BURN_TAG && u64At(1) !== null && accounts(1)) {
+    return {
+      text: `Destroy ${u64At(1)} base units in token account ${accountPubkeys[0]}.`,
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_CLOSE_ACCOUNT_TAG && accounts(2)) {
     return {
       text: `Close the token account ${accountPubkeys[0]} (${label}), sending its SOL to ${accountPubkeys[1]}. Only the account owner or its close authority can do this.`,
       limitation: null,
     };
   }
+  if (tag === TOKEN_FREEZE_TAG && accounts(1)) {
+    return {
+      text: `Freeze token account ${accountPubkeys[0]}. Only its freeze authority can do this, and a frozen account cannot send or receive tokens.`,
+      limitation: null,
+    };
+  }
+  if (
+    tag === TOKEN_TRANSFER_CHECKED_TAG &&
+    data.byteLength >= 10 &&
+    u64At(2) !== null &&
+    accounts(3)
+  ) {
+    const [source, mint, destination] = accountPubkeys;
+    return {
+      text: `Transfer ${u64At(2)} base units (${data[1]} decimals) of mint ${mint} from account ${source} to account ${destination}.`,
+      limitation: null,
+    };
+  }
   return unrecognizedInstruction(label);
+}
+
+function explainComputeBudgetInstruction(
+  instruction: DecodedInstruction
+): ExplainedInstruction {
+  const { data } = instruction;
+  const tag = data.byteLength >= 1 ? data[0] : -1;
+  const u32At = (offset: number): number | null =>
+    data.byteLength >= offset + 4 ? readU32LE(data.subarray(offset)) : null;
+  if (tag === 3 && data.byteLength >= 9) {
+    const price = readU64LE(data.subarray(1));
+    return {
+      text: `Offer a priority fee of ${price} micro-lamports per compute unit.`,
+      limitation: null,
+    };
+  }
+  if (tag === 2 && data.byteLength === 5 && u32At(1) !== null) {
+    return {
+      text: `Set the compute unit limit to ${u32At(1)}.`,
+      limitation: null,
+    };
+  }
+  return unrecognizedInstruction(PROGRAM_LABELS[COMPUTE_BUDGET_PROGRAM_ID]);
 }
 
 /** Explain one decoded instruction. Never throws: anything unresolvable
@@ -144,6 +262,9 @@ export function explainInstruction(
     instruction.programId === TOKEN_2022
   ) {
     return explainTokenInstruction(instruction, label);
+  }
+  if (instruction.programId === COMPUTE_BUDGET_PROGRAM_ID) {
+    return explainComputeBudgetInstruction(instruction);
   }
   return unrecognizedInstruction(label);
 }
