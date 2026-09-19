@@ -212,12 +212,14 @@ function explainTokenInstruction(
   if (
     tag === TOKEN_TRANSFER_CHECKED_TAG &&
     data.byteLength >= 10 &&
-    u64At(2) !== null &&
+    u64At(1) !== null &&
     accounts(3)
   ) {
+    // Wire order verified against the shipped @solana/spl-token encoder:
+    // tag, u64 amount at offset 1, decimals byte last.
     const [source, mint, destination] = accountPubkeys;
     return {
-      text: `Transfer ${u64At(2)} base units (${data[1]} decimals) of mint ${mint} from account ${source} to account ${destination}.`,
+      text: `Transfer ${u64At(1)} base units (${data[9]} decimals) of mint ${mint} from account ${source} to account ${destination}.`,
       limitation: null,
     };
   }

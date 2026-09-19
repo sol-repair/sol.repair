@@ -242,10 +242,12 @@ describe("explainInstruction token table", () => {
   });
 
   it("explains a checked transfer with the mint and decimals", () => {
+    // Wire order verified against the shipped @solana/spl-token encoder:
+    // tag, u64 amount at offset 1, decimals byte last.
     const data = new Uint8Array(10);
     data[0] = 12;
-    data[1] = 6;
-    new DataView(data.buffer).setBigUint64(2, 42n, true);
+    new DataView(data.buffer).setBigUint64(1, 42n, true);
+    data[9] = 6;
     const result = explainInstruction({
       programId: SPL_TOKEN_PROGRAM,
       accountPubkeys: [TOKEN_ACCOUNT, DESTINATION, OWNER],
