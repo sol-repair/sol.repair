@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   AuthorityType,
   createApproveInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   createCloseAccountInstruction,
+  createInitializeAccount3Instruction,
+  createInitializeMint2Instruction,
   createRevokeInstruction,
   createSetAuthorityInstruction,
 } from "@solana/spl-token";
-import { Keypair } from "@solana/web3.js";
+import { Keypair, SystemProgram } from "@solana/web3.js";
 
 import { analyzeLeftBehind } from "@/lib/solana/postState";
 import type { DecodedInstruction } from "@/lib/solana/feeLedger";
@@ -26,6 +29,7 @@ const TOKEN_2022_PROGRAM = TOKEN_2022_PROGRAM_ID.toBase58();
 const COMPUTE_BUDGET_PROGRAM =
   "ComputeBudget111111111111111111111111111111";
 const LIGHTHOUSE = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
+const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 
@@ -366,6 +370,103 @@ describe("analyzeLeftBehind grounds repeated unknown lines", () => {
     expect(analysis.effects[0].text).toBe(
       "An instruction from the classic token program ran that this tool does not fully analyze. What it left behind is not known."
     );
+  });
+});
+
+describe("analyzeLeftBehind understands the setup family", () => {
+  it("reports mint and account setup as named info lines, not warnings", () => {
+    const ownerKey = Keypair.generate();
+    const mintData = new Uint8Array(35);
+    mintData[0] = 20;
+    mintData[1] = 6;
+    mintData.set(ownerKey.publicKey.toBytes(), 2);
+    mintData[34] = 0;
+    const accountData = new Uint8Array(33);
+    accountData[0] = 18;
+    accountData.set(ownerKey.publicKey.toBytes(), 1);
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        { programId: TOKEN_2022_PROGRAM, accountPubkeys: ["mint"], data: mintData },
+        {
+          programId: TOKEN_2022_PROGRAM,
+          accountPubkeys: ["acct", "mint"],
+          data: accountData,
+        },
+        tokenIx(TOKEN_2022_PROGRAM, 22, ["acct"]),
+      ],
+      failed: false,
+    });
+    expect(analysis.verdict).toBe("normal");
+    expect(analysis.effects).toHaveLength(3);
+    expect(analysis.effects.every((e) => e.severity === "info")).toBe(true);
+    expect(analysis.effects[0].text).toContain(
+      `mint authority is ${ownerKey.publicKey.toBase58()}`
+    );
+    expect(analysis.effects[1].text).toBe(
+      `Token account acct was set up for mint mint, owned by ${ownerKey.publicKey.toBase58()}.`
+    );
+    expect(analysis.effects[2].text).toBe(
+      "Token account acct was marked so its owner can never be changed."
+    );
+  });
+
+  it("treats the space question and the wrapped SOL sync as leaving nothing behind", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        tokenIx(TOKEN_2022_PROGRAM, 21, ["mint"], undefined, [0, 0]),
+        tokenIx(SPL_TOKEN_PROGRAM, 17, ["acct"]),
+      ],
+      failed: false,
+    });
+    expect(analysis.effects).toEqual([]);
+    expect(analysis.verdict).toBe("normal");
+  });
+
+  it("recognizes the associated token account program instead of warning about it", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        {
+          programId: ATA_PROGRAM,
+          accountPubkeys: ["a"],
+          data: new Uint8Array([1]),
+        },
+      ],
+      failed: false,
+    });
+    expect(analysis.verdict).toBe("normal");
+    expect(analysis.effects).toEqual([]);
+  });
+
+  it("walks a full library-built account setup with no warnings at all", () => {
+    const payer = Keypair.generate().publicKey;
+    const account = Keypair.generate().publicKey;
+    const ownerKey = Keypair.generate().publicKey;
+    const mintKey = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      SystemProgram.createAccount({
+        fromPubkey: payer,
+        newAccountPubkey: mintKey,
+        lamports: 1461600,
+        space: 82,
+        programId: TOKEN_2022_PROGRAM_ID,
+      }),
+      createInitializeMint2Instruction(mintKey, 6, ownerKey, null),
+      createAssociatedTokenAccountIdempotentInstruction(
+        payer,
+        account,
+        ownerKey,
+        mintKey
+      ),
+      createInitializeAccount3Instruction(account, mintKey, ownerKey),
+    ]);
+    const decoded = decodeRawTransaction(raw)!;
+    const analysis = analyzeLeftBehind({
+      instructions: decoded.instructions,
+      failed: false,
+    });
+    expect(analysis.verdict).toBe("normal");
+    expect(analysis.effects.every((e) => e.severity === "info")).toBe(true);
+    expect(analysis.headline).toContain("granted no new permissions");
   });
 });
 

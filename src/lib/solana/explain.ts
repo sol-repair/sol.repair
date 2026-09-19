@@ -25,6 +25,7 @@ import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "./tokenAccounts";
 const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
 const COMPUTE_BUDGET_PROGRAM_ID =
   "ComputeBudget111111111111111111111111111111";
+const ATA_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SPL_TOKEN = TOKEN_PROGRAM_ID.toBase58();
 const TOKEN_2022 = TOKEN_2022_PROGRAM_ID.toBase58();
 
@@ -33,6 +34,7 @@ const PROGRAM_LABELS: Record<string, string> = {
   [TOKEN_2022]: "the Token-2022 program",
   [SYSTEM_PROGRAM_ID]: "the System program",
   [COMPUTE_BUDGET_PROGRAM_ID]: "the compute budget program",
+  [ATA_PROGRAM_ID]: "the Associated Token Account program",
 };
 
 /* Wire tags this slice decodes. Everything else in a known program is an
@@ -40,6 +42,8 @@ const PROGRAM_LABELS: Record<string, string> = {
 const SYSTEM_CREATE_ACCOUNT_TAG = 0;
 const SYSTEM_ASSIGN_TAG = 1;
 const SYSTEM_TRANSFER_TAG = 2;
+const TOKEN_INITIALIZE_MINT_TAG = 0;
+const TOKEN_INITIALIZE_ACCOUNT_TAG = 1;
 const TOKEN_TRANSFER_TAG = 3;
 const TOKEN_APPROVE_TAG = 4;
 const TOKEN_REVOKE_TAG = 5;
@@ -49,6 +53,12 @@ const TOKEN_BURN_TAG = 8;
 const TOKEN_CLOSE_ACCOUNT_TAG = 9;
 const TOKEN_FREEZE_TAG = 10;
 const TOKEN_TRANSFER_CHECKED_TAG = 12;
+const TOKEN_INITIALIZE_ACCOUNT2_TAG = 16;
+const TOKEN_SYNC_NATIVE_TAG = 17;
+const TOKEN_INITIALIZE_ACCOUNT3_TAG = 18;
+const TOKEN_INITIALIZE_MINT2_TAG = 20;
+const TOKEN_GET_ACCOUNT_DATA_SIZE_TAG = 21;
+const TOKEN_INITIALIZE_IMMUTABLE_OWNER_TAG = 22;
 
 /* SetAuthority authority types shared by both token programs. */
 const AUTHORITY_LABELS: Record<number, string> = {
@@ -258,7 +268,98 @@ function explainTokenInstruction(
       limitation: null,
     };
   }
+  if (
+    (tag === TOKEN_INITIALIZE_MINT_TAG || tag === TOKEN_INITIALIZE_MINT2_TAG) &&
+    data.byteLength >= 35 &&
+    accounts(1)
+  ) {
+    // Layout verified against the shipped spl-token builders: tag, u8
+    // decimals, 32-byte mint authority, one option byte, and the
+    // 32-byte freeze authority only when the option byte is 1.
+    const decimals = data[1];
+    const authority = bs58.encode(data.subarray(2, 34));
+    const freezeText =
+      data[34] === 1 && data.byteLength >= 67
+        ? ` Its freeze authority is ${bs58.encode(data.subarray(35, 67))}.`
+        : "";
+    return {
+      text: `Set up a new token mint with ${decimals} decimals. Its mint authority is ${authority}.${freezeText}`,
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_INITIALIZE_ACCOUNT_TAG && accounts(3)) {
+    const [, mint, ownerKey] = accountPubkeys;
+    return {
+      text: `Set up this token account for mint ${mint}, owned by ${ownerKey}.`,
+      limitation: null,
+    };
+  }
+  if (
+    (tag === TOKEN_INITIALIZE_ACCOUNT2_TAG ||
+      tag === TOKEN_INITIALIZE_ACCOUNT3_TAG) &&
+    data.byteLength >= 33 &&
+    accounts(2)
+  ) {
+    const ownerKey = bs58.encode(data.subarray(1, 33));
+    return {
+      text: `Set up this token account for mint ${accountPubkeys[1]}, owned by ${ownerKey}.`,
+      limitation: null,
+    };
+  }
+  if (
+    tag === TOKEN_GET_ACCOUNT_DATA_SIZE_TAG &&
+    data.byteLength >= 3 &&
+    accounts(1)
+  ) {
+    return {
+      text: "Ask the token program how much space this account needs.",
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_INITIALIZE_IMMUTABLE_OWNER_TAG && accounts(1)) {
+    return {
+      text: "Mark this token account so its owner can never be changed.",
+      limitation: null,
+    };
+  }
+  if (tag === TOKEN_SYNC_NATIVE_TAG && accounts(1)) {
+    return {
+      text: "Update the wrapped-SOL balance of this account to match the SOL it holds.",
+      limitation: null,
+    };
+  }
   return unrecognizedInstruction(label);
+}
+
+/** The Associated Token Account program's own instructions. Its work
+ *  shows up as inner instructions too (creates and initializes), which
+ *  the decoder already lists separately. Wire shapes verified against
+ *  the shipped spl-token builders: plain Create carries no data bytes at
+ *  all, CreateIdempotent is the single byte 1, RecoverNested the single
+ *  byte 2. */
+function explainAtaInstruction(
+  instruction: DecodedInstruction
+): ExplainedInstruction {
+  const { data } = instruction;
+  if (data.byteLength === 0) {
+    return {
+      text: "Create the standard token account for this wallet and this token.",
+      limitation: null,
+    };
+  }
+  if (data.byteLength === 1 && data[0] === 1) {
+    return {
+      text: "Create the standard token account for this wallet and this token if it does not already exist.",
+      limitation: null,
+    };
+  }
+  if (data.byteLength === 1 && data[0] === 2) {
+    return {
+      text: "Recover tokens that were sent to a nested token account.",
+      limitation: null,
+    };
+  }
+  return unrecognizedInstruction(PROGRAM_LABELS[ATA_PROGRAM_ID]);
 }
 
 function explainComputeBudgetInstruction(
@@ -302,6 +403,9 @@ export function explainInstruction(
   }
   if (instruction.programId === COMPUTE_BUDGET_PROGRAM_ID) {
     return explainComputeBudgetInstruction(instruction);
+  }
+  if (instruction.programId === ATA_PROGRAM_ID) {
+    return explainAtaInstruction(instruction);
   }
   return unrecognizedInstruction(label);
 }

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+} from "@solana/web3.js";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createInitializeAccount3Instruction,
+  createInitializeImmutableOwnerInstruction,
+  createInitializeMint2Instruction,
+} from "@solana/spl-token";
 import {
   explainDecodedTransaction,
   explainInstruction,
@@ -387,6 +398,173 @@ describe("explainInstruction compute budget", () => {
     const result = explainInstruction(computeIx(0x16, [1, 2, 3, 4]));
     expect(result.limitation).toBe("unknown-instruction");
     expect(result.text).toContain("compute budget");
+  });
+});
+
+describe("explainInstruction token setup family", () => {
+  const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
+  function mintSetup(tag: number, decimals: number, freeze?: PublicKey) {
+    const data = new Uint8Array(freeze ? 67 : 35);
+    data[0] = tag;
+    data[1] = decimals;
+    data.set(Keypair.generate().publicKey.toBytes(), 2);
+    data[34] = freeze ? 1 : 0;
+    if (freeze) data.set(freeze.toBytes(), 35);
+    return data;
+  }
+
+  it("explains setting up a mint, naming the mint authority and freeze authority", () => {
+    const authority = Keypair.generate().publicKey;
+    const freezeKey = Keypair.generate().publicKey;
+    const withFreeze = mintSetup(20, 6, freezeKey);
+    withFreeze.set(authority.toBytes(), 2);
+    const result = explainInstruction({
+      programId: TOKEN_2022_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT],
+      data: withFreeze,
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Set up a new token mint with 6 decimals. Its mint authority is ${authority.toBase58()}. Its freeze authority is ${freezeKey.toBase58()}.`
+    );
+  });
+
+  it("explains setting up a mint with no freeze authority", () => {
+    const authority = Keypair.generate().publicKey;
+    const data = mintSetup(20, 9);
+    data.set(authority.toBytes(), 2);
+    const result = explainInstruction({
+      programId: TOKEN_2022_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT],
+      data,
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Set up a new token mint with 9 decimals. Its mint authority is ${authority.toBase58()}.`
+    );
+  });
+
+  it("explains the newer account setup forms with the owner from the data", () => {
+    const ownerKey = Keypair.generate().publicKey;
+    for (const tag of [16, 18]) {
+      const data = new Uint8Array(33);
+      data[0] = tag;
+      data.set(ownerKey.toBytes(), 1);
+      const result = explainInstruction({
+        programId: TOKEN_2022_PROGRAM,
+        accountPubkeys: [TOKEN_ACCOUNT, DESTINATION],
+        data,
+      });
+      expect(result.limitation).toBeNull();
+      expect(result.text).toBe(
+        `Set up this token account for mint ${DESTINATION}, owned by ${ownerKey.toBase58()}.`
+      );
+    }
+  });
+
+  it("explains the first account setup form with the owner from the accounts", () => {
+    const result = explainInstruction({
+      programId: SPL_TOKEN_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT, DESTINATION, OWNER],
+      data: new Uint8Array([1]),
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Set up this token account for mint ${DESTINATION}, owned by ${OWNER}.`
+    );
+  });
+
+  it("explains the space question, the owner lock, and the wrapped SOL sync", () => {
+    const space = explainInstruction({
+      programId: TOKEN_2022_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT],
+      data: new Uint8Array([21, 0, 0]),
+    });
+    expect(space.limitation).toBeNull();
+    expect(space.text).toBe(
+      "Ask the token program how much space this account needs."
+    );
+    const lock = explainInstruction({
+      programId: TOKEN_2022_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT],
+      data: new Uint8Array([22]),
+    });
+    expect(lock.limitation).toBeNull();
+    expect(lock.text).toBe(
+      `Mark this token account so its owner can never be changed.`
+    );
+    const sync = explainInstruction({
+      programId: SPL_TOKEN_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT],
+      data: new Uint8Array([17]),
+    });
+    expect(sync.limitation).toBeNull();
+    expect(sync.text).toBe(
+      "Update the wrapped-SOL balance of this account to match the SOL it holds."
+    );
+  });
+
+  it("explains the associated token account program's create instructions", () => {
+    const create = explainInstruction({
+      programId: ATA_PROGRAM,
+      accountPubkeys: [OWNER, TOKEN_ACCOUNT, OWNER, DESTINATION, SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM],
+      data: new Uint8Array(0),
+    });
+    expect(create.limitation).toBeNull();
+    expect(create.text).toBe(
+      "Create the standard token account for this wallet and this token."
+    );
+    const idempotent = explainInstruction({
+      programId: ATA_PROGRAM,
+      accountPubkeys: [OWNER, TOKEN_ACCOUNT, OWNER, DESTINATION, SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM],
+      data: new Uint8Array([1]),
+    });
+    expect(idempotent.limitation).toBeNull();
+    expect(idempotent.text).toBe(
+      "Create the standard token account for this wallet and this token if it does not already exist."
+    );
+    const unknown = explainInstruction({
+      programId: ATA_PROGRAM,
+      accountPubkeys: [OWNER],
+      data: new Uint8Array([9]),
+    });
+    expect(unknown.limitation).toBe("unknown-instruction");
+  });
+
+  it("explains a full account-setup transaction built by the shipped library", () => {
+    const payer = Keypair.generate().publicKey;
+    const account = Keypair.generate().publicKey;
+    const ownerKey = Keypair.generate().publicKey;
+    const mintKey = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      createInitializeMint2Instruction(mintKey, 6, ownerKey, null),
+      // GetAccountDataSize has no builder in the shipped library version;
+      // these bytes mirror the real chain instruction (tag 21, u16 LE
+      // extension type), verified against the owner's own transaction.
+      new TransactionInstruction({
+        keys: [{ pubkey: mintKey, isSigner: false, isWritable: false }],
+        programId: TOKEN_2022_PROGRAM_ID,
+        data: Buffer.from([21, 0, 0]),
+      }),
+      createInitializeImmutableOwnerInstruction(account, TOKEN_2022_PROGRAM_ID),
+      createInitializeAccount3Instruction(account, mintKey, ownerKey),
+      createAssociatedTokenAccountIdempotentInstruction(
+        payer,
+        account,
+        ownerKey,
+        mintKey
+      ),
+    ]);
+    const decoded = decodeRawTransaction(raw)!;
+    const explained = explainDecodedTransaction(decoded);
+    expect(explained.instructions).toHaveLength(5);
+    expect(explained.instructions.every((ix) => ix.limitation === null)).toBe(
+      true
+    );
+    expect(explained.instructions[4].text).toContain(
+      "if it does not already exist"
+    );
   });
 });
 

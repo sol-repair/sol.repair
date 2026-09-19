@@ -30,14 +30,23 @@ import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "./tokenAccounts";
 const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
 const COMPUTE_BUDGET_PROGRAM_ID =
   "ComputeBudget111111111111111111111111111111";
+const ATA_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SPL_TOKEN = TOKEN_PROGRAM_ID.toBase58();
 const TOKEN_2022 = TOKEN_2022_PROGRAM_ID.toBase58();
 
+const TOKEN_INITIALIZE_MINT_TAG = 0;
+const TOKEN_INITIALIZE_ACCOUNT_TAG = 1;
 const TOKEN_APPROVE_TAG = 4;
 const TOKEN_REVOKE_TAG = 5;
 const TOKEN_SET_AUTHORITY_TAG = 6;
 const TOKEN_CLOSE_ACCOUNT_TAG = 9;
 const TOKEN_FREEZE_TAG = 10;
+const TOKEN_INITIALIZE_ACCOUNT2_TAG = 16;
+const TOKEN_SYNC_NATIVE_TAG = 17;
+const TOKEN_INITIALIZE_ACCOUNT3_TAG = 18;
+const TOKEN_INITIALIZE_MINT2_TAG = 20;
+const TOKEN_GET_ACCOUNT_DATA_SIZE_TAG = 21;
+const TOKEN_INITIALIZE_IMMUTABLE_OWNER_TAG = 22;
 const TOKEN_THAW_TAG = 11;
 const SYSTEM_CREATE_ACCOUNT_TAG = 0;
 const SYSTEM_ASSIGN_TAG = 1;
@@ -214,6 +223,58 @@ function tokenEffect(ix: DecodedInstruction): Finding[] {
       },
     ];
   }
+  if (
+    (tag === TOKEN_INITIALIZE_MINT_TAG || tag === TOKEN_INITIALIZE_MINT2_TAG) &&
+    data.byteLength >= 35 &&
+    accountPubkeys.length >= 1
+  ) {
+    const decimals = data[1];
+    const authority = bs58.encode(data.subarray(2, 34));
+    const freezeText =
+      data[34] === 1 && data.byteLength >= 67
+        ? ` Its freeze authority is ${bs58.encode(data.subarray(35, 67))}.`
+        : "";
+    return [
+      {
+        severity: "info",
+        text: `A new token mint was set up with ${decimals} decimals. Its mint authority is ${authority}.${freezeText}`,
+      },
+    ];
+  }
+  if (tag === TOKEN_INITIALIZE_ACCOUNT_TAG && accountPubkeys.length >= 3) {
+    const [account, mint, ownerKey] = accountPubkeys;
+    return [
+      {
+        severity: "info",
+        text: `Token account ${account} was set up for mint ${mint}, owned by ${ownerKey}.`,
+      },
+    ];
+  }
+  if (
+    (tag === TOKEN_INITIALIZE_ACCOUNT2_TAG ||
+      tag === TOKEN_INITIALIZE_ACCOUNT3_TAG) &&
+    data.byteLength >= 33 &&
+    accountPubkeys.length >= 2
+  ) {
+    const ownerKey = bs58.encode(data.subarray(1, 33));
+    return [
+      {
+        severity: "info",
+        text: `Token account ${accountPubkeys[0]} was set up for mint ${accountPubkeys[1]}, owned by ${ownerKey}.`,
+      },
+    ];
+  }
+  if (
+    tag === TOKEN_INITIALIZE_IMMUTABLE_OWNER_TAG &&
+    accountPubkeys.length >= 1
+  ) {
+    return [
+      {
+        severity: "info",
+        text: `Token account ${accountPubkeys[0]} was marked so its owner can never be changed.`,
+      },
+    ];
+  }
   if (tag === TOKEN_THAW_TAG && accountPubkeys.length >= 1) {
     return [
       {
@@ -222,10 +283,16 @@ function tokenEffect(ix: DecodedInstruction): Finding[] {
       },
     ];
   }
-  // Transfers (3), checked transfers (12), mints (7), and burns (8) move
+  // Transfers (3), mints (7), burns (8), checked transfers (12), the
+  // space question (21), and the wrapped SOL sync (17) move or read
   // balances now and leave no standing capability behind.
   if (
-    (tag === 3 || tag === 7 || tag === 8 || tag === 12) &&
+    (tag === 3 ||
+      tag === 7 ||
+      tag === 8 ||
+      tag === 12 ||
+      tag === TOKEN_GET_ACCOUNT_DATA_SIZE_TAG ||
+      tag === TOKEN_SYNC_NATIVE_TAG) &&
     accountPubkeys.length >= 1
   ) {
     return [];
@@ -296,6 +363,20 @@ export function analyzeLeftBehind(input: {
     }
     if (ix.programId === SPL_TOKEN || ix.programId === TOKEN_2022) {
       findings.push(...tokenEffect(ix));
+      continue;
+    }
+    if (ix.programId === ATA_PROGRAM_ID) {
+      // The Associated Token Account program's own instructions carry no
+      // capability of their own: the creates and setups they perform show
+      // up as inner instructions and are analyzed there.
+      const data = ix.data;
+      const known =
+        data.byteLength === 0 ||
+        (data.byteLength === 1 && (data[0] === 1 || data[0] === 2));
+      if (known) continue;
+      findings.push(
+        unrecognized("the Associated Token Account program")
+      );
       continue;
     }
     findings.push(cannotAnalyzeProgram(ix.programId));
