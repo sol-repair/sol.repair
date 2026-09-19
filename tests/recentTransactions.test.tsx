@@ -157,4 +157,70 @@ describe("wallet recent transactions walk", () => {
       screen.getByText(/No Solana wallet detected in this browser/i)
     ).toBeTruthy();
   });
+
+  it("loads the next page when the first page was full, then stops at the end", async () => {
+    mocks.wallet = connectedWallet();
+    const firstPage = Array.from({ length: 25 }, (_, i) => ({
+      signature: `First${String(i).padStart(3, "0")}000000000000000000000000000000000000000000000`,
+      blockTime: null,
+    }));
+    const secondPage = [
+      {
+        signature: "Second00000000000000000000000000000000000000000000000000",
+        blockTime: null,
+      },
+    ];
+    mocks.fetchFeeSignatures
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
+
+    expect(await screen.findByRole("button", { name: /First000/ })).toBeTruthy();
+    const more = await screen.findByRole("button", { name: /load more/i });
+    fireEvent.click(more);
+
+    expect(await screen.findByRole("button", { name: /Second00/ })).toBeTruthy();
+    expect(mocks.fetchFeeSignatures).toHaveBeenLastCalledWith(
+      ENDPOINT,
+      ADDRESS.toBase58(),
+      firstPage[24].signature
+    );
+    expect(screen.queryByRole("button", { name: /load more/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /First000/ })).toBeTruthy();
+  });
+
+  it("offers no load more button when the first page was short", async () => {
+    mocks.wallet = connectedWallet();
+    mocks.fetchFeeSignatures.mockResolvedValue([
+      {
+        signature:
+          "OnlyOne000000000000000000000000000000000000000000000000",
+        blockTime: null,
+      },
+    ]);
+    render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
+    await screen.findByRole("button", { name: /OnlyOne0/ });
+    expect(screen.queryByRole("button", { name: /load more/i })).toBeNull();
+  });
+
+  it("keeps the rows and explains honestly when loading more fails", async () => {
+    mocks.wallet = connectedWallet();
+    const firstPage = Array.from({ length: 25 }, (_, i) => ({
+      signature: `First${String(i).padStart(3, "0")}000000000000000000000000000000000000000000000`,
+      blockTime: null,
+    }));
+    mocks.fetchFeeSignatures
+      .mockResolvedValueOnce(firstPage)
+      .mockRejectedValueOnce(new Error("429 Connection rate limits exceeded"));
+    render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
+
+    const more = await screen.findByRole("button", { name: /load more/i });
+    fireEvent.click(more);
+
+    expect(await screen.findByText(/Could not reach the RPC/i)).toBeTruthy();
+    expect(
+      await screen.findByText(/429 Connection rate limits exceeded/i)
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /First000/ })).toBeTruthy();
+  });
 });

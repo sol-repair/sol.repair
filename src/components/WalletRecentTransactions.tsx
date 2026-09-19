@@ -17,7 +17,11 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletPicker } from "@/components/WalletButton";
-import { fetchFeeSignatures, formatBlockTime } from "@/lib/solana/feeLedger";
+import {
+  FEE_LEDGER_PAGE_SIZE,
+  fetchFeeSignatures,
+  formatBlockTime,
+} from "@/lib/solana/feeLedger";
 
 const emptySubscribe = () => () => {};
 
@@ -34,6 +38,9 @@ type TxListState =
   | {
       kind: "done";
       items: { signature: string; blockTime: number | null }[];
+      /** False while the page was full, meaning older transactions may
+       *  still exist and a Load more control belongs on screen. */
+      reachedEnd: boolean;
     };
 
 export function WalletRecentTransactions({
@@ -56,6 +63,8 @@ export function WalletRecentTransactions({
     address: string;
     state: TxListState;
   } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
 
   const address = connected && publicKey ? publicKey.toBase58() : null;
 
@@ -65,7 +74,14 @@ export function WalletRecentTransactions({
     fetchFeeSignatures(endpoint, address)
       .then((items) => {
         if (!cancelled) {
-          setResult({ address, state: { kind: "done", items } });
+          setResult({
+            address,
+            state: {
+              kind: "done",
+              items,
+              reachedEnd: items.length < FEE_LEDGER_PAGE_SIZE,
+            },
+          });
         }
       })
       .catch((error) => {
@@ -82,6 +98,32 @@ export function WalletRecentTransactions({
       cancelled = true;
     };
   }, [address, endpoint]);
+
+  const currentList =
+    address && result && result.address === address ? result.state : null;
+
+  async function loadMore() {
+    if (!address || !currentList || currentList.kind !== "done") return;
+    if (currentList.items.length === 0) return;
+    const before = currentList.items[currentList.items.length - 1].signature;
+    setMoreError(null);
+    setLoadingMore(true);
+    try {
+      const next = await fetchFeeSignatures(endpoint, address, before);
+      setResult({
+        address,
+        state: {
+          kind: "done",
+          items: [...currentList.items, ...next],
+          reachedEnd: next.length < FEE_LEDGER_PAGE_SIZE,
+        },
+      });
+    } catch (error) {
+      setMoreError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   // Derived, never stored: loading while no result exists for the
   // current address, idle while disconnected, and a result for an old
@@ -187,6 +229,23 @@ export function WalletRecentTransactions({
             </li>
           ))}
         </ul>
+      )}
+
+      {list.kind === "done" && list.items.length > 0 && !list.reachedEnd && (
+        <button
+          onClick={() => void loadMore()}
+          disabled={loadingMore}
+          className="mt-3 w-full rounded border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800/60 disabled:opacity-60"
+        >
+          {loadingMore ? "Loading more..." : "Load more"}
+        </button>
+      )}
+
+      {moreError && (
+        <div className="mt-3">
+          <p className="text-sm text-red-400">Could not reach the RPC.</p>
+          <p className="mt-1 break-all text-xs text-zinc-500">{moreError}</p>
+        </div>
       )}
     </div>
   );
