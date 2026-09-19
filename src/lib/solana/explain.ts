@@ -208,6 +208,12 @@ function explainTokenInstruction(
       limitation: null,
     };
   }
+  if (tag === 11 && accounts(1)) {
+    return {
+      text: `Unfreeze token account ${accountPubkeys[0]}. Only its freeze authority can do this, letting the account send and receive tokens again.`,
+      limitation: null,
+    };
+  }
   if (
     tag === TOKEN_TRANSFER_CHECKED_TAG &&
     data.byteLength >= 10 &&

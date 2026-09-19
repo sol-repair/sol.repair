@@ -281,6 +281,16 @@ describe("explainInstruction token table", () => {
     );
   });
 
+  it("explains thawing an account", () => {
+    const result = explainInstruction(
+      tokenIx(TOKEN_2022_PROGRAM, 11, [TOKEN_ACCOUNT, OWNER])
+    );
+    expect(result.limitation).toBeNull();
+    expect(result.text).toBe(
+      `Unfreeze token account ${TOKEN_ACCOUNT}. Only its freeze authority can do this, letting the account send and receive tokens again.`
+    );
+  });
+
   it("falls back honestly when a known tag arrives with too few accounts", () => {
     const result = explainInstruction(
       tokenIx(SPL_TOKEN_PROGRAM, 3, [TOKEN_ACCOUNT], 1n)
