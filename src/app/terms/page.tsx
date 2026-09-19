@@ -82,9 +82,10 @@ export default function TermsPage() {
               the open-source repository, so anyone can verify where the
               service fee goes. Standard Solana network fees also apply and
               are paid to the Solana network, not to us: a base fee of
-              about 0.000005 SOL per transaction, plus any priority fee
-              your wallet adds when you approve (most wallets add a small
-              one by default).
+              about 0.000005 SOL per transaction, plus the priority fee
+              your wallet adds when you approve (with Phantom&rsquo;s default
+              settings that has recently run between about 0.000075 and
+              0.00015 SOL per transaction).
             </p>
           </section>
 
