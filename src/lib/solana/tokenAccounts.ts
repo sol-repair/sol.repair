@@ -187,12 +187,21 @@ export async function getClosableAccounts(
 
       // 1. Zero token balance. The main rule.
       //    If this fails, the account holds tokens and must NEVER be closed.
+      //    A FROZEN funded account is a special kind of stuck: transfer
+      //    rejects frozen on both sides, burn rejects frozen, and close
+      //    needs a zero balance, so only the mint's freeze authority can
+      //    ever release it (source-verified in both token programs
+      //    2026-09-19). "Holds a token balance" would read as solvable, so
+      //    the reason names the authority that owns the switch instead.
       const amount = BigInt(info.tokenAmount.amount);
       if (amount !== 0n) {
         skippedAccounts.push({
           pubkey: pubkey.toString(),
           mint: info.mint,
-          reason: "holds a token balance",
+          reason:
+            info.state === "frozen"
+              ? "is frozen by the token's freeze authority"
+              : "holds a token balance",
           program: tag,
         });
         continue;

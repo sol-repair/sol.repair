@@ -289,7 +289,12 @@ describe("getClosableAccounts eligibility checks", () => {
     );
   });
 
-  it("still skips a frozen account holding a balance (balance check runs first)", async () => {
+  it("names the freeze authority when a frozen account holds a balance", async () => {
+    // A frozen funded account is trapped for good: transfer rejects frozen
+    // on both sides, burn rejects frozen, and close needs a zero balance,
+    // so only the mint's freeze authority can release it (source-verified
+    // in both token programs 2026-09-19). "Holds a token balance" would
+    // read as solvable, which it is not, so the reason names the switch.
     const frozen = tokenAccount(13, {
       state: "frozen",
       tokenAmount: {
@@ -300,6 +305,39 @@ describe("getClosableAccounts eligibility checks", () => {
       },
     });
     const { result } = await runScan([frozen]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe(
+      "is frozen by the token's freeze authority"
+    );
+  });
+
+  it("gives the frozen funded reason on Token-2022 too", async () => {
+    const frozen = tokenAccount(13, {
+      state: "frozen",
+      tokenAmount: {
+        amount: "5",
+        decimals: 6,
+        uiAmount: 0.000005,
+        uiAmountString: "0.000005",
+      },
+    });
+    const { result } = await runScan([], [frozen]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe(
+      "is frozen by the token's freeze authority"
+    );
+  });
+
+  it("keeps the plain balance reason for accounts that are not frozen", async () => {
+    const funded = tokenAccount(13, {
+      tokenAmount: {
+        amount: "1",
+        decimals: 6,
+        uiAmount: 0.000001,
+        uiAmountString: "0.000001",
+      },
+    });
+    const { result } = await runScan([funded]);
     expect(result.eligibleAccounts).toHaveLength(0);
     expect(result.skippedAccounts[0].reason).toBe("holds a token balance");
   });
