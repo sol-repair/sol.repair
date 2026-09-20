@@ -205,9 +205,10 @@ export async function getClosableAccounts(
       //    in one transaction, so it stays eligible with a needsRevoke flag
       //    that the close builder turns into a Revoke instruction right
       //    before this account's CloseAccount. Checks #3-#5 below still
-      //    apply: a delegated account with a foreign close authority,
-      //    wrapped SOL, or a frozen state is still skipped (the on-chain
-      //    Revoke itself rejects frozen accounts).
+      //    apply: a delegated account with a foreign close authority or
+      //    wrapped SOL is still skipped, and a delegated FROZEN account is
+      //    skipped too because the on-chain Revoke itself rejects frozen
+      //    accounts (AccountFrozen in both programs).
       //    NOTE: the parsed RPC response OMITS the delegate field entirely
       //    when there is no delegation. A naive `info.delegate !== null`
       //    check is WRONG because a missing field is undefined, and
@@ -245,13 +246,29 @@ export async function getClosableAccounts(
         continue;
       }
 
-      // 5. Initialized state. Frozen and uninitialized accounts need special
-      //    handling and are skipped in v1.
-      if (info.state !== "initialized") {
+      // 5. Account state. Frozen empty accounts ARE closeable: chain-verified
+      //    2026-09-19 (a real frozen account closed with err null in a devnet
+      //    simulation) and confirmed against both token programs' source,
+      //    where neither CloseAccount path consults the frozen bit (it guards
+      //    transfers, burns, approvals, and revokes only). The one exception
+      //    is an account that still has an active delegate: the Revoke we
+      //    emit before its close DOES reject frozen accounts (AccountFrozen
+      //    in both programs), so that combination stays skipped. Truly
+      //    uninitialized accounts cannot be closed at all and stay skipped.
+      if (info.state === "uninitialized") {
         skippedAccounts.push({
           pubkey: pubkey.toString(),
           mint: info.mint,
-          reason: `is ${info.state} (not initialized)`,
+          reason: "is not initialized",
+          program: tag,
+        });
+        continue;
+      }
+      if (info.state === "frozen" && needsRevoke) {
+        skippedAccounts.push({
+          pubkey: pubkey.toString(),
+          mint: info.mint,
+          reason: "is frozen with an active delegate",
           program: tag,
         });
         continue;

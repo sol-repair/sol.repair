@@ -198,7 +198,7 @@ describe("getClosableAccounts eligibility checks", () => {
     const { result } = await runScan([delegated]);
     expect(result.eligibleAccounts).toHaveLength(0);
     expect(result.skippedAccounts[0].reason).toBe(
-      "is frozen (not initialized)"
+      "is frozen with an active delegate"
     );
   });
 
@@ -259,13 +259,56 @@ describe("getClosableAccounts eligibility checks", () => {
     expect(result.skippedAccounts[0].reason).toBe("is a wrapped-SOL account");
   });
 
-  it("skips a frozen account", async () => {
+  it("offers a frozen empty account (the chain allows the owner to close it)", async () => {
+    // Chain-verified 2026-09-19: a frozen empty account closes with err
+    // null (devnet simulation against a real frozen account), and neither
+    // CloseAccount path in either token program consults frozen state.
+    // The freeze bit only guards transfers, burns, approvals, and revokes.
     const frozen = tokenAccount(13, { state: "frozen" });
+    const { result } = await runScan([frozen]);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.skippedAccounts).toHaveLength(0);
+  });
+
+  it("offers a frozen empty Token-2022 account too", async () => {
+    const frozen = tokenAccount(13, { state: "frozen" });
+    const { result } = await runScan([], [frozen]);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].program).toBe("token-2022");
+  });
+
+  it("keeps skipping frozen empty accounts whose close authority is foreign", async () => {
+    const frozen = tokenAccount(13, {
+      state: "frozen",
+      closeAuthority: pk(9).toBase58(),
+    });
     const { result } = await runScan([frozen]);
     expect(result.eligibleAccounts).toHaveLength(0);
     expect(result.skippedAccounts[0].reason).toBe(
-      "is frozen (not initialized)"
+      "close authority belongs to another address"
     );
+  });
+
+  it("still skips a frozen account holding a balance (balance check runs first)", async () => {
+    const frozen = tokenAccount(13, {
+      state: "frozen",
+      tokenAmount: {
+        amount: "1",
+        decimals: 6,
+        uiAmount: 0.000001,
+        uiAmountString: "0.000001",
+      },
+    });
+    const { result } = await runScan([frozen]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe("holds a token balance");
+  });
+
+  it("still skips an uninitialized account, with an accurate reason", async () => {
+    const uninitialized = tokenAccount(13, { state: "uninitialized" });
+    const { result } = await runScan([uninitialized]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts[0].reason).toBe("is not initialized");
   });
 
   it("scans both token programs and tags each account correctly", async () => {
