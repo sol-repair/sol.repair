@@ -81,12 +81,14 @@ The app defaults to Solana devnet and the UI shows DEVNET right on it so
 you can't mistake it for mainnet. Mainnet is an explicit config change, not
 the default.
 
-The network and RPC endpoint are set with environment variables. Copy
+The network and RPC endpoints are set with environment variables. Copy
 `.env.example` to `.env.local` and edit what you need. The example file
 explains each variable. The short version is that
-`NEXT_PUBLIC_SOLANA_NETWORK` picks the network and
-`NEXT_PUBLIC_MAINNET_RPC_ENDPOINT` optionally points mainnet at a dedicated
-RPC provider instead of the public endpoint.
+`NEXT_PUBLIC_SOLANA_NETWORK` picks the network and the per-network
+`NEXT_PUBLIC_<NETWORK>_RPC_ENDPOINTS` lists optionally point a network at
+dedicated RPC providers instead of the public endpoint (first entry is
+the primary, and each network reads only its own list). The older single
+`NEXT_PUBLIC_MAINNET_RPC_ENDPOINT` still works for mainnet.
 
 ## Tests
 
@@ -95,8 +97,9 @@ npm test
 ```
 
 The suite covers the account eligibility rules, transaction building, fee
-math, and the repair flow. It runs against local fixtures, never the live
-chain, so it is safe to run anywhere.
+math, the repair flow, the fee-ledger decoder, and the transaction
+explainer's instruction and left-behind analysis. It runs against local
+fixtures, never the live chain, so it is safe to run anywhere.
 
 ## Tech stack
 
@@ -116,7 +119,9 @@ src/app/          Next.js App Router pages and layout
 src/components/   UI components (wallet button, network badge)
 src/hooks/        React hooks for the scan and repair flow
 src/lib/security/ Content security policy builder
-src/lib/solana/   Solana domain logic: scanning, eligibility, transactions
+src/lib/solana/   Solana domain logic: scanning, eligibility, transactions,
+                  decoding, and the plain-language explanation of a
+                  transaction's instructions and what they leave behind
 scripts/          Operator tooling: the fee-ledger audit script
 tests/            Vitest suite: units, chain fixtures, page and hook tests
 ```
