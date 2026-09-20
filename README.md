@@ -57,11 +57,19 @@ Token accounts (classic SPL Token and Token-2022) that pass all of these:
 1. Zero token balance. If an account holds any tokens at all, it gets left
    alone. The app enforces this and so does the Solana program, so it's
    checked twice.
-2. Not actively delegated.
+2. Delegation only when it can be cleared. An empty delegated account is
+   offered like any other: the tool sends a revoke instruction right before
+   the close, in the same transaction. The one combination that cannot work
+   is delegated and frozen at once, because the network rejects a revoke on
+   a frozen account.
 3. Close authority still with your wallet. Some accounts created by other
    programs can only be closed by those programs, so they are skipped.
 4. Not wrapped SOL.
-5. In the "initialized" state.
+5. Frozen is fine while empty. The network blocks moving or burning frozen
+   balances, not closing an empty account, so an empty frozen account is
+   offered like any other. A frozen account that still holds tokens is
+   trapped by the token's freeze authority: no tool can close it, and only
+   that authority can release it.
 
 Fail any one of those and the account is skipped, no exceptions. NFTs and
 any account holding tokens are protected by the zero-balance rule.
