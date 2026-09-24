@@ -53,3 +53,50 @@ describe("actionMutex", () => {
     releaseAction("repair");
   });
 });
+
+describe("actionMutex: the unwrap kind (G.3 §10.2.10, additive)", () => {
+  it('"unwrap" acquires an uncontended lock', () => {
+    expect(acquireAction("unwrap")).toBe(true);
+    expect(heldAction()).toBe("unwrap");
+    releaseAction("unwrap");
+    expect(heldAction()).toBeNull();
+  });
+
+  it('"unwrap" is refused while either existing kind holds', () => {
+    expect(acquireAction("repair")).toBe(true);
+    expect(acquireAction("unwrap")).toBe(false);
+    expect(heldAction()).toBe("repair");
+    releaseAction("repair");
+
+    expect(acquireAction("revoke")).toBe(true);
+    expect(acquireAction("unwrap")).toBe(false);
+    expect(heldAction()).toBe("revoke");
+    releaseAction("revoke");
+  });
+
+  it('a hold by "unwrap" refuses both existing kinds', () => {
+    expect(acquireAction("unwrap")).toBe(true);
+    expect(acquireAction("repair")).toBe(false);
+    expect(acquireAction("revoke")).toBe(false);
+    releaseAction("unwrap");
+  });
+
+  it('a wrong-kind release leaves an "unwrap" hold intact', () => {
+    acquireAction("unwrap");
+    releaseAction("repair");
+    expect(heldAction()).toBe("unwrap");
+    releaseAction("revoke");
+    expect(heldAction()).toBe("unwrap");
+    releaseAction("unwrap");
+    expect(heldAction()).toBeNull();
+  });
+
+  it("re-acquire after an unwrap release succeeds for the other kinds", () => {
+    expect(acquireAction("unwrap")).toBe(true);
+    releaseAction("unwrap");
+    expect(acquireAction("revoke")).toBe(true);
+    releaseAction("revoke");
+    expect(acquireAction("unwrap")).toBe(true);
+    releaseAction("unwrap");
+  });
+});

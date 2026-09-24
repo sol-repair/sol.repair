@@ -105,3 +105,51 @@ describe("fees page 1% conformance marker", () => {
     ).toBeTruthy();
   });
 });
+
+describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive)", () => {
+  it("states the no-fee rule for wrapped-SOL unwrap", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /no service fee\. you are recovering your own sol; the only cost is the network fee\./i
+      )
+    ).toBeTruthy();
+  });
+
+  it("states the 1%-of-recovered rule for repair closes beside it", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /a 1% service fee on the rent the close recovers — charged only when sol is successfully recovered, appended after the closes, and visible in the ledger below\./i
+      )
+    ).toBeTruthy();
+  });
+
+  it("writes the shared rationale beside both rules, naming the asymmetry (F1)", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /the fee exists for unlocking rent a user cannot reach themselves — never for returning the user.s own principal\./i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /an empty wrapped-sol account recovers rent the same way an empty ordinary account does, but the unwrap path returns it fee-free while the repair path charges 1% on the same kind of recovery\./i
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/That asymmetry is the honest cost/i)).toBeTruthy();
+  });
+
+  it("keeps the pre-existing 1% conformance copy intact", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(screen.getByText(/not exactly 1% of the rent/i)).toBeTruthy();
+  });
+});

@@ -274,3 +274,85 @@ describe("G.2 evidence: delegate address and nativeStatus (additive only)", () =
     ).toBeUndefined();
   });
 });
+
+describe("G.3 evidence: the wrapped-sol skip carries lamports and nativeStatus (additive only)", () => {
+  it("carries lamports and nativeStatus on the wrapped-sol skip; the reason stays byte-identical", async () => {
+    const result = await scan([
+      tokenAccountEntry({ seed: 40, isNative: true }),
+    ]);
+    expect(result.skippedAccounts).toHaveLength(1);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.reason).toBe("is a wrapped-SOL account"); // unchanged
+    expect(skipped.cause).toBe("wrapped-sol");
+    expect(skipped.lamports).toBe(2039280);
+    expect(Number.isInteger(skipped.lamports)).toBe(true);
+    expect(skipped.nativeStatus).toBe("native");
+  });
+
+  it("records unknown — never defaulted — when the wrapped-sol envelope omits isNative", async () => {
+    const rawEntry = tokenAccountEntry({ seed: 41 });
+    const info = (
+      rawEntry.account.data as { parsed: { info: Record<string, unknown> } }
+    ).parsed.info;
+    delete info.isNative;
+    const result = await scan([rawEntry]);
+    const skipped = result.skippedAccounts[0];
+    // The `info.isNative !== false` check admits the omitted field at
+    // this site; the additive recording captures that honestly.
+    expect(skipped.cause).toBe("wrapped-sol");
+    expect(skipped.reason).toBe("is a wrapped-SOL account"); // unchanged
+    expect(skipped.nativeStatus).toBe("unknown");
+    expect(skipped.lamports).toBe(2039280);
+  });
+
+  it("adds no balance or decimals at the wrapped-sol site (the zero is a derivation, not a field)", async () => {
+    const result = await scan([
+      tokenAccountEntry({ seed: 42, isNative: true }),
+    ]);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.balance).toBeUndefined();
+    expect(skipped.decimals).toBeUndefined();
+  });
+
+  it("leaves the funded native skip's G.2 shape unchanged (no new field)", async () => {
+    const result = await scan([
+      tokenAccountEntry({ seed: 43, amount: "7", isNative: true }),
+    ]);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.cause).toBe("funded");
+    expect(skipped.reason).toBe("holds a token balance"); // unchanged
+    expect(skipped.balance).toBe("7");
+    expect(skipped.decimals).toBe(6);
+    expect(skipped.lamports).toBe(2039280);
+    expect(skipped.nativeStatus).toBe("native"); // G.2, already shipped
+    expect(result.eligibleAccounts).toHaveLength(0);
+  });
+
+  it("keeps classification byte-identical across the three nativeStatus states at the wrapped-sol site", async () => {
+    // Explicit true: wrapped-sol skip, unchanged reason, still skipped.
+    const native = await scan([
+      tokenAccountEntry({ seed: 44, isNative: true }),
+    ]);
+    expect(native.skippedAccounts[0].cause).toBe("wrapped-sol");
+    expect(native.skippedAccounts[0].reason).toBe("is a wrapped-SOL account");
+    expect(native.eligibleAccounts).toHaveLength(0);
+
+    // Omitted field (unknown): identical outcome — never defaulted.
+    const rawEntry = tokenAccountEntry({ seed: 45 });
+    const info = (
+      rawEntry.account.data as { parsed: { info: Record<string, unknown> } }
+    ).parsed.info;
+    delete info.isNative;
+    const unknown = await scan([rawEntry]);
+    expect(unknown.skippedAccounts[0].cause).toBe("wrapped-sol");
+    expect(unknown.skippedAccounts[0].reason).toBe("is a wrapped-SOL account");
+    expect(unknown.eligibleAccounts).toHaveLength(0);
+
+    // Explicit false: eligible — the pre-G.3 partition, unchanged.
+    const nonNative = await scan([
+      tokenAccountEntry({ seed: 46, isNative: false }),
+    ]);
+    expect(nonNative.skippedAccounts).toHaveLength(0);
+    expect(nonNative.eligibleAccounts).toHaveLength(1);
+  });
+});
