@@ -9,14 +9,18 @@
  * suite pins that signTransaction and sendTransaction are never invoked
  * anywhere in the walk.
  *
- * Fetch depth is the owner-decided 25 (the ledger's page size); a
- * connected wallet on a busy chain shows its newest 25, and pagination
- * is a later milestone if it is ever wanted.
+ * The first page is the ledger's page size (25); a full page means older
+ * transactions may exist, so a Load more control walks back one page at a
+ * time with the previous page's last signature as the cursor.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletPicker } from "@/components/WalletButton";
+import {
+  CONNECT_FAILED_MESSAGE,
+  NO_WALLET_MESSAGE,
+  WalletPicker,
+} from "@/components/WalletButton";
 import {
   FEE_LEDGER_PAGE_SIZE,
   fetchFeeSignatures,
@@ -24,12 +28,6 @@ import {
 } from "@/lib/solana/feeLedger";
 
 const emptySubscribe = () => () => {};
-
-const NO_WALLET_MESSAGE =
-  "No Solana wallet detected in this browser. Open sol.repair inside the browser built into the Phantom or Solflare app, or use a desktop browser with your wallet's extension installed.";
-
-const CONNECT_FAILED_MESSAGE =
-  "Couldn't connect to this wallet. If it keeps failing, open sol.repair inside your wallet's own browser and try again.";
 
 type TxListState =
   | { kind: "idle" }

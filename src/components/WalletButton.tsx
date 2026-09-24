@@ -23,12 +23,14 @@ const emptySubscribe = () => () => {};
  * Two dead ends need plain words instead of silence: a browser that
  * exposes no detectable Solana wallet (some mobile browsers, Brave on
  * iPhone among them), and a wallet whose connect() call fails. Both get
- * one sentence that tells the user the way out.
+ * one sentence that tells the user the way out. Exported because the
+ * recent-transactions walk on the explainer page hits the same two dead
+ * ends and must say exactly the same thing.
  */
-const NO_WALLET_MESSAGE =
+export const NO_WALLET_MESSAGE =
   "No Solana wallet detected in this browser. Open sol.repair inside the browser built into the Phantom or Solflare app, or use a desktop browser with your wallet's extension installed.";
 
-const CONNECT_FAILED_MESSAGE =
+export const CONNECT_FAILED_MESSAGE =
   "Couldn't connect to this wallet. If it keeps failing, open sol.repair inside your wallet's own browser and try again.";
 
 /**
