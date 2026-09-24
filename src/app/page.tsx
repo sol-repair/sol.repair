@@ -10,6 +10,7 @@ import { NetworkBadge } from "@/components/NetworkBadge";
 import { WalletButton } from "@/components/WalletButton";
 import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { DelegationSection } from "@/components/DelegationSection";
+import { NativeAccountsSection } from "@/components/NativeAccountsSection";
 import { useWalletScan } from "@/hooks/useWalletScan";
 import {
   MAX_ACCOUNTS_PER_RUN,
@@ -208,11 +209,13 @@ export default function Home() {
   // Whether the user has clicked "Repair" and is in the confirmation step.
   const [confirming, setConfirming] = useState(false);
 
-  // G.2 §8.12: the two wallet actions exclude each other in both
-  // directions. repairInFlight is derived from this hook's statuses;
-  // revokeInFlight is reported up by DelegationSection. Buttons are
-  // the affordance — the synchronous action mutex is the guarantee.
+  // G.2 §8.12 / G.3 §8.11: the three wallet actions exclude each other
+  // in all directions. repairInFlight is derived from this hook's
+  // statuses; revokeInFlight and unwrapInFlight are reported up by
+  // their sections. Buttons are the affordance — the synchronous
+  // action mutex is the guarantee.
   const [revokeInFlight, setRevokeInFlight] = useState(false);
+  const [unwrapInFlight, setUnwrapInFlight] = useState(false);
   const REPAIR_IN_FLIGHT_STATUSES = [
     "building",
     "awaiting-signature",
@@ -762,7 +765,19 @@ export default function Home() {
               scan={result}
               rescan={rescan}
               repairInFlight={repairInFlight}
+              unwrapInFlight={unwrapInFlight}
               onActionInFlightChange={setRevokeInFlight}
+            />
+
+            {/* G.3: wrapped-SOL unwrap + close (per-item consent, one
+                account per action). Renders nothing when the scan has
+                no eligible native accounts. */}
+            <NativeAccountsSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              revokeInFlight={revokeInFlight}
+              onActionInFlightChange={setUnwrapInFlight}
             />
 
             {result.eligibleAccounts.length === 0 &&
@@ -778,7 +793,9 @@ export default function Home() {
               <>
                 <button
                   onClick={() => setConfirming(true)}
-                  disabled={selectedCount === 0 || revokeInFlight}
+                  disabled={
+                    selectedCount === 0 || revokeInFlight || unwrapInFlight
+                  }
                   className="w-full rounded-lg bg-[#14F195] px-4 py-3 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Repair Wallet
@@ -788,7 +805,7 @@ export default function Home() {
                     Select at least one account above to repair.
                   </p>
                 )}
-                {revokeInFlight && (
+                {(revokeInFlight || unwrapInFlight) && (
                   <p className="text-xs text-zinc-400">
                     Another wallet action is underway. Wait for it to finish.
                   </p>

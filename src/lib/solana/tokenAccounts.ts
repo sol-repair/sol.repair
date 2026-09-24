@@ -312,8 +312,11 @@ export async function getClosableAccounts(
         continue;
       }
 
-      // 4. Not wrapped SOL. Native accounts have special closing semantics
-      //    that are out of scope for v1.
+      // 4. Not wrapped SOL. The repair classification keeps skipping native
+      //    accounts — the repair flow stays closed to them (G.3 spec §3, §12
+      //    Q2); the G.3 unwrap action is a separate flow that consumes the
+      //    two evidence fields this site now records (§5.2). The skip
+      //    decision, the reason string, and the check order are unchanged.
       const isNative = info.isNative !== false;
       if (isNative) {
         skippedAccounts.push({
@@ -322,6 +325,16 @@ export async function getClosableAccounts(
           reason: "is a wrapped-SOL account",
           program: tag,
           cause: "wrapped-sol",
+          // Lamports (rent and everything else) the native account holds.
+          // This is the exact amount CloseAccount moves to the destination.
+          // Evidence for the unwrap action; the skip decision is unchanged.
+          lamports: account.lamports,
+          // Three-state native-status evidence, recorded by the same
+          // expression as every other site. At THIS site the account passed
+          // `info.isNative !== false`, so an omitted field lands here too —
+          // recorded as "unknown", never defaulted, and ineligible for the
+          // unwrap action (G.3 spec §4.2 E2). The skip decision is unchanged.
+          nativeStatus: nativeStatusOf(info.isNative),
         });
         continue;
       }

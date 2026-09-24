@@ -123,6 +123,46 @@ export default function FeesPage() {
           receipt; judge for yourself.
         </p>
 
+        {/* The two fee rules, side by side (G.3 spec §7.7, the Revision 2
+            decision's stated condition): the 1%-of-recovered rule for
+            repair closes and the no-fee rule for wrapped-SOL unwrap share
+            one rationale, written beside both — we charge for unlocking
+            rent a user cannot reach themselves, never for returning the
+            user's own principal. The asymmetry the rules create (an empty
+            wrapped-SOL account unwraps fee-free while an empty ordinary
+            account pays 1% of the same kind of rent recovery, decided by
+            the account's type, not by a user choice) is stated here
+            rather than papered over. */}
+        <div className="mb-6 rounded-md border border-zinc-800 p-3 text-xs leading-relaxed text-zinc-400">
+          <p className="font-mono text-[11px] uppercase tracking-wider text-zinc-400">
+            The fee rules, both of them
+          </p>
+          <p className="mt-2">
+            <span className="text-zinc-300">Repair closes</span> (empty,
+            non-wrapped token accounts): a 1% service fee on the rent the
+            close recovers — charged only when SOL is successfully
+            recovered, appended after the closes, and visible in the
+            ledger below.
+          </p>
+          <p className="mt-2">
+            <span className="text-zinc-300">Wrapped-SOL unwrap and close</span>{" "}
+            (wrapped-SOL accounts): no service fee. You are recovering
+            your own SOL; the only cost is the network fee.
+          </p>
+          <p className="mt-2">
+            Why the two rules differ, and why they are stated together:
+            the fee exists for unlocking rent a user cannot reach
+            themselves — never for returning the user&rsquo;s own
+            principal. The split is by account type, not by user choice:
+            an empty wrapped-SOL account recovers rent the same way an
+            empty ordinary account does, but the unwrap path returns it
+            fee-free while the repair path charges 1% on the same kind of
+            recovery. That asymmetry is the honest cost of never charging
+            on principal, and it is written here so both rules can be
+            judged side by side.
+          </p>
+        </div>
+
         <div className="mb-4 flex gap-2">
           {CLUSTERS.map((c) => (
             <button

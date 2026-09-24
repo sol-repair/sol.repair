@@ -1,20 +1,20 @@
 "use client";
 
 /**
- * DelegationSection (G.2): presentation and per-item consent for
- * funded-account delegate revocation (spec §6).
+ * NativeAccountsSection (G.3): presentation and per-item consent for
+ * wrapped-SOL unwrap+close (spec §6).
  *
- * Renders only when the scan contains eligible delegations (plus
- * read-only rows for frozen delegated accounts). The component owns
- * the confirmation card and result cards; the authoritative gate,
- * signing, submission, resolution, and verification live in
- * useRevokeDelegate. The pre-card read here is presentation only —
- * the hook re-runs the gate as its authoritative first step, in-lock.
+ * Renders only when the scan contains eligible native accounts. The
+ * component owns the confirmation card and result cards; the
+ * authoritative gate, signing, submission, resolution, and
+ * verification live in useUnwrapNative. The pre-card read here is
+ * presentation only — the hook re-runs the gate as its authoritative
+ * first step, in-lock.
  *
- * Copy rules (spec §6.3, test-enforced): findings, never verdicts; no
- * unconditional balance claims (only the recorded reads), no causal
- * attribution, no allowance figures, no success wording while pending
- * or unverified.
+ * Copy rules (spec §6.3, test-enforced): findings, never verdicts; the
+ * recovery figure is the account's total lamports, never a rent/
+ * balance split; no unconditional balance-increase claims; no causal
+ * attribution; no success wording while pending or unverified.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,22 +22,22 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { VersionedTransaction } from "@solana/web3.js";
 
 import { SOLANA_NETWORK } from "@/lib/solana/connection";
-import { useRevokeDelegate } from "@/hooks/useRevokeDelegate";
+import { useUnwrapNative } from "@/hooks/useUnwrapNative";
 import {
-  ALREADY_REVOKED_COPY,
-  buildRevokeInstruction,
-  evaluateDelegationGate,
-  gateAbortSentence,
-  readDelegatedAccountState,
-  selectRevocableDelegations,
-  type DelegatedAccountRead,
-  type RevocableDelegation,
-} from "@/lib/solana/revokeDelegation";
+  ALREADY_CLOSED_COPY,
+  buildUnwrapInstruction,
+  evaluateNativeGate,
+  NATIVE_GATE_ABORT_COPY,
+  readNativeAccountState,
+  selectUnwrappableNativeAccounts,
+  type NativeAccountRead,
+  type UnwrappableNativeAccount,
+} from "@/lib/solana/unwrapNative";
 import { buildTransaction, estimateNetworkFee } from "@/lib/solana/transactions";
 import {
+  TOKEN_2022_PROGRAM_ID,
   lamportsToSol,
   type ScanResult,
-  type SkippedAccount,
 } from "@/lib/solana/tokenAccounts";
 
 const plural = (count: number, singular: string, pluralForm: string) =>
@@ -120,6 +120,10 @@ function groupDigits(value: string): string {
   return value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+function groupCount(value: number): string {
+  return groupDigits(value.toString());
+}
+
 /** Ticking elapsed-seconds counter (the page's honest "not stuck"
  *  signal, re-declared locally). */
 function ElapsedSeconds() {
@@ -137,7 +141,7 @@ function ElapsedSeconds() {
 
 const AMBER_STATUSES = new Set(["checking-current-state", "confirming"]);
 
-function RevokeSpinner({ amber = false }: { amber?: boolean }) {
+function UnwrapSpinner({ amber = false }: { amber?: boolean }) {
   return (
     <svg
       className={`h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none ${
@@ -164,55 +168,42 @@ function RevokeSpinner({ amber = false }: { amber?: boolean }) {
   );
 }
 
-/** The balance-observation block for a verified revocation: derived
- *  ONLY from the hook's three recorded reads (spec §8.2, Cases A-D
- *  plus the both-changed combination). Evidence-dependent by
- *  construction — there is no unconditional "unchanged" branch. */
-export function balanceObservationCopy(
-  scan: string | null,
-  before: string | null,
-  after: string | null
-): string | null {
-  if (scan === null || before === null) return null;
-  const g = groupDigits;
-  if (after === null) {
-    return `Balance at scan: ${g(scan)} base units. Balance in the fresh read before the transaction: ${g(before)}. The post-transaction balance could not be read (the read failed), so the balance result is unknown. The revocation itself is verified; the balance is not.`;
-  }
-  if (scan === before && before === after) {
-    return `Balance observed: ${g(scan)} base units at the scan, in the fresh read before the transaction, and in the read after it. The recorded reads matched. SOL.REPAIR does not monitor the account between reads.`;
-  }
-  if (scan !== before && before === after) {
-    return `Balance at scan: ${g(scan)}. Balance in the fresh read before the transaction: ${g(before)}. Balance in the read after it: ${g(after)}. The change happened before the transaction; SOL.REPAIR cannot tell what caused it.`;
-  }
-  if (scan === before && before !== after) {
-    return `Balance in the fresh read before the transaction: ${g(before)}. Balance in the read after it: ${g(after)}. The balance changed between those two reads. SOL.REPAIR cannot attribute the change and does not claim the transaction caused it.`;
-  }
-  return `Balance at scan: ${g(scan)}. Balance before the transaction: ${g(before)}. Balance after it: ${g(after)}. The balance changed before the transaction and again between the pre-transaction read and the read after it. SOL.REPAIR cannot attribute either change and does not claim the transaction caused them.`;
-}
-
 type GatePreview =
   | { state: "idle" }
   | { state: "reading" }
-  | { state: "pass"; balanceBeforeAction: string }
-  | { state: "already-absent" }
+  | {
+      state: "pass";
+      amountBeforeAction: string;
+      lamportsBeforeAction: number;
+      delegate: string | null;
+    }
+  | { state: "already-closed" }
   | { state: "abort"; sentence: string };
 
 const NO_SIM = { state: "idle" } as const;
 
-export function DelegationSection({
+/** The wrapped-balance fragment of a row: the funded case states the
+ *  scan-time balance and decimals; the empty case states the zero as
+ *  the derivation it is (spec §4.2 E6, §5.2 — no balance field exists
+ *  at that skip site). */
+function wrappedBalanceFragment(candidate: UnwrappableNativeAccount) {
+  if (candidate.decimals === undefined) {
+    return "wrapped balance 0 (the scan's zero-balance check)";
+  }
+  return `wrapped balance ${groupDigits(candidate.amountAtScan)} base units (${candidate.decimals} decimals, at scan time)`;
+}
+
+export function NativeAccountsSection({
   scan,
   rescan,
   repairInFlight,
-  unwrapInFlight,
+  revokeInFlight,
   onActionInFlightChange,
 }: {
   scan: ScanResult;
   rescan: () => void;
   repairInFlight: boolean;
-  /** G.3 §8.11: the unwrap action's in-flight signal, folded into the
-   *  existing affordance; the mutex, not buttons, remains the
-   *  guarantee. */
-  unwrapInFlight?: boolean;
+  revokeInFlight: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
 }) {
   const { connection } = useConnection();
@@ -222,42 +213,30 @@ export function DelegationSection({
     outcome,
     signatures,
     accountPubkey,
-    balanceAtScan,
-    balanceBeforeAction,
-    balanceAfterAction,
-    delegatePresentAtLastRead,
+    lamportsBeforeAction,
+    accountPresentAfterAction,
     note,
     error,
     errorDetail,
     actionInFlight,
-    revoke,
+    unwrap,
     reset,
-  } = useRevokeDelegate();
+  } = useUnwrapNative();
 
-  const delegations = useMemo(
-    () => selectRevocableDelegations(scan),
-    [scan]
-  );
-  const frozenDelegated = useMemo(
-    () =>
-      scan.skippedAccounts.filter(
-        (entry: SkippedAccount) =>
-          entry.cause === "funded" &&
-          entry.delegated === true &&
-          entry.frozen === true
-      ),
+  const natives = useMemo(
+    () => selectUnwrappableNativeAccounts(scan),
     [scan]
   );
 
   // Report the in-flight signal upward so the page can hold the repair
-  // button (the affordance half of §8.12; the mutex is the guarantee).
+  // button and DelegationSection can hold its buttons (the affordance
+  // half of §8.11; the mutex is the guarantee).
   useEffect(() => {
     onActionInFlightChange?.(actionInFlight);
   }, [actionInFlight, onActionInFlightChange]);
 
-  const [reviewing, setReviewing] = useState<RevocableDelegation | null>(
-    null
-  );
+  const [reviewing, setReviewing] =
+    useState<UnwrappableNativeAccount | null>(null);
   const [gatePreview, setGatePreview] = useState<GatePreview>({
     state: "idle",
   });
@@ -269,31 +248,36 @@ export function DelegationSection({
   >(NO_SIM);
 
   const beginReview = useCallback(
-    (d: RevocableDelegation) => {
-      setReviewing(d);
+    (c: UnwrappableNativeAccount) => {
+      setReviewing(c);
       setGatePreview({ state: "reading" });
       setSim(NO_SIM);
       // Presentation-only pre-card read; the hook re-runs the gate as
       // its authoritative in-lock first step.
-      readDelegatedAccountState(connection, d.pubkey)
-        .then((read: DelegatedAccountRead) => {
+      readNativeAccountState(connection, c.pubkey)
+        .then((read: NativeAccountRead) => {
           setGatePreview((prev) => {
             if (prev.state !== "reading" || !publicKey) return prev;
-            const verdict = evaluateDelegationGate(
+            const verdict = evaluateNativeGate(
               read,
-              d.delegate,
+              c.mint,
               publicKey.toBase58()
             );
             if (verdict.kind === "pass") {
               return {
                 state: "pass",
-                balanceBeforeAction: verdict.balanceBeforeAction,
+                amountBeforeAction: verdict.amountBeforeAction,
+                lamportsBeforeAction: verdict.lamportsBeforeAction,
+                delegate: verdict.delegate,
               };
             }
-            if (verdict.kind === "already-absent") {
-              return { state: "already-absent" };
+            if (verdict.kind === "already-closed") {
+              return { state: "already-closed" };
             }
-            return { state: "abort", sentence: gateAbortSentence(verdict) };
+            return {
+              state: "abort",
+              sentence: NATIVE_GATE_ABORT_COPY[verdict.reason],
+            };
           });
         })
         .catch(() => {
@@ -327,9 +311,15 @@ export function DelegationSection({
     if (!reviewing || !publicKey) return;
     setSim({ state: "running" });
     try {
-      const instruction = buildRevokeInstruction(reviewing, publicKey);
+      const candidate: UnwrappableNativeAccount =
+        gatePreview.state === "pass" && gatePreview.delegate
+          ? { ...reviewing, delegate: gatePreview.delegate }
+          : gatePreview.state === "pass"
+            ? { ...reviewing, delegate: undefined }
+            : reviewing;
+      const instructions = buildUnwrapInstruction(candidate, publicKey);
       const transaction = await buildTransaction(connection, publicKey, [
-        instruction,
+        ...instructions,
       ]);
       const versioned = new VersionedTransaction(
         transaction.compileMessage()
@@ -348,100 +338,128 @@ export function DelegationSection({
         error: e instanceof Error ? e.message : String(e),
       });
     }
-  }, [connection, publicKey, reviewing]);
+  }, [connection, publicKey, reviewing, gatePreview]);
 
-  if (delegations.length === 0 && frozenDelegated.length === 0) {
+  // The raw preview, built from the same instruction objects the hook
+  // signs (§6.2 block 4, §7.8 review gate). Field naming is distinct
+  // from the page's close preview and DelegationSection's revoke
+  // preview.
+  const previewEntries = useMemo(() => {
+    if (!reviewing || !publicKey || gatePreview.state !== "pass") {
+      return null;
+    }
+    const candidate: UnwrappableNativeAccount = gatePreview.delegate
+      ? { ...reviewing, delegate: gatePreview.delegate }
+      : { ...reviewing, delegate: undefined };
+    return buildUnwrapInstruction(candidate, publicKey).map((ix) => {
+      const program = ix.programId.equals(TOKEN_2022_PROGRAM_ID)
+        ? "Token-2022 Program"
+        : "SPL Token Program";
+      if (ix.data[0] === 5) {
+        return {
+          program,
+          instruction: "revoke",
+          account: ix.keys[0].pubkey.toBase58(),
+          authority: ix.keys[1].pubkey.toBase58(),
+          note: "clears the delegate before the close",
+        };
+      }
+      return {
+        program,
+        instruction: "closeAccount",
+        account: ix.keys[0].pubkey.toBase58(),
+        destination: ix.keys[1].pubkey.toBase58(),
+        authority: ix.keys[2].pubkey.toBase58(),
+        note: "every lamport in the account goes to the destination",
+      };
+    });
+  }, [reviewing, publicKey, gatePreview]);
+
+  if (natives.length === 0) {
     return null;
   }
 
   const busy = actionInFlight;
-  const otherActionInFlight = repairInFlight || unwrapInFlight === true;
+  const otherActionInFlight = repairInFlight || revokeInFlight;
 
   return (
     <div
-      data-testid="delegation-section"
+      data-testid="native-accounts-section"
       className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
     >
-      <p className="text-sm text-zinc-300">Standing delegations</p>
+      <p className="text-sm text-zinc-300">Wrapped SOL</p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-400">
-        {delegations.length} funded{" "}
-        {plural(delegations.length, "account", "accounts")} with a balance{" "}
-        {plural(delegations.length, "has", "have")} an active delegation. A
-        delegation is a permission the account&rsquo;s owner granted to the
-        address shown. This is what the chain records; SOL.REPAIR cannot
-        tell why a delegation exists or whether the delegate has ever
-        acted.
+        {natives.length} {plural(natives.length, "account", "accounts")}{" "}
+        {natives.length === 1 ? "holds" : "hold"} wrapped SOL (a
+        token-program representation of SOL). Closing{" "}
+        {natives.length === 1 ? "it" : "them"} returns every lamport{" "}
+        {natives.length === 1 ? "it holds" : "they hold"} to your
+        wallet. This is what the chain records; SOL.REPAIR cannot tell
+        why{" "}
+        {natives.length === 1
+          ? "this account exists"
+          : "these accounts exist"}{" "}
+        or whether anything still expects{" "}
+        {natives.length === 1 ? "it" : "them"}.
       </p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-        Balances and delegate facts are from the scan (finalized view).
-        Only accounts the scan could confirm as non-native are offered
-        here.
+        Balances and lamports are from the scan (finalized view). Only
+        accounts the scan could confirm as wrapped-SOL are offered here;
+        an account whose native status the scan could not confirm is
+        never offered.
       </p>
 
-      {delegations.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {delegations.map((d) => (
-            <div
-              key={d.pubkey}
-              className="rounded-md border border-zinc-800 bg-black/40 p-2"
-            >
-              <div className="flex items-baseline justify-between gap-3 font-mono text-[11px] leading-relaxed text-zinc-400">
-                <span className="min-w-0 break-all">
-                  <AccountLink address={d.pubkey} />
-                  {" · "}
-                  <AccountLink address={d.mint} />
-                  {d.program === "token-2022" && (
-                    <span className="text-sky-400/80"> · Token-2022</span>
-                  )}
-                  <br />
-                  balance {groupDigits(d.balanceAtScan)} base units (
-                  {d.decimals} decimals, at scan time) · delegate{" "}
-                  <AccountLink address={d.delegate} />
-                </span>
-                <button
-                  onClick={() => beginReview(d)}
-                  disabled={otherActionInFlight || busy}
-                  className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Revoke delegate
-                </button>
-              </div>
-              <details className="mt-1">
-                <summary className="cursor-pointer text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">
-                  What this delegation means
-                </summary>
-                <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-                  This account has an active delegation to the address
-                  shown. The token program lets that address spend from
-                  this account — by transferring or burning — up to the
-                  delegated amount that was set when the permission was
-                  created. The amount of delegated spending authority is
-                  not displayed: the scan&rsquo;s account data names the
-                  delegate but does not include the delegated amount, and
-                  SOL.REPAIR does not invent values it cannot read. The
-                  delegation does not include closing the account or
-                  changing its authorities. Revoking ends this permission
-                  going forward. It does not reverse anything that already
-                  happened, and it does not change the account&rsquo;s
-                  owner or any other authority.
-                </p>
-              </details>
+      <div className="mt-3 space-y-2">
+        {natives.map((c) => (
+          <div
+            key={c.pubkey}
+            className="rounded-md border border-zinc-800 bg-black/40 p-2"
+          >
+            <div className="flex items-baseline justify-between gap-3 font-mono text-[11px] leading-relaxed text-zinc-400">
+              <span className="min-w-0 break-all">
+                <AccountLink address={c.pubkey} />
+                {" · native mint "}
+                <AccountLink address={c.mint} />
+                <br />
+                {wrappedBalanceFragment(c)} · account holds{" "}
+                {groupCount(c.lamports)} lamports total ·{" "}
+                {c.program === "token-2022" ? "Token-2022" : "SPL Token Program"}
+              </span>
+              <button
+                onClick={() => beginReview(c)}
+                disabled={otherActionInFlight || busy}
+                className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Unwrap and close
+              </button>
             </div>
-          ))}
-        </div>
-      )}
-
-      {frozenDelegated.length > 0 && (
-        <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-500">
-          {frozenDelegated.map((entry) => (
-            <p key={entry.pubkey} className="break-all">
-              <AccountLink address={entry.pubkey} /> · frozen by the
-              token&rsquo;s freeze authority; a frozen account cannot be
-              revoked
-            </p>
-          ))}
-        </div>
-      )}
+            <details className="mt-1">
+              <summary className="cursor-pointer text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">
+                What closing this account means
+              </summary>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                This account is a wrapped-SOL account: a normal token
+                account whose token is SOL itself. Swaps and other
+                programs open one, use it, and often leave it behind.
+                Closing it deletes the account and sends every lamport
+                it holds — the wrapped SOL balance and everything else
+                in the account, including any SOL that was sent to its
+                address directly — to your wallet. That movement is how
+                the token program&rsquo;s close works for native
+                accounts; SOL.REPAIR does not perform any transfer of
+                its own. If a program you use still expects this account
+                to exist (some positions and orders are held in wrapped
+                SOL), that program will see the account gone after the
+                close. SOL.REPAIR cannot tell a leftover wrapper from an
+                account something still depends on — that judgment is
+                yours. Closing is not undoable by this tool; a future
+                swap can open a new wrapped-SOL account (and lock a new
+                rent reserve) at any time.
+              </p>
+            </details>
+          </div>
+        ))}
+      </div>
 
       {otherActionInFlight && !busy && (
         <p className="mt-3 text-xs leading-relaxed text-amber-400/80">
@@ -485,10 +503,10 @@ export function DelegationSection({
               </div>
             </>
           )}
-          {gatePreview.state === "already-absent" && (
+          {gatePreview.state === "already-closed" && (
             <>
               <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                {ALREADY_REVOKED_COPY}
+                {ALREADY_CLOSED_COPY}
               </p>
               <div className="mt-3">
                 <button
@@ -506,61 +524,69 @@ export function DelegationSection({
           {gatePreview.state === "pass" && (
             <>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                You are about to approve 1 transaction that removes the
-                delegate {short(reviewing.delegate)} from token account{" "}
-                {short(reviewing.pubkey)}.
+                You are about to approve 1 transaction that closes
+                wrapped-SOL account {short(reviewing.pubkey)}. Every
+                lamport it holds —{" "}
+                {groupCount(gatePreview.lamportsBeforeAction)} at the
+                fresh read just now — goes to your wallet (
+                {publicKey ? short(publicKey.toBase58()) : ""}). The
+                account will no longer exist.
               </p>
               <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                Balance at scan: {groupDigits(reviewing.balanceAtScan)} base
-                units. Balance at the fresh read just now:{" "}
-                {groupDigits(gatePreview.balanceBeforeAction)} base units.
+                Wrapped balance at scan:{" "}
+                {groupDigits(reviewing.amountAtScan)} base units. At the
+                fresh read just now:{" "}
+                {groupDigits(gatePreview.amountBeforeAction)} base units.
+                Total lamports at scan: {groupCount(reviewing.lamports)}.
+                At the fresh read just now:{" "}
+                {groupCount(gatePreview.lamportsBeforeAction)}.
               </p>
-              {gatePreview.balanceBeforeAction !==
-                reviewing.balanceAtScan && (
+              {(gatePreview.amountBeforeAction !== reviewing.amountAtScan ||
+                gatePreview.lamportsBeforeAction !==
+                  reviewing.lamports) && (
                 <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
-                  The balance changed between the scan and this read.
+                  The account changed between the scan and this read.
                   SOL.REPAIR cannot tell what caused the change.
                 </p>
               )}
+              {gatePreview.delegate && (
+                <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                  A delegate ({short(gatePreview.delegate)}) holds a
+                  spending permission on this account.
+                </p>
+              )}
               <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                This transaction contains exactly one instruction: revoke,
-                from{" "}
+                This transaction contains exactly{" "}
+                {gatePreview.delegate ? "two instructions" : "one instruction"}
+                :{" "}
+                {gatePreview.delegate
+                  ? "a revoke, then closeAccount"
+                  : "closeAccount"}
+                , from{" "}
                 {reviewing.program === "token-2022"
                   ? "the Token-2022 program"
                   : "the SPL Token Program"}
-                . It does not transfer or burn tokens, does not close the
-                account, and does not change the token balance.
+                , with your wallet as both the destination and the
+                authority. It does not transfer tokens to any other
+                address.
+                {gatePreview.delegate &&
+                  " It first revokes the delegate on this account, then closes it."}
               </p>
               <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                Network fee: ~{lamportsToSol(estimateNetworkFee())} SOL, paid
-                from your wallet. No service fee: the 1% fee applies only to
-                recovered rent, and this transaction recovers none. Your
-                wallet may add its own priority fee.
+                Network fee: ~{lamportsToSol(estimateNetworkFee())} SOL,
+                paid from your wallet. Your wallet may add its own
+                priority fee. No service fee: you are recovering your
+                own SOL.
               </p>
               <details className="mt-2 rounded-md border border-zinc-800 p-2">
                 <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                   Inspect exactly what you&rsquo;ll sign
                 </summary>
                 <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                  Built from the same instruction the wallet will sign.
+                  Built from the same instructions the wallet will sign.
                 </p>
                 <pre className="mt-1 max-h-48 overflow-auto rounded bg-black p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
-                  {JSON.stringify(
-                    [
-                      {
-                        program:
-                          reviewing.program === "token-2022"
-                            ? "Token-2022 Program"
-                            : "SPL Token Program",
-                        instruction: "revoke",
-                        account: reviewing.pubkey,
-                        delegateAuthority: publicKey?.toBase58() ?? null,
-                        note: "removes the delegate; balance untouched",
-                      },
-                    ],
-                    null,
-                    2
-                  )}
+                  {previewEntries && JSON.stringify(previewEntries, null, 2)}
                 </pre>
               </details>
               <div className="mt-2">
@@ -575,8 +601,9 @@ export function DelegationSection({
                 </button>
                 {sim.state === "ok" && (
                   <p className="mt-1 text-xs leading-relaxed text-emerald-400">
-                    Simulation passed. Expected effect: the delegate is
-                    cleared; the balance is untouched.
+                    Simulation passed. Expected effect: the account is
+                    deleted and every lamport it holds goes to your
+                    wallet.
                   </p>
                 )}
                 {sim.state === "error" && (
@@ -588,11 +615,11 @@ export function DelegationSection({
               <div className="mt-3 flex gap-3">
                 <button
                   onClick={() => {
-                    void revoke(reviewing);
+                    void unwrap(reviewing);
                   }}
                   className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584]"
                 >
-                  Revoke delegate
+                  Unwrap and close
                 </button>
                 <button
                   onClick={closeReview}
@@ -613,18 +640,18 @@ export function DelegationSection({
           className="mt-3 rounded-md border border-zinc-700 p-3"
         >
           <div className="flex items-center gap-3">
-            <RevokeSpinner amber={AMBER_STATUSES.has(status)} />
+            <UnwrapSpinner amber={AMBER_STATUSES.has(status)} />
             <p className="min-w-0 flex-1 text-sm text-zinc-300">
               {status === "checking-current-state" &&
                 "Checking the account's current state..."}
               {status === "building" && "Building transaction..."}
               {status === "awaiting-signature" &&
-                "Check your wallet. Approve to revoke the delegate."}
+                "Check your wallet. Approve to unwrap and close."}
               {status === "sending" && "Approved. Sending to the network..."}
               {status === "confirming" &&
                 "Sent. Waiting for the network to confirm..."}
               {status === "verifying" &&
-                "Confirmed. Verifying the delegate field on-chain..."}
+                "Confirmed. Verifying the account is gone on-chain..."}
             </p>
             {(status === "sending" ||
               status === "confirming" ||
@@ -641,39 +668,29 @@ export function DelegationSection({
       {/* Done cards */}
       {status === "done" && (
         <div className="mt-3 rounded-md border border-emerald-800 bg-emerald-950/30 p-3">
-          {outcome === "revoked-verified" && (
+          {outcome === "unwrap-verified" && (
             <>
               <p className="text-sm font-medium text-emerald-400">
-                Delegate revoked
+                Wrapped SOL returned.
               </p>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                Token account {accountPubkey ? short(accountPubkey) : ""} no
-                longer names a delegate — confirmed by a fresh read after
-                the transaction.
+                Wrapped-SOL account {accountPubkey ? short(accountPubkey) : ""}{" "}
+                no longer exists — confirmed by a fresh read after the
+                transaction. Its last recorded lamports (
+                {lamportsBeforeAction === null
+                  ? "figure unavailable"
+                  : groupCount(lamportsBeforeAction)}
+                , read just before the close) went to your wallet as the
+                close&rsquo;s destination.
               </p>
-              {balanceObservationCopy(
-                balanceAtScan,
-                balanceBeforeAction,
-                balanceAfterAction
-              ) && (
-                <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                  {
-                    balanceObservationCopy(
-                      balanceAtScan,
-                      balanceBeforeAction,
-                      balanceAfterAction
-                    ) as string
-                  }
-                </p>
-              )}
             </>
           )}
-          {outcome === "already-revoked" && (
+          {outcome === "already-closed" && (
             <p className="text-sm leading-relaxed text-zinc-300">
               {error}
             </p>
           )}
-          {outcome === "delegate-absent-unattributed" && (
+          {outcome === "close-unattributed" && (
             <p className="text-sm leading-relaxed text-zinc-300">{error}</p>
           )}
           {signatures.map((sig) => (
@@ -693,27 +710,27 @@ export function DelegationSection({
       {/* Error card */}
       {status === "error" && (
         <div className="mt-3 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-400">
-          <p className="font-medium">The revoke did not go through</p>
+          <p className="font-medium">The unwrap did not go through</p>
           <p className="mt-1 leading-relaxed text-red-400/80">{error}</p>
           {outcome === "on-chain-failure" &&
-            delegatePresentAtLastRead === true && (
+            accountPresentAfterAction === true && (
               <p className="mt-1 text-xs leading-relaxed text-red-400/70">
-                When we checked, the delegate was still on the account.
+                When we checked, the account still existed.
               </p>
             )}
           {outcome === "on-chain-failure" &&
-            delegatePresentAtLastRead === false && (
+            accountPresentAfterAction === false && (
               <p className="mt-1 text-xs leading-relaxed text-red-400/70">
-                A fresh read after it shows no delegate on the account —
-                whether this app&rsquo;s transaction caused that could not
-                be established.
+                A fresh read after it shows the account gone — whether
+                this app&rsquo;s transaction caused that could not be
+                established.
               </p>
             )}
           {outcome === "on-chain-failure" &&
-            delegatePresentAtLastRead === null && (
+            accountPresentAfterAction === null && (
               <p className="mt-1 text-xs leading-relaxed text-red-400/70">
-                The follow-up read failed, so the current delegate state is
-                unknown.
+                The follow-up read failed, so the current state of the
+                account is unknown.
               </p>
             )}
           {signatures.map((sig) => (
@@ -741,7 +758,7 @@ export function DelegationSection({
       {/* Unverified card (distinct from success and failure, §8.9) */}
       {status === "unverified" && (
         <div className="mt-3 rounded-md border border-amber-800 bg-amber-950/30 p-3 text-sm text-amber-300">
-          <p className="font-medium">We could not verify whether the revoke landed</p>
+          <p className="font-medium">We could not verify whether the close landed</p>
           <p className="mt-1 leading-relaxed text-amber-300/80">{error}</p>
           {signatures.map((sig) => (
             <ExplorerLink key={sig} signature={sig} />
