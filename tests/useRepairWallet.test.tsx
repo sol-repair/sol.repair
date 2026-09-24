@@ -32,6 +32,7 @@ import {
   MAX_ACCOUNTS_PER_RUN,
   useRepairWallet,
 } from "../src/hooks/useRepairWallet";
+import { MAX_CLOSE_INSTRUCTIONS_PER_TX } from "../src/lib/solana/transactions";
 import {
   TOKEN_PROGRAM_ID,
   type ClosableAccount,
@@ -632,8 +633,10 @@ describe("useRepairWallet", () => {
     // instruction tag plus the u64 LE lamports at offset 4.
     const approvals: Array<{ closes: number; feeLamports: bigint | null }> = [];
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
-      const closes = tx.instructions.filter((ix) =>
-        ix.programId.toBase58().startsWith("Token")
+      // CloseAccount is token instruction tag 9 in both token programs;
+      // counting by data tag cannot mistake a Revoke (tag 5) for a close.
+      const closes = tx.instructions.filter(
+        (ix) => ix.data.length === 1 && ix.data[0] === 9
       ).length;
       const feeIx = tx.instructions.find(
         (ix) => ix.programId.toBase58() === SystemProgram.programId.toBase58()
@@ -653,7 +656,7 @@ describe("useRepairWallet", () => {
     });
 
     // Approval 1: the original full batch with the full-batch fee.
-    expect(approvals[0].closes).toBe(20);
+    expect(approvals[0].closes).toBe(MAX_CLOSE_INSTRUCTIONS_PER_TX);
     expect(approvals[0].feeLamports).toBe(407856n); // floor(20 x 2039280 / 100)
     // Approval 2: RECONCILED - the 13 still-open accounts only, with the
     // fee recalculated on the retry batch only.
@@ -732,8 +735,8 @@ describe("useRepairWallet", () => {
 
     const approvals: Array<{ closes: number; closedKeys: string[] }> = [];
     mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
-      const closeIxs = tx.instructions.filter((ix) =>
-        ix.programId.toBase58().startsWith("Token")
+      const closeIxs = tx.instructions.filter(
+        (ix) => ix.data.length === 1 && ix.data[0] === 9
       );
       approvals.push({
         closes: closeIxs.length,
@@ -751,9 +754,11 @@ describe("useRepairWallet", () => {
 
     // Exactly five approvals, each the full 20 closes.
     expect(result.current.status).toBe("done");
-    expect(approvals).toHaveLength(MAX_ACCOUNTS_PER_RUN / 20);
+    expect(approvals).toHaveLength(
+      MAX_ACCOUNTS_PER_RUN / MAX_CLOSE_INSTRUCTIONS_PER_TX
+    );
     for (const approval of approvals) {
-      expect(approval.closes).toBe(20);
+      expect(approval.closes).toBe(MAX_CLOSE_INSTRUCTIONS_PER_TX);
     }
     // The first 100 accounts, in order, and nothing beyond them.
     const closedKeys = approvals.flatMap((a) => a.closedKeys);

@@ -59,7 +59,6 @@ const mocks = vi.hoisted(() => ({
     getAccountInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
-    confirmTransaction: vi.fn(),
     simulateTransaction: vi.fn(),
   },
 }));
@@ -73,9 +72,16 @@ vi.mock("@/hooks/useWalletScan", () => ({
   useWalletScan: () => mocks.scan,
 }));
 
-vi.mock("@/hooks/useRepairWallet", () => ({
+vi.mock("@/hooks/useRepairWallet", async () => ({
   useRepairWallet: () => mocks.repair,
-  MAX_ACCOUNTS_PER_RUN: 100,
+  // The page also imports the cap constant for its copy, so the fake must
+  // carry it too. Read the REAL export rather than a copy of its value: a
+  // hand-written 100 here would drift silently if the cap ever changed.
+  MAX_ACCOUNTS_PER_RUN: (
+    await vi.importActual<typeof import("@/hooks/useRepairWallet")>(
+      "@/hooks/useRepairWallet"
+    )
+  ).MAX_ACCOUNTS_PER_RUN,
 }));
 
 vi.mock("next/link", () => ({
