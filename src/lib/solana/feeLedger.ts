@@ -35,24 +35,46 @@ import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "./tokenAccounts";
 // Read-only: the conformance check mirrors the frozen fee formula's rate.
 // fees.ts itself is not modified.
 import { FEE_PERCENT } from "./fees";
+// Same list parsing and the same precedence the app's own connection uses,
+// so a deployment configured one way cannot read the chain two ways.
+import { parseEndpointList } from "./connection";
 
 /** Endpoints for the ledger. The devnet tab always uses the public devnet
- *  endpoint. The mainnet tab uses the same dedicated provider endpoint the
- *  app's mainnet build already uses (NEXT_PUBLIC_MAINNET_RPC_ENDPOINT) when
- *  one is configured, because the public mainnet endpoint now refuses
- *  browser requests outright: any request carrying an Origin header gets
- *  "Access forbidden" (403) — verified 2026-08-29 against
- *  api.mainnet-beta.solana.com, and the one keyless alternative
- *  (solana-rpc.publicnode.com) returns null for older transactions, which
- *  would silently drop rows. Without a configured endpoint the mainnet tab
- *  falls back to the public one, which still serves headerless clients
- *  (curl, node) and keeps the ledger reproducible: a row is defined the
- *  same way and can be re-derived against any RPC. */
-const MAINNET_LEDGER_ENDPOINT = process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT;
+ *  endpoint. The mainnet tab reads through the deployment's configured
+ *  mainnet provider when there is one - the per-network endpoint LIST
+ *  first (its primary entry), then the legacy single endpoint - because
+ *  the public mainnet endpoint now refuses browser requests outright: any
+ *  request carrying an Origin header gets "Access forbidden" (403) —
+ *  verified 2026-08-29 against api.mainnet-beta.solana.com, and the one
+ *  keyless alternative (solana-rpc.publicnode.com) returns null for older
+ *  transactions, which would silently drop rows. Without a configured
+ *  endpoint the mainnet tab falls back to the public one, which still
+ *  serves headerless clients (curl, node) and keeps the ledger
+ *  reproducible: a row is defined the same way and can be re-derived
+ *  against any RPC. */
+function mainnetLedgerEndpoint(
+  configuredList: string | undefined,
+  legacyEndpoint: string | undefined
+): string {
+  const configured = [
+    ...parseEndpointList(configuredList),
+    ...parseEndpointList(legacyEndpoint),
+  ];
+  return configured.length > 0
+    ? configured[0]
+    : "https://api.mainnet-beta.solana.com";
+}
+
+// LITERAL process.env references at module scope: Next.js inlines only
+// literal NEXT_PUBLIC_* reads into the browser bundle (see the same note
+// in connection.ts).
+const MAINNET_LEDGER_ENDPOINT = mainnetLedgerEndpoint(
+  process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS,
+  process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT
+);
 
 export const FEE_LEDGER_ENDPOINTS = {
-  "mainnet-beta":
-    MAINNET_LEDGER_ENDPOINT ?? "https://api.mainnet-beta.solana.com",
+  "mainnet-beta": MAINNET_LEDGER_ENDPOINT,
   devnet: "https://api.devnet.solana.com",
 } as const;
 

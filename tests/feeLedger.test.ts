@@ -666,8 +666,40 @@ describe("FEE_LEDGER_ENDPOINTS selection", () => {
     vi.resetModules();
   });
 
+  it("mainnet uses the first entry of the endpoint LIST when it is set", async () => {
+    // The per-network list is the documented preferred shape, and the app's
+    // own connection reads it first. The ledger must not read the chain two
+    // ways: with only the list configured it used to fall back to the public
+    // endpoint, which refuses browser requests (403) on mainnet.
+    vi.stubEnv("NEXT_PUBLIC_MAINNET_RPC_ENDPOINT", undefined);
+    vi.stubEnv(
+      "NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS",
+      " https://primary.example , https://secondary.example "
+    );
+    vi.resetModules();
+    const mod = await import("@/lib/solana/feeLedger");
+    expect(mod.FEE_LEDGER_ENDPOINTS["mainnet-beta"]).toBe(
+      "https://primary.example"
+    );
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("mainnet prefers the endpoint LIST over the legacy single endpoint", async () => {
+    vi.stubEnv("NEXT_PUBLIC_MAINNET_RPC_ENDPOINT", "https://legacy.example");
+    vi.stubEnv("NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS", "https://primary.example");
+    vi.resetModules();
+    const mod = await import("@/lib/solana/feeLedger");
+    expect(mod.FEE_LEDGER_ENDPOINTS["mainnet-beta"]).toBe(
+      "https://primary.example"
+    );
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
   it("mainnet falls back to the public endpoint when unset", async () => {
     vi.stubEnv("NEXT_PUBLIC_MAINNET_RPC_ENDPOINT", undefined);
+    vi.stubEnv("NEXT_PUBLIC_MAINNET_RPC_ENDPOINTS", undefined);
     vi.resetModules();
     const mod = await import("@/lib/solana/feeLedger");
     expect(mod.FEE_LEDGER_ENDPOINTS["mainnet-beta"]).toBe(
