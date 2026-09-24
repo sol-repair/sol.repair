@@ -14,7 +14,7 @@
  * sitemap until the suite is announced (M4).
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { NetworkBadge } from "@/components/NetworkBadge";
 import { WalletRecentTransactions } from "@/components/WalletRecentTransactions";
@@ -73,37 +73,66 @@ const ENDPOINT = IS_MAINNET
   ? FEE_LEDGER_ENDPOINTS["mainnet-beta"]
   : FEE_LEDGER_ENDPOINTS.devnet;
 
+/** Ticking counter for the in-flight read. A changing number is the honest
+ *  "not stuck" signal on a slow public endpoint: real time passing, no fake
+ *  progress. Same pattern as the homepage's repair counter. */
+function ReadingSeconds() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="font-mono tabular-nums text-zinc-500">{seconds}s</span>
+  );
+}
+
 export default function UnderstandPage() {
   const [signature, setSignature] = useState("");
   const [state, setState] = useState<ExplainState>({ kind: "idle" });
+  // Newest request wins. Every click (form submit or a recent-transactions
+  // row) starts a fetch; a slower EARLIER response must never overwrite a
+  // later one, so each request is generation-tagged and stale responses are
+  // discarded before they can touch state. Same pattern as the scan and
+  // ledger hooks. Individual RPC calls are still abort-bounded (30s) in the
+  // fetch layer; this guard is about overlapping requests, not timeouts.
+  const requestRef = useRef(0);
 
   async function explain(signatureInput: string) {
+    const request = ++requestRef.current;
+    const stale = () => request !== requestRef.current;
     if (!SIGNATURE_PATTERN.test(signatureInput)) {
-      setState({ kind: "invalid" });
+      if (!stale()) setState({ kind: "invalid" });
       return;
     }
     setState({ kind: "loading" });
     try {
       const raw = await fetchRawTransaction(ENDPOINT, signatureInput);
+      if (stale()) return;
       if (!raw) {
         setState({ kind: "not-found" });
         return;
       }
       const decoded = decodeRawTransaction(raw);
+      if (stale()) return;
       if (!decoded) {
         setState({ kind: "unreadable" });
         return;
       }
+      const explained = explainDecodedTransaction(decoded);
+      const analysis = analyzeLeftBehind({
+        instructions: decoded.instructions,
+        failed: raw.meta?.err != null,
+      });
+      if (stale()) return;
       setState({
         kind: "done",
         signature: signatureInput,
-        explained: explainDecodedTransaction(decoded),
-        analysis: analyzeLeftBehind({
-          instructions: decoded.instructions,
-          failed: raw.meta?.err != null,
-        }),
+        explained,
+        analysis,
       });
     } catch (error) {
+      if (stale()) return;
       setState({
         kind: "error",
         detail: error instanceof Error ? error.message : String(error),
@@ -216,7 +245,10 @@ export default function UnderstandPage() {
         )}
 
         {state.kind === "loading" && (
-          <p className="mb-6 text-sm text-zinc-400">Reading the chain...</p>
+          <p className="mb-6 text-sm text-zinc-400">
+            Reading the chain... The public endpoint can be slow under load.{" "}
+            <ReadingSeconds />
+          </p>
         )}
 
         {state.kind === "not-found" && (

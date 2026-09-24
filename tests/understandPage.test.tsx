@@ -287,4 +287,63 @@ describe("understand page outcomes", () => {
     const endpoint = mockedFetch.mock.calls[0][0];
     expect(typeof endpoint === "string" && endpoint.startsWith("https://")).toBe(true);
   });
+
+  it("discards a late OLDER response when a newer request was started", async () => {
+    // The observed hang shape: a slow public endpoint plus recent-list rows
+    // that stay clickable during a read. The newest request must win, and a
+    // slower earlier response must never overwrite it.
+    const SIGNATURE_A = VALID_SIGNATURE;
+    const SIGNATURE_B =
+      "4rqZdxHnfWpd567ci3MTZjujVFPVMAeQ4Nu1MhRgwH1UzVunmtvWFb6o1bXeSNuwEGy3HfiLUE6seHQArBNJnvQj";
+    const { raw: rawSlow } = buildLegacyRaw([
+      closeIx(),
+      systemTransferIx(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    const { raw: rawFast } = buildLegacyRaw([closeIx()]);
+
+    mocks.wallet = {
+      wallet: { adapter: { name: "Phantom" } },
+      wallets: [],
+      connect: vi.fn(),
+      connected: true,
+      connecting: false,
+      disconnect: vi.fn(),
+      publicKey: Keypair.generate().publicKey,
+    };
+    mockedSignatureList.mockResolvedValue([
+      { signature: SIGNATURE_A, blockTime: 1789215763 },
+      { signature: SIGNATURE_B, blockTime: 1789215700 },
+    ]);
+
+    let resolveSlow!: (value: ReturnType<typeof buildLegacyRaw>["raw"]) => void;
+    mockedFetch
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSlow = resolve;
+          })
+      )
+      .mockImplementationOnce(async () => rawFast);
+
+    render(<UnderstandPage />);
+    const rowA = await screen.findByRole("button", { name: /2V4dcrHE/ });
+    fireEvent.click(rowA);
+    expect(await screen.findByText(/Reading the chain\.\.\./)).toBeTruthy();
+    const rowB = await screen.findByRole("button", { name: /4rqZdxHn/ });
+    fireEvent.click(rowB);
+    expect(
+      await screen.findByText(/This transaction contains 1 instruction/i)
+    ).toBeTruthy();
+    expect(screen.getByText(SIGNATURE_B)).toBeTruthy();
+
+    // The older request finally lands. It must NOT replace the newer one.
+    resolveSlow(rawSlow);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(SIGNATURE_A)).toBeNull();
+    expect(screen.getByText(SIGNATURE_B)).toBeTruthy();
+    expect(
+      screen.getByText(/This transaction contains 1 instruction/i)
+    ).toBeTruthy();
+  });
 });
