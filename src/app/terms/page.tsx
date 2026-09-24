@@ -80,12 +80,21 @@ export default function TermsPage() {
               your wallet displays the complete cost (service fee and
               network fee) before you sign. Our fee address is published in
               the open-source repository, so anyone can verify where the
-              service fee goes. Standard Solana network fees also apply and
-              are paid to the Solana network, not to us: a base fee of
-              about 0.000005 SOL per transaction, plus the priority fee
-              your wallet adds when you approve (with Phantom&rsquo;s default
-              settings that has recently run between about 0.000075 and
-              0.00015 SOL per transaction).
+              service fee goes.
+            </p>
+            <p>
+              Wrapped-SOL accounts handled by the separate unwrap-and-close
+              action are never charged a service fee: the SOL they recover is
+              your own principal coming home. Only the standard Solana
+              network fees apply, and they are paid to the Solana network,
+              not to us: a base fee of about 0.000005 SOL per transaction,
+              plus the priority fee your wallet adds when you approve (with
+              Phantom&rsquo;s default settings that has recently run between
+              about 0.000075 and 0.00015 SOL per transaction).
+            </p>
+            <p>
+              Standard Solana network fees also apply to repairs and are
+              paid to the Solana network, not to us.
             </p>
           </section>
 

@@ -64,7 +64,8 @@ Token accounts (classic SPL Token and Token-2022) that pass all of these:
    a frozen account.
 3. Close authority still with your wallet. Some accounts created by other
    programs can only be closed by those programs, so they are skipped.
-4. Not wrapped SOL.
+4. Not wrapped SOL. Wrapped-SOL accounts are handled by the separate
+   unwrap action described below.
 5. Frozen is fine while empty. The network blocks moving or burning frozen
    balances, not closing an empty account, so an empty frozen account is
    offered like any other. A frozen account that still holds tokens is
@@ -77,6 +78,14 @@ any account holding tokens are protected by the zero-balance rule.
 Funded accounts are never closed, but a funded delegated account can have
 its delegation revoked as a separate, revoke-only action that does not
 touch balances.
+
+Wrapped-SOL accounts get their own action: unwrap and close. A wrapped-SOL
+account is a token-program representation of SOL, typically opened by swaps
+and left behind. Closing it deletes the account and returns every lamport it
+holds - the wrapped balance plus everything else in the account - to the
+wallet owner. Offered for both empty and funded wrapped-SOL accounts the scan
+confirms as native, one account per approval, with no service fee: the money
+recovered is the user's own.
 
 ## Running it locally
 
