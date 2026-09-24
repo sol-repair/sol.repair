@@ -30,6 +30,7 @@ import {
 import Home from "../src/app/page";
 import { MAX_ACCOUNTS_PER_RUN } from "../src/hooks/useRepairWallet";
 import { feeAmountLamports } from "../src/lib/solana/fees";
+import { MAX_CLOSE_INSTRUCTIONS_PER_TX } from "../src/lib/solana/transactions";
 import {
   TOKEN_PROGRAM_ID,
   lamportsToSol,
@@ -101,9 +102,11 @@ const SCAN_RESULT: ScanResult = {
   skippedAccounts: [],
 };
 
-// Five batches of 20, fee per batch = floor(20 x 2039280 / 100).
+// One batch of 20 closes, fee per batch = floor(20 x 2039280 / 100); the
+// expected service fee is that batch fee times the number of batches.
 const EXPECTED_SERVICE_FEE =
-  BigInt(MAX_ACCOUNTS_PER_RUN / 20) * feeAmountLamports(ACCOUNTS.slice(0, 20));
+  BigInt(MAX_ACCOUNTS_PER_RUN / MAX_CLOSE_INSTRUCTIONS_PER_TX) *
+  feeAmountLamports(ACCOUNTS.slice(0, MAX_CLOSE_INSTRUCTIONS_PER_TX));
 
 /**
  * Render the page the way the real scan lands: no result on the first

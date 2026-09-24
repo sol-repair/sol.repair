@@ -45,7 +45,6 @@ const mocks = vi.hoisted(() => ({
     getAccountInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
-    confirmTransaction: vi.fn(),
     simulateTransaction: vi.fn(),
   },
 }));
