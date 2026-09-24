@@ -27,6 +27,21 @@ export const TOKEN_2022_PROGRAM_ID = new PublicKey(
  *  build the CloseAccount instruction. */
 export type TokenProgram = "spl" | "token-2022";
 
+/**
+ * Three-state native-status evidence for a parsed token account (G.2,
+ * spec §4.3). Strict equality on the parsed isNative value: an omitted
+ * or non-boolean field is "unknown", never coerced or defaulted. The
+ * close flow keeps its own `info.isNative !== false` refusal check;
+ * this mapping is evidence for downstream action eligibility only.
+ */
+export type NativeStatus = "native" | "non-native" | "unknown";
+
+export function nativeStatusOf(isNative: unknown): NativeStatus {
+  if (isNative === true) return "native";
+  if (isNative === false) return "non-native";
+  return "unknown";
+}
+
 const SCANNED_PROGRAMS: ReadonlyArray<{
   id: PublicKey;
   tag: TokenProgram;
@@ -105,6 +120,18 @@ export interface SkippedAccount {
   /** True when the parsed response named an active delegate. Evidence
    *  only; the skip decision itself is unchanged. */
   delegated?: boolean;
+  /** Base58 address of the active delegate when the parsed response
+   *  named one. Evidence only; carried alongside `delegated` so the UI
+   *  can show WHICH address holds the permission. The skip decision is
+   *  unchanged. */
+  delegate?: string;
+  /** Three-state native-status evidence, derived by strict equality on
+   *  the parsed account's isNative value (see nativeStatusOf below):
+   *  "native" | "non-native" | "unknown" — an omitted or non-boolean
+   *  field is recorded as "unknown", never defaulted. Evidence only;
+   *  the skip decision and the close flow's own isNative check are
+   *  unchanged. */
+  nativeStatus?: NativeStatus;
   /** True when the parsed state is "frozen" (funded skips; frozen EMPTY
    *  accounts are eligible and carry the flag on ClosableAccount). */
   frozen?: boolean;
@@ -240,8 +267,11 @@ export async function getClosableAccounts(
           balance: info.tokenAmount.amount,
           decimals: info.tokenAmount.decimals,
           lamports: account.lamports,
-          ...(info.delegate ? { delegated: true } : {}),
+          ...(info.delegate
+            ? { delegated: true, delegate: info.delegate }
+            : {}),
           ...(info.state === "frozen" ? { frozen: true } : {}),
+          nativeStatus: nativeStatusOf(info.isNative),
         });
         continue;
       }
@@ -323,6 +353,11 @@ export async function getClosableAccounts(
           program: tag,
           cause: "frozen-with-delegate",
           delegated: true,
+          ...(info.delegate ? { delegate: info.delegate } : {}),
+          // This site is only reachable after the isNative check passed,
+          // so the derivation always yields "non-native" here — recorded
+          // by the same expression as the funded site, not special-cased.
+          nativeStatus: nativeStatusOf(info.isNative),
         });
         continue;
       }

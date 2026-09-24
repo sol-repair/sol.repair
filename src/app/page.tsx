@@ -9,6 +9,7 @@ import { VersionedTransaction } from "@solana/web3.js";
 import { NetworkBadge } from "@/components/NetworkBadge";
 import { WalletButton } from "@/components/WalletButton";
 import { WalletStateSummary } from "@/components/WalletStateSummary";
+import { DelegationSection } from "@/components/DelegationSection";
 import { useWalletScan } from "@/hooks/useWalletScan";
 import {
   MAX_ACCOUNTS_PER_RUN,
@@ -206,6 +207,20 @@ export default function Home() {
 
   // Whether the user has clicked "Repair" and is in the confirmation step.
   const [confirming, setConfirming] = useState(false);
+
+  // G.2 §8.12: the two wallet actions exclude each other in both
+  // directions. repairInFlight is derived from this hook's statuses;
+  // revokeInFlight is reported up by DelegationSection. Buttons are
+  // the affordance — the synchronous action mutex is the guarantee.
+  const [revokeInFlight, setRevokeInFlight] = useState(false);
+  const REPAIR_IN_FLIGHT_STATUSES = [
+    "building",
+    "awaiting-signature",
+    "sending",
+    "verifying",
+    "checking",
+  ] as const;
+  const repairInFlight = REPAIR_IN_FLIGHT_STATUSES.some((s) => s === status);
 
   // Optional pre-sign simulation ("show your work"): run every batch
   // through the RPC simulator before the user signs anything.
@@ -740,6 +755,16 @@ export default function Home() {
               )}
             </div>
 
+            {/* G.2: funded-account delegate revocation (per-item
+                consent, one account per action). Renders nothing when
+                the scan has no eligible delegations. */}
+            <DelegationSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              onActionInFlightChange={setRevokeInFlight}
+            />
+
             {result.eligibleAccounts.length === 0 &&
               result.totalAccounts > 0 && (
                 <p className="text-sm text-zinc-400">
@@ -753,7 +778,7 @@ export default function Home() {
               <>
                 <button
                   onClick={() => setConfirming(true)}
-                  disabled={selectedCount === 0}
+                  disabled={selectedCount === 0 || revokeInFlight}
                   className="w-full rounded-lg bg-[#14F195] px-4 py-3 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Repair Wallet
@@ -761,6 +786,11 @@ export default function Home() {
                 {selectedCount === 0 && (
                   <p className="text-xs text-zinc-400">
                     Select at least one account above to repair.
+                  </p>
+                )}
+                {revokeInFlight && (
+                  <p className="text-xs text-zinc-400">
+                    Another wallet action is underway. Wait for it to finish.
                   </p>
                 )}
               </>

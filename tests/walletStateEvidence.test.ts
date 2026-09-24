@@ -194,3 +194,83 @@ describe("G.1 evidence preservation in getClosableAccounts", () => {
     expect(eligible.needsRevoke).toBeUndefined();
   });
 });
+
+describe("G.2 evidence: delegate address and nativeStatus (additive only)", () => {
+  it("carries the delegate address alongside delegated on a funded skip", async () => {
+    const delegate = pk(20).toBase58();
+    const result = await scan([
+      tokenAccountEntry({ seed: 21, amount: "7", delegate }),
+    ]);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.delegated).toBe(true);
+    expect(skipped.delegate).toBe(delegate);
+    // The classification outcome is unchanged, byte for byte.
+    expect(skipped.reason).toBe("holds a token balance");
+    expect(result.eligibleAccounts).toHaveLength(0);
+  });
+
+  it("maps the parsed isNative value onto the three nativeStatus states", async () => {
+    const native = await scan([
+      tokenAccountEntry({ seed: 22, amount: "7", isNative: true }),
+    ]);
+    expect(native.skippedAccounts[0].nativeStatus).toBe("native");
+
+    const nonNative = await scan([
+      tokenAccountEntry({ seed: 23, amount: "7", isNative: false }),
+    ]);
+    expect(nonNative.skippedAccounts[0].nativeStatus).toBe("non-native");
+
+    // The fixture always writes isNative; an explicit undefined via a
+    // raw envelope proves no defaulting: unknown stays unknown.
+    const rawEntry = tokenAccountEntry({ seed: 24, amount: "7" });
+    const info = (
+      rawEntry.account.data as { parsed: { info: Record<string, unknown> } }
+    ).parsed.info;
+    delete info.isNative;
+    const unknown = await scan([rawEntry]);
+    expect(unknown.skippedAccounts[0].nativeStatus).toBe("unknown");
+  });
+
+  it("carries the delegate address and non-native status on the frozen-with-delegate skip", async () => {
+    const delegate = pk(25).toBase58();
+    const result = await scan([
+      tokenAccountEntry({
+        seed: 26,
+        amount: "0",
+        delegate,
+        state: "frozen",
+      }),
+    ]);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.cause).toBe("frozen-with-delegate");
+    expect(skipped.delegated).toBe(true);
+    expect(skipped.delegate).toBe(delegate);
+    // Reached only after the isNative check passed, so always
+    // non-native here — derived, not special-cased.
+    expect(skipped.nativeStatus).toBe("non-native");
+    expect(skipped.reason).toBe("is frozen with an active delegate");
+  });
+
+  it("keeps classification identical across all three nativeStatus states", async () => {
+    for (const isNative of [true, false] as const) {
+      const result = await scan([
+        tokenAccountEntry({ seed: 27, amount: "9", isNative }),
+      ]);
+      expect(result.skippedAccounts[0].cause).toBe("funded");
+      expect(result.skippedAccounts[0].reason).toBe("holds a token balance");
+      expect(result.eligibleAccounts).toHaveLength(0);
+    }
+  });
+
+  it("leaves empty eligible accounts without the G.2 fields either", async () => {
+    const result = await scan([
+      tokenAccountEntry({ seed: 28, amount: "0", delegate: pk(29).toBase58() }),
+    ]);
+    const eligible = result.eligibleAccounts[0];
+    expect(eligible.needsRevoke).toBe(true);
+    expect((eligible as { delegate?: string }).delegate).toBeUndefined();
+    expect(
+      (eligible as { nativeStatus?: string }).nativeStatus
+    ).toBeUndefined();
+  });
+});

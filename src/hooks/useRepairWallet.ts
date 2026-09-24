@@ -53,6 +53,7 @@ import {
   buildCloseAccountInstructions,
   verifyAccountsClosed,
 } from "@/lib/solana/closeAccounts";
+import { acquireAction, releaseAction } from "@/lib/actionMutex";
 import { buildFeeTransfer } from "@/lib/solana/fees";
 import {
   buildTransaction,
@@ -230,6 +231,20 @@ export function useRepairWallet() {
     async (accounts: ClosableAccount[], feeReady: boolean) => {
       if (repairInFlight.current) return;
       repairInFlight.current = true;
+      // G.2 §8.12: cross-action mutex. The local ref above already
+      // makes repair-vs-repair a silent no-op; this acquire is only
+      // reachable when a DELEGATE REVOCATION holds the lock — a
+      // situation that could not exist before G.2 — so every
+      // pre-existing behavior is unchanged.
+      if (!acquireAction("repair")) {
+        repairInFlight.current = false;
+        setState({
+          ...INITIAL_STATE,
+          status: "error",
+          error: "Another wallet action is underway. Wait for it to finish.",
+        });
+        return;
+      }
       try {
         if (!wallet.publicKey || !wallet.signTransaction) {
           setState({
@@ -527,6 +542,7 @@ export function useRepairWallet() {
           });
         }
       } finally {
+        releaseAction("repair");
         repairInFlight.current = false;
       }
     },
