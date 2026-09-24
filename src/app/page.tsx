@@ -8,6 +8,7 @@ import {
 import { VersionedTransaction } from "@solana/web3.js";
 import { NetworkBadge } from "@/components/NetworkBadge";
 import { WalletButton } from "@/components/WalletButton";
+import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { useWalletScan } from "@/hooks/useWalletScan";
 import {
   MAX_ACCOUNTS_PER_RUN,
@@ -18,6 +19,7 @@ import {
   lamportsToSol,
 } from "@/lib/solana/tokenAccounts";
 import { SOLANA_NETWORK } from "@/lib/solana/connection";
+import { summarizeWalletState } from "@/lib/solana/walletInspection";
 import { buildCloseAccountInstructions } from "@/lib/solana/closeAccounts";
 import {
   buildFeeTransfer,
@@ -245,6 +247,13 @@ export default function Home() {
   }, [connection, publicKey]);
 
   const hasEligible = result && result.eligibleAccounts.length > 0;
+
+  // G.1 wallet state inspection: pure aggregation of the completed scan.
+  // Read-only; no new RPC, no actions. Rendered inside the scan panel.
+  const inspection = useMemo(
+    () => (result ? summarizeWalletState(result) : null),
+    [result]
+  );
 
   // --- Account selection: granular user control over WHAT gets closed. ---
   // Scammers drain everything at once; a legitimate tool lets you choose.
@@ -628,6 +637,8 @@ export default function Home() {
                 {lamportsToSol(result.recoverableLamports)} SOL recoverable
               </p>
 
+              {inspection && <WalletStateSummary summary={inspection} />}
+
               {/* Itemized, selectable results. The scan is verifiable, and
                   the user chooses exactly what gets closed. Scammers
                   never offer that choice. */}
@@ -736,12 +747,6 @@ export default function Home() {
                   closing right now.
                 </p>
               )}
-
-            {result.totalAccounts === 0 && (
-              <p className="text-sm text-zinc-400">
-                No token accounts found. This wallet is already clean.
-              </p>
-            )}
 
             {/* Repair button, only shown when there are eligible accounts */}
             {hasEligible && !confirming && status === "idle" && (

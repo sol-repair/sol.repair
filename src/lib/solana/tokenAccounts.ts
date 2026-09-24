@@ -67,7 +67,22 @@ export interface ClosableAccount {
    *  emits a Revoke instruction immediately before this account's
    *  CloseAccount. Absent on clean accounts. */
   needsRevoke?: boolean;
+  /** True when the parsed account state is "frozen". Frozen EMPTY accounts
+   *  are closable (that eligibility is unchanged); the flag exists so the
+   *  inspection layer can show the frozen fact without re-deriving it. */
+  frozen?: boolean;
 }
+
+/** Why an account was skipped, recorded at the exact site that chose the
+ *  user-facing `reason` string so aggregation never has to match on prose.
+ *  The `reason` string remains the only user-facing text. */
+export type SkipCause =
+  | "unreadable"
+  | "funded"
+  | "close-authority"
+  | "wrapped-sol"
+  | "uninitialized"
+  | "frozen-with-delegate";
 
 /** An account we skip on purpose, with the reason.
  *  Shown to the user so the scan is verifiable, not a black box. */
@@ -77,6 +92,22 @@ export interface SkippedAccount {
   /** Human-readable eligibility-check failure. */
   reason: string;
   program: TokenProgram;
+  /** Machine-readable cause for aggregation; see SkipCause. */
+  cause: SkipCause;
+  /** Exact base-unit token balance. Evidence for the inspection summary;
+   *  present only on funded skips (the only skips holding a nonzero
+   *  balance) and only when the parsed response passed validation. */
+  balance?: string;
+  /** Token decimals, carried with `balance`. */
+  decimals?: number;
+  /** Rent (lamports) the account holds, carried with `balance`. */
+  lamports?: number;
+  /** True when the parsed response named an active delegate. Evidence
+   *  only; the skip decision itself is unchanged. */
+  delegated?: boolean;
+  /** True when the parsed state is "frozen" (funded skips; frozen EMPTY
+   *  accounts are eligible and carry the flag on ClosableAccount). */
+  frozen?: boolean;
 }
 
 /** Result of scanning a wallet for closeable accounts. */
@@ -149,6 +180,7 @@ export async function getClosableAccounts(
           mint: "unknown",
           reason: "response could not be read (malformed RPC data)",
           program: tag,
+          cause: "unreadable",
         });
         continue;
       }
@@ -172,6 +204,7 @@ export async function getClosableAccounts(
           mint: info.mint,
           reason: "response could not be read (malformed RPC data)",
           program: tag,
+          cause: "unreadable",
         });
         continue;
       }
@@ -203,6 +236,12 @@ export async function getClosableAccounts(
               ? "is frozen by the token's freeze authority"
               : "holds a token balance",
           program: tag,
+          cause: "funded",
+          balance: info.tokenAmount.amount,
+          decimals: info.tokenAmount.decimals,
+          lamports: account.lamports,
+          ...(info.delegate ? { delegated: true } : {}),
+          ...(info.state === "frozen" ? { frozen: true } : {}),
         });
         continue;
       }
@@ -238,6 +277,7 @@ export async function getClosableAccounts(
           mint: info.mint,
           reason: "close authority belongs to another address",
           program: tag,
+          cause: "close-authority",
         });
         continue;
       }
@@ -251,6 +291,7 @@ export async function getClosableAccounts(
           mint: info.mint,
           reason: "is a wrapped-SOL account",
           program: tag,
+          cause: "wrapped-sol",
         });
         continue;
       }
@@ -270,6 +311,7 @@ export async function getClosableAccounts(
           mint: info.mint,
           reason: "is not initialized",
           program: tag,
+          cause: "uninitialized",
         });
         continue;
       }
@@ -279,6 +321,8 @@ export async function getClosableAccounts(
           mint: info.mint,
           reason: "is frozen with an active delegate",
           program: tag,
+          cause: "frozen-with-delegate",
+          delegated: true,
         });
         continue;
       }
@@ -290,6 +334,7 @@ export async function getClosableAccounts(
         lamports: account.lamports,
         program: tag,
         ...(needsRevoke ? { needsRevoke: true } : {}),
+        ...(info.state === "frozen" ? { frozen: true } : {}),
       });
       recoverableLamports += BigInt(account.lamports);
     }
