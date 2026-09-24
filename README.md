@@ -74,6 +74,10 @@ Token accounts (classic SPL Token and Token-2022) that pass all of these:
 Fail any one of those and the account is skipped, no exceptions. NFTs and
 any account holding tokens are protected by the zero-balance rule.
 
+Funded accounts are never closed, but a funded delegated account can have
+its delegation revoked as a separate, revoke-only action that does not
+touch balances.
+
 ## Running it locally
 
 Node.js 20 or newer.
