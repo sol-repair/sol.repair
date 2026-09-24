@@ -749,6 +749,67 @@ describe("the §8.12 action mutex", () => {
     expect(heldAction()).toBeNull();
   });
 
+  it("auto-releases at each remaining safe terminal: expired, on-chain-failure, confirmed-verification-unavailable (§10.3.22)", async () => {
+    // error / expired — non-landing proven twice; nothing can land, so
+    // the lock releases without any user action.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight.mockResolvedValue(WINDOW + 1);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(parsedAccount());
+    {
+      const { result } = renderRevoke();
+      await act(async () => {
+        void result.current.revoke(DELEGATION);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await flushUntil(result, (s) => s === "error");
+      expect(result.current.outcome).toBe("expired");
+      expect(heldAction()).toBeNull();
+      expect(acquireRepairFails()).toBe(false);
+    }
+    cleanup();
+
+    // error / on-chain-failure — landed and atomically reverted; its
+    // execution is finished.
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: "InstructionError", confirmationStatus: "confirmed" }],
+    });
+    {
+      const { result } = renderRevoke();
+      await act(async () => {
+        void result.current.revoke(DELEGATION);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await flushUntil(result, (s) => s === "error");
+      expect(result.current.outcome).toBe("on-chain-failure");
+      expect(heldAction()).toBeNull();
+      expect(acquireRepairFails()).toBe(false);
+    }
+    cleanup();
+
+    // unverified / confirmed-verification-unavailable — the one
+    // unverified kind that is NOT held: the transaction is confirmed
+    // landed (S7's precondition), so only the follow-up read is
+    // missing. Contrast the hold-until-dismissal of
+    // unresolved-outcome above.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(CONFIRMED);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(parsedAccount()) // gate
+      .mockRejectedValue(new Error("rpc down")); // verify reads fail
+    {
+      const { result } = renderRevoke();
+      await act(async () => {
+        void result.current.revoke(DELEGATION);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await flushUntil(result, (s) => s === "unverified");
+      expect(result.current.outcome).toBe(
+        "confirmed-verification-unavailable"
+      );
+      expect(heldAction()).toBeNull();
+      expect(acquireRepairFails()).toBe(false);
+    }
+  });
+
   it("makes near-simultaneous initiation single-winner in both directions (§10.3.15)", async () => {
     // Direction 1: repair first, revoke refused.
     const repair1 = renderHook(() => useRepairWallet());
