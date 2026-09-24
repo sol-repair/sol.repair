@@ -52,6 +52,7 @@ const TOKEN_MINT_TO_TAG = 7;
 const TOKEN_BURN_TAG = 8;
 const TOKEN_CLOSE_ACCOUNT_TAG = 9;
 const TOKEN_FREEZE_TAG = 10;
+const TOKEN_THAW_TAG = 11;
 const TOKEN_TRANSFER_CHECKED_TAG = 12;
 const TOKEN_INITIALIZE_ACCOUNT2_TAG = 16;
 const TOKEN_SYNC_NATIVE_TAG = 17;
@@ -248,7 +249,7 @@ function explainTokenInstruction(
       limitation: null,
     };
   }
-  if (tag === 11 && accounts(1)) {
+  if (tag === TOKEN_THAW_TAG && accounts(1)) {
     return {
       text: `Unfreeze token account ${accountPubkeys[0]}. Only its freeze authority can do this, letting the account send and receive tokens again.`,
       limitation: null,

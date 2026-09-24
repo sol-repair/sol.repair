@@ -28,6 +28,7 @@ import {
 import {
   buildTransaction,
   chunkInstructions,
+  estimateNetworkFee,
 } from "@/lib/solana/transactions";
 import Link from "next/link";
 import GuidesSection from "@/components/GuidesSection";
@@ -398,7 +399,7 @@ export default function Home() {
           throw new Error(JSON.stringify(res.value.err));
         }
       }
-      const feeLamports = 5000n * BigInt(batches.length);
+      const feeLamports = estimateNetworkFee() * BigInt(batches.length);
       setSim({
         state: "ok",
         netSol: lamportsToSol(
@@ -830,7 +831,7 @@ export default function Home() {
                   <p className="flex items-baseline justify-between gap-3">
                     <span className="text-zinc-400">Network fee:</span>
                     <span className="text-right font-mono text-zinc-100">
-                      ~{lamportsToSol(5000n * BigInt(batchCount))} SOL base (
+                      ~{lamportsToSol(estimateNetworkFee() * BigInt(batchCount))} SOL base (
                       {batchCount} × 0.000005)
                     </span>
                   </p>
