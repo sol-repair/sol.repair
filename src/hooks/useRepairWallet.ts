@@ -45,7 +45,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+
+import { useRpcConnection } from "@/hooks/useRpcConnection";
 import bs58 from "bs58";
 import type { Connection } from "@solana/web3.js";
 
@@ -204,7 +206,7 @@ async function confirmByPolling(
 class FriendlyError extends Error {}
 
 export function useRepairWallet() {
-  const { connection } = useConnection();
+  const connection = useRpcConnection();
   const wallet = useWallet();
 
   const [state, setState] = useState<RepairState>(INITIAL_STATE);

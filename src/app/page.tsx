@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  useConnection,
-  useWallet,
-} from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { VersionedTransaction } from "@solana/web3.js";
 import { NetworkBadge } from "@/components/NetworkBadge";
 import { WalletButton } from "@/components/WalletButton";
@@ -12,6 +9,7 @@ import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { DelegationSection } from "@/components/DelegationSection";
 import { NativeAccountsSection } from "@/components/NativeAccountsSection";
 import { useWalletScan } from "@/hooks/useWalletScan";
+import { useRpcConnection } from "@/hooks/useRpcConnection";
 import {
   MAX_ACCOUNTS_PER_RUN,
   useRepairWallet,
@@ -191,7 +189,7 @@ function RepairSpinner({ tone = "emerald" }: { tone?: "emerald" | "amber" }) {
 
 export default function Home() {
   const { publicKey } = useWallet();
-  const { connection } = useConnection();
+  const connection = useRpcConnection();
   const { loading, result, error: scanError, rescan } = useWalletScan();
   const {
     status,

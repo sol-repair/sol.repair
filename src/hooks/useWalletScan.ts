@@ -23,7 +23,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+
+import { useRpcConnection } from "@/hooks/useRpcConnection";
 import {
   getClosableAccounts,
   type ScanResult,
@@ -44,7 +46,7 @@ export function useWalletScan(): {
   error: string | null;
   rescan: () => void;
 } {
-  const { connection } = useConnection();
+  const connection = useRpcConnection();
   const { publicKey } = useWallet();
   const ownerKey = publicKey?.toBase58() ?? "";
 

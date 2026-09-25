@@ -39,7 +39,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+
+import { useRpcConnection } from "@/hooks/useRpcConnection";
 import bs58 from "bs58";
 import type { Connection, Transaction } from "@solana/web3.js";
 
@@ -441,7 +443,7 @@ const IN_FLIGHT_STATUSES: ReadonlySet<UnwrapStatus> = new Set([
 ]);
 
 export function useUnwrapNative() {
-  const { connection } = useConnection();
+  const connection = useRpcConnection();
   const wallet = useWallet();
 
   const [state, setState] = useState<UnwrapState>(INITIAL_STATE);

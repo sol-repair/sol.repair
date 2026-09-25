@@ -124,9 +124,10 @@ export function getRpcEndpoints(
 /**
  * The active network's ordered endpoint list. The first entry is the
  * primary connection used by the wallet provider and every RPC read;
- * the rest are documented failover targets (per-call failover is a
- * tracked follow-up - today the list defines the order deployments
- * prefer, with the public endpoint as the built-in safety net).
+ * the rest are failover targets, wired per-call through rpc.ts's
+ * useRpcConnection (M9): a transport-shaped failure on one endpoint
+ * rotates the same call to the next, with the public endpoint as the
+ * built-in safety net.
  */
 export const RPC_ENDPOINTS: string[] = getRpcEndpoints(
   SOLANA_NETWORK,

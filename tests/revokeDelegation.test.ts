@@ -517,6 +517,10 @@ describe("import boundary", () => {
       "@/lib/solana/fees",
       "@/lib/solana/transactions",
       "@/lib/solana/tokenAccounts",
+      // M9: the failover-aware RPC connection hook (connection.ts's
+      // ordered endpoint list) - transport only, no action or inspection
+      // surface.
+      "@/hooks/useRpcConnection",
     ]);
     for (const source of from) {
       expect(allowed.has(source)).toBe(true);

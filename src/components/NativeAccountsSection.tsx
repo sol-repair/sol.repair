@@ -18,7 +18,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useRpcConnection } from "@/hooks/useRpcConnection";
 import { VersionedTransaction } from "@solana/web3.js";
 
 import { SOLANA_NETWORK } from "@/lib/solana/connection";
@@ -206,7 +207,7 @@ export function NativeAccountsSection({
   revokeInFlight: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
 }) {
-  const { connection } = useConnection();
+  const connection = useRpcConnection();
   const { publicKey } = useWallet();
   const {
     status,
