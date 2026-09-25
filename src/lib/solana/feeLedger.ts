@@ -375,12 +375,17 @@ export function decodeRawTransaction(raw: RawTransaction): {
     // one exception is the SIMD-0385 v1 envelope, which leads with the
     // version byte 0x81 (no signature prefix at the front) and cannot
     // pass the deserializer (it asserts version 0), so it is intercepted
-    // and parsed by decodeV1Transaction below.
+    // and parsed by decodeV1Transaction below. web3 1.99 widened
+    // VersionedMessage with MessageV1; the narrowing below keeps that
+    // shape out of the v0 decompiler (a v1 message outside the
+    // intercepted envelope is garbage by this decoder's contract).
     const bytes = Buffer.from(txData[0], "base64");
     if (bytes[0] === 0x81) return decodeV1Transaction(bytes, raw);
     const { value: signatureCount, bytesRead } = decodeLengthPrefix(bytes);
     const offset = bytesRead + signatureCount * 64;
-    message = VersionedMessage.deserialize(bytes.subarray(offset));
+    message = VersionedMessage.deserialize(bytes.subarray(offset)) as
+      | Message
+      | MessageV0;
   } catch {
     return null;
   }
