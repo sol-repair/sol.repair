@@ -98,8 +98,9 @@ export function WalletStateSummary({
         )}
         {count("wrapped-sol") > 0 && (
           <li>
-            {count("wrapped-sol")} wrapped-SOL{" "}
-            {plural(count("wrapped-sol"), "account", "accounts")}.
+            {count("wrapped-sol")} empty wrapped-SOL{" "}
+            {plural(count("wrapped-sol"), "account", "accounts")}. Funded
+            wrapped-SOL accounts are counted under accounts holding tokens.
           </li>
         )}
         {count("frozen") > 0 && (

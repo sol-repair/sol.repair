@@ -13,10 +13,11 @@ transaction signature or page involved makes a report much easier to act on.
 ## What the app is
 
 The site is fully client-side. There is no backend and no server-side state:
-the browser reads the chain directly through public RPC endpoints, the fee
-ledger is derived from on-chain transactions in the visitor's own browser,
-and the site never receives private keys or seed phrases. Every transaction
-is signed by the user in their own wallet.
+the browser reads the chain directly through its configured ordered RPC
+endpoint list (provider endpoints first, public cluster endpoints as
+fallback), the fee ledger is derived from on-chain transactions in the
+visitor's own browser, and the site never receives private keys or seed
+phrases. Every transaction is signed by the user in their own wallet.
 
 ## Dependency risk posture
 
