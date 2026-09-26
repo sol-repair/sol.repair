@@ -152,12 +152,13 @@ export default function FeesPage() {
           </p>
           <p className="mt-2">
             <span className="text-zinc-300">Dust burn-and-close</span>{" "}
-            (accounts holding tokens, per the owner's 2026-09-26 ruling):
-            the same 1% fee on the rent the close recovers. The burn
-            itself destroys the token balance permanently and is charged
-            nothing; the fee covers the same service as the empty-account
-            repair. SOL.REPAIR cannot judge what a token is worth, and
-            burning is not undoable.
+            (accounts holding tokens, per the
+            owner&rsquo;s 2026-09-26 ruling): the same 1% fee on the
+            rent the close recovers. The burn itself destroys the token
+            balance permanently and is charged nothing; the fee covers
+            the same service as the empty-account repair. SOL.REPAIR
+            cannot judge what a token is worth, and burning is not
+            undoable.
           </p>
           <p className="mt-2">
             Why the two rules differ, and why they are stated together:

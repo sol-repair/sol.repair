@@ -390,7 +390,7 @@ export function useWithdrawExcess() {
           });
           return;
         }
-        const verdict = evaluateExcessGate(gateRead, candidate);
+        const verdict = evaluateExcessGate(gateRead);
         if (verdict.kind === "abort") {
           setRunState({
             status: "error",

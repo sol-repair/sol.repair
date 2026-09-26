@@ -96,31 +96,6 @@ function scanWith(entries: SkippedAccount[]): ScanResult {
   };
 }
 
-function parsedPassRead() {
-  return {
-    value: {
-      owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      lamports: 2039280,
-      data: {
-        parsed: {
-          info: {
-            mint: Keypair.generate().publicKey.toBase58(),
-            owner: OWNER.publicKey.toBase58(),
-            tokenAmount: {
-              amount: "5000",
-              decimals: 6,
-              uiAmount: 0.005,
-              uiAmountString: "0.005",
-            },
-            state: "initialized",
-            isNative: false,
-          },
-        },
-      },
-    },
-  };
-}
-
 /** Render a section whose scan entry's mint is known, so the gate
  *  (presentation read) passes. Returns the entry. */
 function renderWithEntry(feeReady: boolean, over: Partial<SkippedAccount> = {}) {
@@ -147,7 +122,7 @@ function renderWithEntry(feeReady: boolean, over: Partial<SkippedAccount> = {}) 
       },
     },
   });
-  const utils = render(
+  render(
     <BurnDustSection
       scan={scanWith([entry])}
       rescan={() => {}}
@@ -157,7 +132,7 @@ function renderWithEntry(feeReady: boolean, over: Partial<SkippedAccount> = {}) 
       feeReady={feeReady}
     />
   );
-  return { utils, entry };
+  return { entry };
 }
 
 beforeEach(() => {
@@ -246,14 +221,13 @@ describe("BurnDustSection finding rows", () => {
 
 describe("BurnDustSection consent card", () => {
   it("opens with the gate read and states the permanent burn with current figures", async () => {
-    const { entry } = renderWithEntry(true);
+    renderWithEntry(true);
     fireEvent.click(screen.getByRole("button", { name: "Burn and close" }));
     expect(await screen.findByText(/Review before you sign/)).toBeTruthy();
     expect(
       screen.getByText(/burns 5,000 base units of mint/i)
     ).toBeTruthy();
     expect(screen.getByText(/The burn is permanent\./)).toBeTruthy();
-    expect(entry).toBeTruthy();
   });
 
   it("shows the 1% fee line when the fee account is ready and none when it is not", async () => {
@@ -345,7 +319,7 @@ describe("BurnDustSection terminal cards", () => {
     );
   });
 
-  it("renders the on-chain failure with the untouched-balance observation", () => {
+  it("renders the on-chain failure with the observation note", () => {
     setHook({
       status: "error",
       outcome: "on-chain-failure",

@@ -127,7 +127,6 @@ export function ExcessSection({
     signatures,
     accountPubkey,
     excessBeforeAction,
-    lamportsBeforeAction,
     lamportsAfterAction,
     note,
     error,
@@ -139,30 +138,29 @@ export function ExcessSection({
 
   const keys = useMemo(() => collectToken2022Keys(scan), [scan]);
 
-  const [candidates, setCandidates] = useState<ExcessCandidate[] | null>(
-    null
-  );
+  const [detected, setDetected] = useState<{
+    keys: ReturnType<typeof collectToken2022Keys>;
+    candidates: ExcessCandidate[];
+  } | null>(null);
 
   // Detection: chunked batched reads on mount and on every fresh scan. A
   // failed detection renders nothing this round; a rescan retries it.
+  // Stale results are discarded during render (the page's
+  // reset-state-on-data-change pattern), so no synchronous setState
+  // lives in this effect.
   useEffect(() => {
     let cancelled = false;
-    setCandidates(null);
     detectExcessCandidates(connection, keys)
       .then((found) => {
-        if (!cancelled) setCandidates(found);
+        if (!cancelled) setDetected({ keys, candidates: found });
       })
       .catch(() => {
-        if (!cancelled) setCandidates([]);
+        if (!cancelled) setDetected({ keys, candidates: [] });
       });
     return () => {
       cancelled = true;
     };
   }, [connection, keys]);
-
-  const {
-    status: detectionStatus,
-  } = { status: candidates === null ? "detecting" : "done" };
 
   // Report the in-flight signal upward (the affordance half; the
   // mutex is the guarantee).
@@ -190,7 +188,7 @@ export function ExcessSection({
         .then((read: ExcessRead) => {
           setGatePreview((prev) => {
             if (prev.state !== "reading" || !publicKey) return prev;
-            const verdict = evaluateExcessGate(read, c);
+            const verdict = evaluateExcessGate(read);
             if (verdict.kind === "pass") {
               return {
                 state: "pass",
@@ -275,7 +273,9 @@ export function ExcessSection({
     ];
   }, [reviewing, publicKey]);
 
-  if (detectionStatus === "detecting" || !candidates || candidates.length === 0) {
+  const detectionCurrent = detected !== null && detected.keys === keys;
+  const candidates = detectionCurrent ? detected.candidates : [];
+  if (candidates.length === 0) {
     return null;
   }
 

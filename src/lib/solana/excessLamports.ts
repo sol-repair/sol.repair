@@ -262,10 +262,7 @@ export type ExcessGateVerdict =
  * abort shape is an RPC-side failure, which the hook reports before
  * anything is signed.
  */
-export function evaluateExcessGate(
-  read: ExcessRead,
-  reviewed: ExcessCandidate
-): ExcessGateVerdict {
+export function evaluateExcessGate(read: ExcessRead): ExcessGateVerdict {
   if (read.kind === "missing") return { kind: "already-gone" };
   if (read.kind === "rpc-failed") {
     return {

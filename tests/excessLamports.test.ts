@@ -224,18 +224,9 @@ describe("detectExcessCandidates", () => {
 });
 
 describe("evaluateExcessGate", () => {
-  const reviewed = {
-    pubkey: Keypair.generate().publicKey.toBase58(),
-    lamports: 2000000,
-    dataLen: 165,
-    excess: 511560,
-    frozen: false,
-  };
-
   it("passes with the current excess and lamports", () => {
     const verdict = evaluateExcessGate(
-      { kind: "read", lamports: 2000000, dataLen: 165, excess: 511560 },
-      reviewed
+      { kind: "read", lamports: 2000000, dataLen: 165, excess: 511560 }
     );
     expect(verdict.kind).toBe("pass");
     if (verdict.kind === "pass") {
@@ -246,25 +237,23 @@ describe("evaluateExcessGate", () => {
 
   it("passes with drifted figures (Case B: drain what exists at land time)", () => {
     const verdict = evaluateExcessGate(
-      { kind: "read", lamports: 2100000, dataLen: 165, excess: 611560 },
-      reviewed
+      { kind: "read", lamports: 2100000, dataLen: 165, excess: 611560 }
     );
     expect(verdict.kind).toBe("pass");
   });
 
   it("reports already-withdrawn when the excess is gone", () => {
     const verdict = evaluateExcessGate(
-      { kind: "read", lamports: 1488440, dataLen: 165, excess: 0 },
-      reviewed
+      { kind: "read", lamports: 1488440, dataLen: 165, excess: 0 }
     );
     expect(verdict.kind).toBe("already-withdrawn");
   });
 
   it("reports already-gone and the RPC abort", () => {
-    expect(evaluateExcessGate({ kind: "missing" }, reviewed).kind).toBe(
+    expect(evaluateExcessGate({ kind: "missing" }).kind).toBe(
       "already-gone"
     );
-    const failed = evaluateExcessGate({ kind: "rpc-failed" }, reviewed);
+    const failed = evaluateExcessGate({ kind: "rpc-failed" });
     expect(failed).toEqual({
       kind: "abort",
       sentence:
