@@ -13,8 +13,8 @@ export default function TermsPage() {
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
         <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-500">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300">
+          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
+          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
             ← Back
           </Link>
         </div>
@@ -22,7 +22,7 @@ export default function TermsPage() {
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
           Terms of Service
         </h1>
-            <p className="mb-8 text-sm text-zinc-500">Last updated: August 15, 2026</p>
+            <p className="mb-8 text-sm text-zinc-400">Last updated: August 15, 2026</p>
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>

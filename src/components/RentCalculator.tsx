@@ -37,7 +37,7 @@ export function RentCalculator() {
       />
       <p className="mt-3 font-mono text-sm text-zinc-200">
         {range === null ? (
-          <span className="text-zinc-500">
+          <span className="text-zinc-400">
             Enter a count between 1 and 99,999.
           </span>
         ) : (

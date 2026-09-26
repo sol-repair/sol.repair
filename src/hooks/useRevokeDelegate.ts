@@ -596,11 +596,11 @@ export function useRevokeDelegate() {
               if (!refusalRetryUsed) {
                 refusalRetryUsed = true;
                 lastResolutionNote =
-                  "The wallet refused the request — the transaction had expired. Nothing was signed. Retrying once with a fresh transaction.";
+                  "The wallet refused the request: the transaction had expired. Nothing was signed. Retrying once with a fresh transaction.";
                 continue;
               }
               throw new FriendlyError(
-                "The wallet refused the request — the transaction had expired. Nothing was signed.",
+                "The wallet refused the request: the transaction had expired. Nothing was signed.",
                 "expired"
               );
             }
@@ -779,7 +779,7 @@ export function useRevokeDelegate() {
               outcome: "unresolved-outcome",
               errorDetail: resolution.detail,
               error:
-                "We could not verify whether the revoke landed. The transaction's outcome could not be established — it may still land. Nothing more will be sent automatically.",
+                "We could not verify whether the revoke landed. The transaction's outcome could not be established. It may still land. Nothing more will be sent automatically.",
             });
             return;
           }
@@ -824,7 +824,7 @@ export function useRevokeDelegate() {
           }
           reSignUsed = true;
           lastResolutionNote =
-            "The transaction expired before the network confirmed it. Nothing landed. Retrying once with a fresh transaction — your approval is required again.";
+            "The transaction expired before the network confirmed it. Nothing landed. Retrying once with a fresh transaction. Your approval is required again.";
           // loop: fresh build + fresh explicit approval (§8.5 step 4)
         }
       } catch (err) {

@@ -5,10 +5,10 @@
  * read what the transaction did in plain language.
  *
  * Read-only forever, by owner lock: this page never connects a wallet
- * and never asks you to sign anything. It reuses the fee ledger's fetch
- * and decoder (base64, version-1 capable) and the explain module's
- * plain-language dictionary; anything the dictionary does not know says
- * so instead of guessing.
+ * for signing and never asks you to sign anything. It reuses the fee
+ * ledger's fetch and decoder (base64, version-1 capable) and the
+ * explain module's plain-language dictionary; anything the dictionary
+ * does not know says so instead of guessing.
  *
  * Quiet for now: nothing links here and the page stays out of the
  * sitemap until the suite is announced (M4).
@@ -83,7 +83,7 @@ function ReadingSeconds() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="font-mono tabular-nums text-zinc-500">{seconds}s</span>
+    <span className="font-mono tabular-nums text-zinc-400">{seconds}s</span>
   );
 }
 
@@ -144,10 +144,10 @@ export default function UnderstandPage() {
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-2xl">
         <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-500">SOL.repair</span>
+          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
           <div className="flex items-center gap-3">
             <NetworkBadge />
-            <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300">
+            <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
               ← Back
             </Link>
           </div>
@@ -159,9 +159,9 @@ export default function UnderstandPage() {
         <p className="mb-6 text-sm leading-relaxed text-zinc-400">
           Paste a Solana transaction signature. This page reads the
           transaction on chain and explains what each instruction does, in
-          plain language. Read-only: this page never connects a wallet and
-          never asks you to sign anything. Anything it cannot describe says
-          so instead of guessing.
+          plain language. Read-only: this page never connects a wallet for
+          signing and never asks you to sign anything. Anything it cannot
+          describe says so instead of guessing.
         </p>
 
         <details className="mb-6 rounded border border-zinc-800 bg-zinc-900/30 p-4">
@@ -227,7 +227,7 @@ export default function UnderstandPage() {
             value={signature}
             onChange={(event) => setSignature(event.target.value)}
             placeholder="Paste a transaction signature"
-            className="w-full flex-1 rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+            className="w-full flex-1 rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400"
           />
           <button
             type="submit"
@@ -269,7 +269,7 @@ export default function UnderstandPage() {
         {state.kind === "error" && (
           <div className="mb-6">
             <p className="text-sm text-red-400">Could not reach the RPC.</p>
-            <p className="mt-1 break-all text-xs text-zinc-500">
+            <p className="mt-1 break-all text-xs text-zinc-400">
               {state.detail}
             </p>
           </div>
@@ -281,12 +281,12 @@ export default function UnderstandPage() {
               <p className="break-all font-mono text-xs text-zinc-400">
                 {state.signature}
               </p>
-              <p className="mt-2 text-xs text-zinc-500">
+              <p className="mt-2 text-xs text-zinc-400">
                 Signed {formatBlockTime(state.explained.blockTime)}
               </p>
             </div>
             <div className="space-y-2">
-              <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">
+              <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
                 Left behind
               </p>
               <div className={VERDICT_PANEL_CLASS[state.analysis.verdict]}>
@@ -308,13 +308,13 @@ export default function UnderstandPage() {
               </div>
             </div>
             {state.analysis.verdict === "failed" ? (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-400">
                 The instructions it attempted are not shown, because none of
                 them took effect.
               </p>
             ) : (
               <div className="space-y-2">
-                <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">
+                <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
                   Instructions
                 </p>
                 <p className="text-sm text-zinc-300">
@@ -333,10 +333,10 @@ export default function UnderstandPage() {
                       className={
                         instruction.limitation === null
                           ? "rounded border border-zinc-800 bg-zinc-900/50 p-3 text-sm leading-relaxed text-zinc-200"
-                          : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-500"
+                          : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-400"
                       }
                     >
-                      <span className="mr-2 font-mono text-xs text-zinc-500">
+                      <span className="mr-2 font-mono text-xs text-zinc-400">
                         {index + 1}.
                       </span>
                       {instruction.text}

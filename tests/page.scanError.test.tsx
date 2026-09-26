@@ -15,7 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   Keypair,
   PublicKey,
@@ -74,6 +74,7 @@ beforeEach(() => {
   mocks.scan.loading = false;
   mocks.scan.result = null;
   mocks.scan.error = null;
+  mocks.scan.rescan.mockClear();
 });
 
 afterEach(cleanup);
@@ -129,5 +130,32 @@ describe("scan error box", () => {
 
     expect(screen.queryByText(FRIENDLY)).toBeNull();
     expect(screen.getByText(/Connection refused/)).toBeTruthy();
+  });
+});
+
+describe("scan failure recovery", () => {
+  it("offers a scan-again control and re-runs the scan through the hook's rescan", () => {
+    mocks.scan.error = "Too many requests from your IP";
+    render(<Home />);
+
+    const retry = screen.getByRole("button", { name: /scan again/i });
+    fireEvent.click(retry);
+    expect(mocks.scan.rescan).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the same retry on a non-rate-limit failure", () => {
+    mocks.scan.error = "Connection refused";
+    render(<Home />);
+
+    fireEvent.click(screen.getByRole("button", { name: /scan again/i }));
+    expect(mocks.scan.rescan).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no retry control while the scan is healthy or loading", () => {
+    mocks.scan.error = null;
+    mocks.scan.loading = false;
+    render(<Home />);
+
+    expect(screen.queryByRole("button", { name: /scan again/i })).toBeNull();
   });
 });

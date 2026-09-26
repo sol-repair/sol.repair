@@ -82,9 +82,14 @@ function submitSignature(signature: string) {
 }
 
 describe("understand page renders its read-only promise", () => {
-  it("states the page never connects a wallet and never asks for a signature", () => {
+  it("states the page never connects a wallet FOR SIGNING and never asks for a signature", () => {
     render(<UnderstandPage />);
-    expect(screen.getByText(/never connects a wallet/i)).toBeTruthy();
+    // The page's recent-transactions walk DOES open a read-only wallet
+    // connection, so the unqualified "never connects a wallet" wording
+    // was false. The intro must carry the "for signing" qualifier.
+    expect(
+      screen.getByText(/never connects a wallet for signing/i)
+    ).toBeTruthy();
     expect(screen.getByText(/never asks you to sign anything/i)).toBeTruthy();
   });
 

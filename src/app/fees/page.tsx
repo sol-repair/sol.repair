@@ -107,16 +107,16 @@ export default function FeesPage() {
         </h1>
         <p className="mb-2 text-zinc-300">
           Fee activity is derived directly from transactions to the
-          SOL.repair fee wallet — successful transactions containing
+          SOL.repair fee wallet: successful transactions containing
           token-account closes and a transfer to the fee address. This page
-          runs in your browser — no backend, nothing cached on a server.
+          runs in your browser. No backend, nothing cached on a server.
           Every row links to the transaction, so you can verify every
           number yourself.
         </p>
-        <p className="mb-6 text-xs leading-relaxed text-zinc-500">
+        <p className="mb-6 text-xs leading-relaxed text-zinc-400">
           The chain can&rsquo;t tag a transaction &ldquo;this was
           SOL.repair&rdquo;. A row here is the exact shape our repair
-          produces — token-account closes with a transfer to the published
+          produces: token-account closes with a transfer to the published
           fee address. Every row is checked against the fee rule: when the
           transferred amount is not exactly 1% of the rent its closes
           freed, the row is marked, not hidden. The signature is the
@@ -140,7 +140,7 @@ export default function FeesPage() {
           <p className="mt-2">
             <span className="text-zinc-300">Repair closes</span> (empty,
             non-wrapped token accounts): a 1% service fee on the rent the
-            close recovers — charged only when SOL is successfully
+            close recovers, charged only when SOL is successfully
             recovered, appended after the closes, and visible in the
             ledger below.
           </p>
@@ -152,7 +152,7 @@ export default function FeesPage() {
           <p className="mt-2">
             Why the two rules differ, and why they are stated together:
             the fee exists for unlocking rent a user cannot reach
-            themselves — never for returning the user&rsquo;s own
+            themselves, never for returning the user&rsquo;s own
             principal. The split is by account type, not by user choice:
             an empty wrapped-SOL account recovers rent the same way an
             empty ordinary account does, but the unwrap path returns it
@@ -194,7 +194,7 @@ export default function FeesPage() {
         {error && (
           <div className="mb-4 rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-400">
             <p className="font-medium">Ledger unavailable</p>
-            <p className="mt-1 text-red-400/70">{error}</p>
+            <p className="mt-1 text-red-400">{error}</p>
             <button
               onClick={reload}
               className="mt-3 rounded-lg border border-zinc-700 px-4 py-3 text-xs text-zinc-400 transition-colors hover:text-zinc-200"

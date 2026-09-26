@@ -15,8 +15,8 @@ export default function SolanaRentGuide() {
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
         <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-500">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300">
+          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
+          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
             ← Back
           </Link>
         </div>
@@ -56,19 +56,19 @@ export default function SolanaRentGuide() {
             </h2>
             <div className="grid gap-2 font-mono text-[11px] leading-relaxed">
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">
-                <span className="text-zinc-500">Empty token account</span>
+                <span className="text-zinc-400">Empty token account</span>
                 <br />
                 holds about 0.00149 to 0.00208 SOL of rent
               </div>
-              <div className="text-center text-zinc-600">↓</div>
+              <div className="text-center text-zinc-400">↓</div>
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">
-                <span className="text-zinc-500">closeAccount instruction</span>
+                <span className="text-zinc-400">closeAccount instruction</span>
                 <br />
                 one instruction, you sign it
               </div>
-              <div className="text-center text-zinc-600">↓</div>
+              <div className="text-center text-zinc-400">↓</div>
               <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300">
-                <span className="text-zinc-500">Your wallet</span>
+                <span className="text-zinc-400">Your wallet</span>
                 <br />
                 the rent returns to you, same transaction
               </div>

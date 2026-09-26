@@ -135,6 +135,9 @@ describe("in-flight repair progress panel", () => {
     );
     expect(box.querySelector("svg.animate-spin")).toBeTruthy();
     expect(screen.getByText("0s")).toBeTruthy();
+    // The ticking number must stay out of the live region (audit F5):
+    // aria-hidden keeps screen readers from re-announcing every tick.
+    expect(screen.getByText("0s").getAttribute("aria-hidden")).toBe("true");
     await act(async () => {
       vi.advanceTimersByTime(3000);
     });

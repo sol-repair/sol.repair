@@ -558,7 +558,7 @@ describe("affordances (§8.12, §10.4.9)", () => {
       {
         status: "building",
         note:
-          "The transaction expired before the network confirmed it. Nothing landed. Retrying once with a fresh transaction — your approval is required again.",
+          "The transaction expired before the network confirmed it. Nothing landed. Retrying once with a fresh transaction. Your approval is required again.",
       },
       true
     );
@@ -571,6 +571,28 @@ describe("affordances (§8.12, §10.4.9)", () => {
     );
     expect(screen.getByText(/Retrying once with a fresh transaction/)).toBeTruthy();
     expectNoBannedPhrases();
+  });
+
+  it("keeps the elapsed counter out of the live region", () => {
+    setHook({ status: "confirming" }, true);
+    render(
+      <DelegationSection
+        scan={scanWith([eligibleEntry])}
+        rescan={() => {}}
+        repairInFlight={false}
+      />
+    );
+    expect(screen.getByRole("status")).toBeTruthy();
+    // The per-second counter is visual only: inside the live region it
+    // would re-announce the whole card every tick (audit F5). The
+    // stage copy is what screen readers should hear, and it changes
+    // only when the lifecycle actually moves.
+    expect(screen.getByText("0s").getAttribute("aria-hidden")).toBe("true");
+    expect(
+      screen
+        .getByText("Sent. Waiting for the network to confirm...")
+        .closest('[role="status"]')
+    ).toBeTruthy();
   });
 
   it("invokes revoke with the reviewed delegation on approval", async () => {

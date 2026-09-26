@@ -14,7 +14,7 @@
  * time with the previous page's last signature as the cursor.
  */
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
   CONNECT_FAILED_MESSAGE,
@@ -57,12 +57,21 @@ export function WalletRecentTransactions({
     useWallet();
   const [walletError, setWalletError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const connectTriggerRef = useRef<HTMLButtonElement>(null);
   const [result, setResult] = useState<{
     address: string;
     state: TxListState;
   } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState<string | null>(null);
+
+  // Whatever closes the picker - Cancel, Escape, the overlay, or a
+  // completed pick - returns focus to the control that opened it.
+  // Same contract as the homepage's wallet picker.
+  const closePicker = () => {
+    setPickerOpen(false);
+    connectTriggerRef.current?.focus();
+  };
 
   const address = connected && publicKey ? publicKey.toBase58() : null;
 
@@ -144,14 +153,15 @@ export function WalletRecentTransactions({
   ) : null;
 
   if (!address) {
-    const label = wallet
-      ? connecting
-        ? "Connecting..."
-        : "Connect to list your recent transactions"
-      : "Connect to list your recent transactions";
+    const label = connecting
+      ? "Connecting..."
+      : wallet
+        ? `Connect ${wallet.adapter.name} to list your recent transactions`
+        : "Connect to list your recent transactions";
     return (
       <>
         <button
+          ref={connectTriggerRef}
           onClick={() => {
             setWalletError(null);
             if (wallet) {
@@ -167,10 +177,16 @@ export function WalletRecentTransactions({
           disabled={connecting}
           className={`${base} bg-[#14F195] text-black hover:bg-[#0fd584]`}
         >
-          {label}
+          <span className="inline-flex items-center justify-center gap-2">
+            {wallet?.adapter.icon && !connecting && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={wallet.adapter.icon} alt="" className="h-5 w-5" />
+            )}
+            {label}
+          </span>
         </button>
         {errorLine}
-        {pickerOpen && <WalletPicker onClose={() => setPickerOpen(false)} />}
+        {pickerOpen && <WalletPicker onClose={closePicker} />}
       </>
     );
   }
@@ -184,7 +200,7 @@ export function WalletRecentTransactions({
         <button
           onClick={() => disconnect()}
           title="Disconnect wallet"
-          className="font-mono text-xs text-zinc-500 hover:text-zinc-300"
+          className="font-mono text-xs text-zinc-400 hover:text-zinc-300"
         >
           {address.slice(0, 4)}…{address.slice(-4)} · disconnect
         </button>
@@ -199,7 +215,7 @@ export function WalletRecentTransactions({
       {list.kind === "error" && (
         <div className="mt-3">
           <p className="text-sm text-red-400">Could not reach the RPC.</p>
-          <p className="mt-1 break-all text-xs text-zinc-500">{list.detail}</p>
+          <p className="mt-1 break-all text-xs text-zinc-400">{list.detail}</p>
         </div>
       )}
 
@@ -220,7 +236,7 @@ export function WalletRecentTransactions({
                 <span className="truncate">
                   {item.signature.slice(0, 8)}…{item.signature.slice(-4)}
                 </span>
-                <span className="shrink-0 tabular-nums text-zinc-500">
+                <span className="shrink-0 tabular-nums text-zinc-400">
                   {formatBlockTime(item.blockTime)}
                 </span>
               </button>
@@ -242,7 +258,7 @@ export function WalletRecentTransactions({
       {moreError && (
         <div className="mt-3">
           <p className="text-sm text-red-400">Could not reach the RPC.</p>
-          <p className="mt-1 break-all text-xs text-zinc-500">{moreError}</p>
+          <p className="mt-1 break-all text-xs text-zinc-400">{moreError}</p>
         </div>
       )}
     </div>

@@ -65,7 +65,7 @@ function writeCache(cluster: FeeLedgerCluster, entry: CacheEntry): void {
 
 export function errorMessage(e: unknown): string {
   if (e instanceof LedgerFetchError && e.kind === "rate-limited") {
-    return "RPC rate limited — give it a few seconds.";
+    return "RPC rate limited. Give it a few seconds.";
   }
   return "Could not reach the RPC. Check your connection and retry.";
 }

@@ -143,7 +143,10 @@ function AccountLink({ address, label }: { address: string; label?: string }) {
 
 /** Ticking elapsed-seconds counter for the in-flight repair states. A
  *  changing number is the honest "not stuck" signal: real time passing,
- *  no fake percentages, no countdown. */
+ *  no fake percentages, no countdown. Hidden from assistive technology:
+ *  the counter sits inside the role="status" card, and a per-second
+ *  number would re-announce the whole live region every tick. The
+ *  status text alone carries the meaningful announcements. */
 function ElapsedSeconds() {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
@@ -151,7 +154,10 @@ function ElapsedSeconds() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="shrink-0 font-mono text-xs tabular-nums text-zinc-400">
+    <span
+      aria-hidden="true"
+      className="shrink-0 font-mono text-xs tabular-nums text-zinc-400"
+    >
       {seconds}s
     </span>
   );
@@ -620,19 +626,30 @@ export default function Home() {
             <p className="font-medium">Scan failed</p>
             {isRateLimitError(scanError) ? (
               <>
-                <p className="mt-1 text-red-400/70">
+                <p className="mt-1 text-red-400">
                   The network is limiting how fast your wallet can be read.
                   Wait a minute and scan again.
                 </p>
                 {/* The raw reply stays visible in small print: friendly
                  *  words explain it, nothing is hidden. */}
-                <p className="mt-1 break-all text-xs text-red-400/50">
+                <p className="mt-1 break-all text-xs text-red-400">
                   {scanError}
                 </p>
               </>
             ) : (
-              <p className="mt-1 text-red-400/70">{scanError}</p>
+              <p className="mt-1 text-red-400">{scanError}</p>
             )}
+            {/* The scan already re-runs on connect and after every
+             *  action; a failure had no way to start it again. rescan()
+             *  drops the stored outcome, so this card is replaced by the
+             *  loading state immediately - a second click cannot stack
+             *  a second scan. */}
+            <button
+              onClick={rescan}
+              className="mt-3 rounded-lg border border-zinc-700 px-4 py-2 text-zinc-400 transition-colors hover:text-zinc-200"
+            >
+              Scan again
+            </button>
           </div>
         )}
 
@@ -660,7 +677,7 @@ export default function Home() {
                   never offer that choice. */}
               {hasEligible && (
                 <details open className="mt-3">
-                  <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+                  <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                     Choose which accounts to close ({selectedCount} of{" "}
                     {result.eligibleAccounts.length} selected)
                   </summary>
@@ -671,13 +688,13 @@ export default function Home() {
                           new Set(result.eligibleAccounts.map((a) => a.pubkey))
                         )
                       }
-                      className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200"
+                      className="inline-block px-1 py-1.5 text-zinc-400 underline underline-offset-2 hover:text-zinc-200"
                     >
                       Select all
                     </button>
                     <button
                       onClick={() => setSelected(new Set())}
-                      className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200"
+                      className="inline-block px-1 py-1.5 text-zinc-400 underline underline-offset-2 hover:text-zinc-200"
                     >
                       Select none
                     </button>
@@ -727,7 +744,7 @@ export default function Home() {
 
               {result.skippedAccounts.length > 0 && (
                 <details className="mt-4">
-                  <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+                  <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                     {result.skippedAccounts.length} skipped, kept safe, with
                     reasons
                   </summary>
@@ -755,28 +772,6 @@ export default function Home() {
                 </details>
               )}
             </div>
-
-            {/* G.2: funded-account delegate revocation (per-item
-                consent, one account per action). Renders nothing when
-                the scan has no eligible delegations. */}
-            <DelegationSection
-              scan={result}
-              rescan={rescan}
-              repairInFlight={repairInFlight}
-              unwrapInFlight={unwrapInFlight}
-              onActionInFlightChange={setRevokeInFlight}
-            />
-
-            {/* G.3: wrapped-SOL unwrap + close (per-item consent, one
-                account per action). Renders nothing when the scan has
-                no eligible native accounts. */}
-            <NativeAccountsSection
-              scan={result}
-              rescan={rescan}
-              repairInFlight={repairInFlight}
-              revokeInFlight={revokeInFlight}
-              onActionInFlightChange={setUnwrapInFlight}
-            />
 
             {result.eligibleAccounts.length === 0 &&
               result.totalAccounts > 0 && (
@@ -885,13 +880,13 @@ export default function Home() {
                       {batchCount} × 0.000005)
                     </span>
                   </p>
-                  <p className="border-t border-zinc-800 pt-2 text-xs leading-relaxed text-zinc-500">
+                  <p className="border-t border-zinc-800 pt-2 text-xs leading-relaxed text-zinc-400">
                     Plus the priority fee your wallet adds when signing.
                     With Phantom&rsquo;s default settings that has recently
                     run between about 0.000075 and 0.00015 SOL per
                     transaction.
                   </p>
-                  <p className="text-xs leading-relaxed text-zinc-500">
+                  <p className="text-xs leading-relaxed text-zinc-400">
                     Network fees go to the Solana network, not to us. Your
                     wallet needs this small balance before signing. The
                     network fee can&rsquo;t be paid from the rent being
@@ -907,7 +902,7 @@ export default function Home() {
 
                 {/* Raw transaction inspector: prove what will be signed. */}
                 <details className="mt-3 rounded-md border border-zinc-800 p-3">
-                  <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+                  <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                     Inspect exactly what you&rsquo;ll sign
                   </summary>
                   <p className="mt-2 text-xs leading-relaxed text-zinc-400">
@@ -929,7 +924,7 @@ export default function Home() {
                   <button
                     onClick={runSimulation}
                     disabled={sim.state === "running"}
-                    className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-50"
+                    className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-50"
                   >
                     {sim.state === "running"
                       ? "Simulating on-chain..."
@@ -1060,7 +1055,7 @@ export default function Home() {
             {status === "error" && (
               <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-400">
                 <p className="font-medium">Repair failed</p>
-                <p className="mt-1 text-red-400/70">{repairError}</p>
+                <p className="mt-1 text-red-400">{repairError}</p>
                 {/* The hook preserves the receipts of batches that already
                  *  landed before the run stopped; show them so the count
                  *  and the recovered SOL are independently checkable. */}
@@ -1073,10 +1068,10 @@ export default function Home() {
                  *  no one. */}
                 {repairErrorDetail && (
                   <details className="mt-2">
-                    <summary className="cursor-pointer text-xs text-red-400/60">
+                    <summary className="cursor-pointer py-1 text-xs text-red-400">
                       Technical details
                     </summary>
-                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-red-400/50">
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-red-400">
                       {repairErrorDetail}
                     </pre>
                   </details>
@@ -1093,6 +1088,31 @@ export default function Home() {
                 </button>
               </div>
             )}
+
+            {/* The two secondary action sections render below the whole
+                repair flow, so the primary action - select, review,
+                approve - stays at the top of the page on every viewport.
+                G.2: funded-account delegate revocation (per-item
+                consent, one account per action). Renders nothing when
+                the scan has no eligible delegations. */}
+            <DelegationSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              unwrapInFlight={unwrapInFlight}
+              onActionInFlightChange={setRevokeInFlight}
+            />
+
+            {/* G.3: wrapped-SOL unwrap + close (per-item consent, one
+                account per action). Renders nothing when the scan has
+                no eligible native accounts. */}
+            <NativeAccountsSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              revokeInFlight={revokeInFlight}
+              onActionInFlightChange={setUnwrapInFlight}
+            />
           </div>
         )}
 

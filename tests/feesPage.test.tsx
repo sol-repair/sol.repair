@@ -124,7 +124,7 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
 
     expect(
       screen.getByText(
-        /a 1% service fee on the rent the close recovers — charged only when sol is successfully recovered, appended after the closes, and visible in the ledger below\./i
+        /a 1% service fee on the rent the close recovers, charged only when sol is successfully recovered, appended after the closes, and visible in the ledger below\./i
       )
     ).toBeTruthy();
   });
@@ -135,7 +135,7 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
 
     expect(
       screen.getByText(
-        /the fee exists for unlocking rent a user cannot reach themselves — never for returning the user.s own principal\./i
+        /the fee exists for unlocking rent a user cannot reach themselves, never for returning the user.s own principal\./i
       )
     ).toBeTruthy();
     expect(

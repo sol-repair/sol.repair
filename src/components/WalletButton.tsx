@@ -12,9 +12,19 @@
  * useSyncExternalStore gives us a hydration-safe "are we on the client
  * yet" value: the server snapshot is false, the client snapshot is true,
  * and React reconciles the two without an effect or a state update.
+ *
+ * Once a wallet is picked, its name and icon stay on the control: the
+ * connect button says WHICH wallet it will ask, and the connected
+ * button shows the same icon beside the address.
  */
 
-import { useSyncExternalStore, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 
 const emptySubscribe = () => () => {};
@@ -39,6 +49,12 @@ export const CONNECT_FAILED_MESSAGE =
  * button that says what the tap does. Exported so other read-only
  * surfaces (the transaction explainer's recent-transactions walk)
  * reuse the exact same picker instead of growing a second one.
+ *
+ * Keyboard behavior for the picker: focus enters the dialog when it
+ * opens, Tab cycles inside it, and Escape closes it. Focus returns to
+ * the triggering control when it closes - the opener owns that (its
+ * onClose callback refocuses the trigger), so every close path
+ * (Cancel, Escape, overlay click, a completed pick) restores it.
  */
 export function WalletPicker({
   onClose,
@@ -46,17 +62,50 @@ export function WalletPicker({
   onClose: () => void;
 }) {
   const { wallets, select } = useWallet();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === dialog || active === first)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Choose a wallet"
+      onKeyDown={onKeyDown}
     >
       <div
-        className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-950 p-4"
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose a wallet"
+        className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-950 p-4 outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
@@ -106,6 +155,14 @@ export function WalletButton() {
     useWallet();
   const [walletError, setWalletError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const selectTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // Whatever closes the picker - Cancel, Escape, the overlay, or a
+  // completed pick - returns focus to the control that opened it.
+  const closePicker = useCallback(() => {
+    setPickerOpen(false);
+    selectTriggerRef.current?.focus();
+  }, []);
 
   if (!isClient) {
     // Placeholder that reserves roughly the button's space so the layout
@@ -135,8 +192,14 @@ export function WalletButton() {
         title="Disconnect wallet"
         className={`${base} border border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800`}
       >
-        Connected: {publicKey.toBase58().slice(0, 4)}…
-        {publicKey.toBase58().slice(-4)} · click to disconnect
+        <span className="inline-flex items-center justify-center gap-2">
+          {wallet?.adapter.icon && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={wallet.adapter.icon} alt="" className="h-5 w-5" />
+          )}
+          Connected: {publicKey.toBase58().slice(0, 4)}…
+          {publicKey.toBase58().slice(-4)} · click to disconnect
+        </span>
       </button>
     );
   }
@@ -152,7 +215,17 @@ export function WalletButton() {
           disabled={connecting}
           className={`${base} bg-[#14F195] text-black hover:bg-[#0fd584]`}
         >
-          {connecting ? "Connecting..." : "Connect to Scan Accounts"}
+          {connecting ? (
+            "Connecting..."
+          ) : (
+            <span className="inline-flex items-center justify-center gap-2">
+              {wallet.adapter.icon && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={wallet.adapter.icon} alt="" className="h-5 w-5" />
+              )}
+              Connect {wallet.adapter.name} to Scan Accounts
+            </span>
+          )}
         </button>
         {errorLine}
       </>
@@ -162,6 +235,7 @@ export function WalletButton() {
   return (
     <>
       <button
+        ref={selectTriggerRef}
         onClick={() => {
           setWalletError(null);
           if (wallets.length === 0) {
@@ -175,7 +249,7 @@ export function WalletButton() {
         Select Wallet
       </button>
       {errorLine}
-      {pickerOpen && <WalletPicker onClose={() => setPickerOpen(false)} />}
+      {pickerOpen && <WalletPicker onClose={closePicker} />}
     </>
   );
 }

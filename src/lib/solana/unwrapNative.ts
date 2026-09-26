@@ -400,4 +400,4 @@ export const NATIVE_GATE_ABORT_COPY: Record<NativeGateAbortReason, string> = {
 
 /** The already-closed sentence (spec §8.9 row 1). */
 export const ALREADY_CLOSED_COPY =
-  "This account no longer exists — it may already have been closed. Nothing was signed.";
+  "This account no longer exists. It may already have been closed. Nothing was signed.";

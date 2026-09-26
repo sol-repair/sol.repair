@@ -280,7 +280,7 @@ describe("finding rows (§6.2 block 1, §10.4.1)", () => {
     fireEvent.click(screen.getByText("What closing this account means"));
     const text = container.textContent ?? "";
     expect(text).toContain(
-      "SOL.REPAIR cannot tell a leftover wrapper from an account something still depends on — that judgment is yours."
+      "SOL.REPAIR cannot tell whether this account is a leftover or whether something still depends on it. That judgment is yours."
     );
     expect(text).toContain("Closing is not undoable by this tool");
     expect(text).toContain(
@@ -320,7 +320,7 @@ describe("the confirmation card (§6.2 block 4, §10.4.2)", () => {
     expect(
       screen.getByText(
         new RegExp(
-          `You are about to approve 1 transaction that closes wrapped-SOL account .*\\. Every lamport it holds — 2,488,440 at the fresh read just now — goes to your wallet`
+          `You are about to approve 1 transaction that closes wrapped-SOL account .*\\. Every lamport it holds, 2,488,440 at the fresh read just now, goes to your wallet`
         )
       )
     ).toBeTruthy();
@@ -482,7 +482,7 @@ describe("the confirmation card (§6.2 block 4, §10.4.2)", () => {
     await screen.findByText("Review before you sign");
     expect(
       screen.getByText(
-        "This account no longer exists — it may already have been closed. Nothing was signed."
+        "This account no longer exists. It may already have been closed. Nothing was signed."
       )
     ).toBeTruthy();
     expect(screen.queryByText("Run pre-sign simulation")).toBeNull();
@@ -514,7 +514,7 @@ describe("terminal-outcome cards (§6.2 blocks 5-7, §10.4.5)", () => {
     expect(screen.getByText("Wrapped SOL returned.")).toBeTruthy();
     const text = container.textContent ?? "";
     expect(text).toContain(
-      "no longer exists — confirmed by a fresh read after the transaction."
+      "no longer exists, confirmed by a fresh read after the transaction."
     );
     expect(text).toMatch(
       /Its last recorded lamports \(2,488,440, read just before the close\) went to your wallet as the close.s destination\./
@@ -581,7 +581,7 @@ describe("terminal-outcome cards (§6.2 blocks 5-7, §10.4.5)", () => {
       status: "unverified",
       outcome: "unresolved-outcome",
       error:
-        "We could not verify whether the close landed. The transaction's outcome could not be established — it may still land. Nothing more will be sent automatically.",
+        "We could not verify whether the close landed. The transaction's outcome could not be established. It may still land. Nothing more will be sent automatically.",
       signatures: ["sig777"],
     });
     render(
@@ -642,6 +642,22 @@ describe("the three-direction in-flight affordance (§8.11, §10.4.6)", () => {
       name: "Unwrap and close",
     }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+  });
+
+  it("keeps the elapsed counter out of the live region", () => {
+    setHook({ status: "confirming" }, true);
+    render(
+      <NativeAccountsSection
+        scan={scanWith([emptyEntry])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+      />
+    );
+    expect(screen.getByRole("status")).toBeTruthy();
+    // The per-second counter is visual only: inside the live region it
+    // would re-announce the whole card every tick (audit F5).
+    expect(screen.getByText("0s").getAttribute("aria-hidden")).toBe("true");
   });
 
   it("leaves the buttons enabled when no action is in flight", () => {

@@ -122,7 +122,10 @@ function groupDigits(value: string): string {
 }
 
 /** Ticking elapsed-seconds counter (the page's honest "not stuck"
- *  signal, re-declared locally). */
+ *  signal, re-declared locally). aria-hidden: it sits inside the
+ *  role="status" card, and a per-second number would re-announce the
+ *  whole live region every tick; the status text carries the
+ *  meaningful announcements. */
 function ElapsedSeconds() {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
@@ -130,7 +133,10 @@ function ElapsedSeconds() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="shrink-0 font-mono text-xs tabular-nums text-zinc-400">
+    <span
+      aria-hidden="true"
+      className="shrink-0 font-mono text-xs tabular-nums text-zinc-400"
+    >
       {seconds}s
     </span>
   );
@@ -373,7 +379,7 @@ export function DelegationSection({
         tell why a delegation exists or whether the delegate has ever
         acted.
       </p>
-      <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-1 text-xs leading-relaxed text-zinc-400">
         Balances and delegate facts are from the scan (finalized view).
         Only accounts the scan could confirm as non-native are offered
         here.
@@ -402,19 +408,19 @@ export function DelegationSection({
                 <button
                   onClick={() => beginReview(d)}
                   disabled={otherActionInFlight || busy}
-                  className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Revoke delegate
                 </button>
               </div>
               <details className="mt-1">
-                <summary className="cursor-pointer text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">
+                <summary className="cursor-pointer py-1 text-[11px] text-zinc-400 transition-colors hover:text-zinc-300">
                   What this delegation means
                 </summary>
                 <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
                   This account has an active delegation to the address
                   shown. The token program lets that address spend from
-                  this account — by transferring or burning — up to the
+                  this account, by transferring or burning, up to the
                   delegated amount that was set when the permission was
                   created. The amount of delegated spending authority is
                   not displayed: the scan&rsquo;s account data names the
@@ -433,7 +439,7 @@ export function DelegationSection({
       )}
 
       {frozenDelegated.length > 0 && (
-        <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-500">
+        <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
           {frozenDelegated.map((entry) => (
             <p key={entry.pubkey} className="break-all">
               <AccountLink address={entry.pubkey} /> · frozen by the
@@ -539,10 +545,10 @@ export function DelegationSection({
                 wallet may add its own priority fee.
               </p>
               <details className="mt-2 rounded-md border border-zinc-800 p-2">
-                <summary className="cursor-pointer text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+                <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
                   Inspect exactly what you&rsquo;ll sign
                 </summary>
-                <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
                   Built from the same instruction the wallet will sign.
                 </p>
                 <pre className="mt-1 max-h-48 overflow-auto rounded bg-black p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
@@ -568,7 +574,7 @@ export function DelegationSection({
                 <button
                   onClick={runSimulation}
                   disabled={sim.state === "running"}
-                  className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-50"
+                  className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-50"
                 >
                   {sim.state === "running"
                     ? "Simulating on-chain..."
@@ -649,7 +655,7 @@ export function DelegationSection({
               </p>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
                 Token account {accountPubkey ? short(accountPubkey) : ""} no
-                longer names a delegate — confirmed by a fresh read after
+                longer names a delegate, confirmed by a fresh read after
                 the transaction.
               </p>
               {balanceObservationCopy(
@@ -695,24 +701,24 @@ export function DelegationSection({
       {status === "error" && (
         <div className="mt-3 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-400">
           <p className="font-medium">The revoke did not go through</p>
-          <p className="mt-1 leading-relaxed text-red-400/80">{error}</p>
+          <p className="mt-1 leading-relaxed text-red-400">{error}</p>
           {outcome === "on-chain-failure" &&
             delegatePresentAtLastRead === true && (
-              <p className="mt-1 text-xs leading-relaxed text-red-400/70">
+              <p className="mt-1 text-xs leading-relaxed text-red-400">
                 When we checked, the delegate was still on the account.
               </p>
             )}
           {outcome === "on-chain-failure" &&
             delegatePresentAtLastRead === false && (
-              <p className="mt-1 text-xs leading-relaxed text-red-400/70">
-                A fresh read after it shows no delegate on the account —
-                whether this app&rsquo;s transaction caused that could not
+              <p className="mt-1 text-xs leading-relaxed text-red-400">
+                A fresh read after it shows no delegate on the account.
+                Whether this app&rsquo;s transaction caused that could not
                 be established.
               </p>
             )}
           {outcome === "on-chain-failure" &&
             delegatePresentAtLastRead === null && (
-              <p className="mt-1 text-xs leading-relaxed text-red-400/70">
+              <p className="mt-1 text-xs leading-relaxed text-red-400">
                 The follow-up read failed, so the current delegate state is
                 unknown.
               </p>
@@ -722,10 +728,10 @@ export function DelegationSection({
           ))}
           {errorDetail && (
             <details className="mt-2">
-              <summary className="cursor-pointer text-xs text-red-400/60">
+              <summary className="cursor-pointer py-1 text-xs text-red-400">
                 Technical details
               </summary>
-              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-red-400/50">
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-red-400">
                 {errorDetail}
               </pre>
             </details>

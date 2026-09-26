@@ -13,8 +13,8 @@ export default function CloseTokenAccountsGuide() {
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
         <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-500">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300">
+          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
+          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
             ← Back
           </Link>
         </div>

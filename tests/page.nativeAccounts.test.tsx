@@ -200,4 +200,24 @@ describe("the native-accounts section mount and the three-way affordance", () =>
     }) as HTMLButtonElement;
     expect(repair.disabled).toBe(true);
   });
+
+  it("renders the repair controls before both secondary action sections", () => {
+    // Audit F6: with delegations and wrapped-SOL accounts present, the
+    // primary action must not sit below the two secondary sections -
+    // on a phone that put "Repair Wallet" one to two viewports below
+    // the account selection it belongs to. The full repair flow
+    // (button, review, in-flight, results) renders first; the
+    // per-item sections follow.
+    renderHomeWithScanResult();
+    const repair = screen.getByRole("button", { name: "Repair Wallet" });
+    const delegation = screen.getByTestId("delegation-section-stub");
+    const native = screen.getByTestId("native-accounts-section-stub");
+    const repairComesBefore = (later: Element) =>
+      Boolean(
+        repair.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    expect(repairComesBefore(delegation)).toBe(true);
+    expect(repairComesBefore(native)).toBe(true);
+  });
 });
