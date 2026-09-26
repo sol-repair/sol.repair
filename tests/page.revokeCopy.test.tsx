@@ -205,7 +205,7 @@ describe("revoke copy on the scan and confirmation screens", () => {
 
     expect(
       screen.getByText(
-        /revoke instruction for each account with an active delegate/
+        /revoke instruction runs for each delegated account that is not frozen/
       )
     ).toBeTruthy();
   });

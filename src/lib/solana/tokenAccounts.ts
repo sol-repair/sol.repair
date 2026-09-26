@@ -97,6 +97,10 @@ export type SkipCause =
   | "close-authority"
   | "wrapped-sol"
   | "uninitialized"
+  // No scan site produces this since the owner-approved close-only rule
+  // of 2026-09-25 (a frozen delegated account is now eligible). The
+  // member and the inspection mapping stay so a stale fixture or a
+  // future site cannot silently misaggregate.
   | "frozen-with-delegate";
 
 /** An account we skip on purpose, with the reason.
@@ -125,6 +129,13 @@ export interface SkippedAccount {
    *  can show WHICH address holds the permission. The skip decision is
    *  unchanged. */
   delegate?: string;
+  /** True when the funded account names a close authority other than
+   *  the wallet owner (G.4-family dust evidence, Revision 1). A funded
+   *  account is skipped at check #1 before the close-authority check
+   *  runs, so this is the only site that can see the fact; the burn
+   *  selection uses it to exclude accounts whose trailing close would
+   *  always fail. Evidence only; the skip decision is unchanged. */
+  foreignCloseAuthority?: boolean;
   /** Three-state native-status evidence, derived by strict equality on
    *  the parsed account's isNative value (see nativeStatusOf below):
    *  "native" | "non-native" | "unknown" — an omitted or non-boolean
@@ -270,6 +281,15 @@ export async function getClosableAccounts(
           ...(info.delegate
             ? { delegated: true, delegate: info.delegate }
             : {}),
+          // Dust-burn evidence: a funded account is skipped here before
+          // the close-authority check runs, so this is the only site
+          // that can record a foreign close authority on a FUNDED
+          // account. The burn selection excludes it (its trailing
+          // close could never succeed).
+          ...(info.closeAuthority &&
+          info.closeAuthority !== owner.toString()
+            ? { foreignCloseAuthority: true }
+            : {}),
           ...(info.state === "frozen" ? { frozen: true } : {}),
           nativeStatus: nativeStatusOf(info.isNative),
         });
@@ -279,14 +299,16 @@ export async function getClosableAccounts(
       // 2. Active delegation: mark, don't skip.
       //    The balance check above guarantees the account is EMPTY by the
       //    time we get here. An empty delegated account still locks the
-      //    owner's rent, and the owner can revoke the delegation and close
-      //    in one transaction, so it stays eligible with a needsRevoke flag
-      //    that the close builder turns into a Revoke instruction right
-      //    before this account's CloseAccount. Checks #3-#5 below still
-      //    apply: a delegated account with a foreign close authority or
-      //    wrapped SOL is still skipped, and a delegated FROZEN account is
-      //    skipped too because the on-chain Revoke itself rejects frozen
-      //    accounts (AccountFrozen in both programs).
+      //    owner's rent. For a non-frozen account the owner can revoke
+      //    the delegation and close in one transaction, so it stays
+      //    eligible with a needsRevoke flag that the close builder turns
+      //    into a Revoke instruction right before this account's
+      //    CloseAccount. For a FROZEN delegated account no Revoke is
+      //    emitted at all (the on-chain Revoke itself rejects frozen
+      //    accounts, AccountFrozen in both programs); the close-only
+      //    path below handles it. Checks #3-#5 still apply either way: a
+      //    delegated account with a foreign close authority or wrapped
+      //    SOL is still skipped.
       //    NOTE: the parsed RPC response OMITS the delegate field entirely
       //    when there is no delegation. A naive `info.delegate !== null`
       //    check is WRONG because a missing field is undefined, and
@@ -343,11 +365,14 @@ export async function getClosableAccounts(
       //    2026-09-19 (a real frozen account closed with err null in a devnet
       //    simulation) and confirmed against both token programs' source,
       //    where neither CloseAccount path consults the frozen bit (it guards
-      //    transfers, burns, approvals, and revokes only). The one exception
-      //    is an account that still has an active delegate: the Revoke we
-      //    emit before its close DOES reject frozen accounts (AccountFrozen
-      //    in both programs), so that combination stays skipped. Truly
-      //    uninitialized accounts cannot be closed at all and stay skipped.
+      //    transfers, burns, approvals, and revokes only). This includes a
+      //    frozen account with an active delegate (owner-approved
+      //    2026-09-25): the Revoke we emit before a delegated close DOES
+      //    reject frozen accounts (AccountFrozen in both programs), so the
+      //    frozen case is closed WITHOUT a Revoke - closing the account
+      //    ends the delegation with it, because there is nothing left for
+      //    a delegate to spend from. Truly uninitialized accounts cannot
+      //    be closed at all and stay skipped.
       if (info.state === "uninitialized") {
         skippedAccounts.push({
           pubkey: pubkey.toString(),
@@ -358,22 +383,6 @@ export async function getClosableAccounts(
         });
         continue;
       }
-      if (info.state === "frozen" && needsRevoke) {
-        skippedAccounts.push({
-          pubkey: pubkey.toString(),
-          mint: info.mint,
-          reason: "is frozen with an active delegate",
-          program: tag,
-          cause: "frozen-with-delegate",
-          delegated: true,
-          ...(info.delegate ? { delegate: info.delegate } : {}),
-          // This site is only reachable after the isNative check passed,
-          // so the derivation always yields "non-native" here — recorded
-          // by the same expression as the funded site, not special-cased.
-          nativeStatus: nativeStatusOf(info.isNative),
-        });
-        continue;
-      }
 
       // All five checks passed. This account is safe to close.
       eligibleAccounts.push({
@@ -381,7 +390,9 @@ export async function getClosableAccounts(
         mint: info.mint,
         lamports: account.lamports,
         program: tag,
-        ...(needsRevoke ? { needsRevoke: true } : {}),
+        ...(needsRevoke && info.state !== "frozen"
+          ? { needsRevoke: true }
+          : {}),
         ...(info.state === "frozen" ? { frozen: true } : {}),
       });
       recoverableLamports += BigInt(account.lamports);

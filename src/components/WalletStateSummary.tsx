@@ -107,7 +107,8 @@ export function WalletStateSummary({
           <li>
             {count("frozen")} frozen{" "}
             {plural(count("frozen"), "account", "accounts")}. Only the
-            token&rsquo;s freeze authority can unfreeze them.
+            token&rsquo;s freeze authority can unfreeze them. An empty
+            frozen account can still be closed.
           </li>
         )}
         {count("uninitialized") > 0 && (

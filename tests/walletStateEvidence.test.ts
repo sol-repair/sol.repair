@@ -157,7 +157,7 @@ describe("G.1 evidence preservation in getClosableAccounts", () => {
     expect(skipped.cause).toBe("uninitialized");
   });
 
-  it("tags the frozen delegated skip and preserves its delegate evidence", async () => {
+  it("marks a frozen delegated account eligible with frozen evidence and no revoke", async () => {
     const result = await scan([
       tokenAccountEntry({
         seed: 10,
@@ -166,11 +166,12 @@ describe("G.1 evidence preservation in getClosableAccounts", () => {
         state: "frozen",
       }),
     ]);
-    const skipped = result.skippedAccounts[0];
-    expect(skipped.reason).toBe("is frozen with an active delegate"); // unchanged
-    expect(skipped.cause).toBe("frozen-with-delegate");
-    expect(skipped.delegated).toBe(true);
-    expect(result.eligibleAccounts).toHaveLength(0);
+    // Owner-approved 2026-09-25: close-only for frozen delegated
+    // accounts. The Revoke would reject frozen, so none is emitted.
+    expect(result.skippedAccounts).toHaveLength(0);
+    const eligible = result.eligibleAccounts[0];
+    expect(eligible.frozen).toBe(true);
+    expect(eligible.needsRevoke).toBeUndefined();
   });
 
   it("tags malformed-number responses as unreadable and carries no balance evidence", async () => {
@@ -231,7 +232,12 @@ describe("G.2 evidence: delegate address and nativeStatus (additive only)", () =
     expect(unknown.skippedAccounts[0].nativeStatus).toBe("unknown");
   });
 
-  it("carries the delegate address and non-native status on the frozen-with-delegate skip", async () => {
+  it("drops the skip-only delegate evidence when a frozen delegated account goes close-only", async () => {
+    // The delegate address and the nativeStatus derivation used to
+    // travel on the frozen-with-delegate SKIP. That site no longer
+    // exists (owner-approved 2026-09-25): the account is eligible, and
+    // the delegate is irrelevant to a close that ends the delegation
+    // with the account.
     const delegate = pk(25).toBase58();
     const result = await scan([
       tokenAccountEntry({
@@ -241,14 +247,11 @@ describe("G.2 evidence: delegate address and nativeStatus (additive only)", () =
         state: "frozen",
       }),
     ]);
-    const skipped = result.skippedAccounts[0];
-    expect(skipped.cause).toBe("frozen-with-delegate");
-    expect(skipped.delegated).toBe(true);
-    expect(skipped.delegate).toBe(delegate);
-    // Reached only after the isNative check passed, so always
-    // non-native here — derived, not special-cased.
-    expect(skipped.nativeStatus).toBe("non-native");
-    expect(skipped.reason).toBe("is frozen with an active delegate");
+    expect(result.skippedAccounts).toHaveLength(0);
+    const eligible = result.eligibleAccounts[0];
+    expect(eligible.frozen).toBe(true);
+    expect(eligible.needsRevoke).toBeUndefined();
+    expect("delegate" in eligible).toBe(false);
   });
 
   it("keeps classification identical across all three nativeStatus states", async () => {

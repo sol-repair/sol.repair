@@ -190,16 +190,40 @@ describe("getClosableAccounts eligibility checks", () => {
     expect(result.skippedAccounts[0].reason).toBe("is a wrapped-SOL account");
   });
 
-  it("still skips a delegated frozen account (on-chain Revoke rejects frozen accounts)", async () => {
+  it("records foreignCloseAuthority evidence on a funded skip with a foreign close authority", async () => {
+    const foreign = tokenAccount(31, { closeAuthority: pk(32).toBase58(), tokenAmount: { amount: "77", decimals: 6, uiAmount: 0.000077, uiAmountString: "0.000077" } });
+    const { result } = await runScan([foreign]);
+    expect(result.eligibleAccounts).toHaveLength(0);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.cause).toBe("funded");
+    expect(skipped.foreignCloseAuthority).toBe(true);
+  });
+
+  it("records no foreignCloseAuthority when the close authority is the owner (or absent)", async () => {
+    const owned = tokenAccount(33, { closeAuthority: OWNER.toBase58(), tokenAmount: { amount: "77", decimals: 6, uiAmount: 0.000077, uiAmountString: "0.000077" } });
+    const plain = tokenAccount(34, { tokenAmount: { amount: "77", decimals: 6, uiAmount: 0.000077, uiAmountString: "0.000077" } });
+    const { result } = await runScan([owned, plain]);
+    expect(result.skippedAccounts).toHaveLength(2);
+    expect(result.skippedAccounts[0].foreignCloseAuthority).toBeUndefined();
+    expect(result.skippedAccounts[1].foreignCloseAuthority).toBeUndefined();
+  });
+
+  it("offers a delegated frozen account for close only (owner-approved 2026-09-25)", async () => {
+    // The on-chain Revoke rejects frozen accounts (AccountFrozen in both
+    // programs), so no Revoke is emitted for this account. The close
+    // itself consults no frozen state, and a closed account leaves no
+    // delegation behind, so the close-only path recovers the rent the
+    // old skip left trapped.
     const delegated = tokenAccount(4, {
       delegate: pk(5).toBase58(),
       state: "frozen",
     });
     const { result } = await runScan([delegated]);
-    expect(result.eligibleAccounts).toHaveLength(0);
-    expect(result.skippedAccounts[0].reason).toBe(
-      "is frozen with an active delegate"
-    );
+    expect(result.skippedAccounts).toHaveLength(0);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].needsRevoke).toBeUndefined();
+    expect(result.eligibleAccounts[0].frozen).toBe(true);
+    expect(result.eligibleAccounts[0].lamports).toBeGreaterThan(0);
   });
 
   it("marks a delegated Token-2022 account eligible with its program tag", async () => {

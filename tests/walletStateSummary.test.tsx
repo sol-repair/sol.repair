@@ -127,6 +127,22 @@ describe("WalletStateSummary", () => {
     expect(screen.getByText(/shown in the skipped list/)).toBeTruthy();
   });
 
+  it("clarifies that an empty frozen account can still be closed", () => {
+    // Owner-approved 2026-09-25: frozen delegated accounts are eligible
+    // close-only, so the frozen line must not read as a dead end.
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        eligibleAccounts: [account({ frozen: true })],
+      })
+    );
+    render(<WalletStateSummary summary={summary} />);
+    expect(screen.getByText(/1 frozen account/)).toBeTruthy();
+    expect(
+      screen.getByText(/An empty frozen account can still be closed\./)
+    ).toBeTruthy();
+  });
+
   it("imports no wallet adapter and no action-bearing module (read-only boundary)", () => {
     // Match whole import statements (multi-line imports included), so
     // boundary prose naming the banned modules cannot trip the check.

@@ -3,8 +3,11 @@
  *
  * When a token account is closed, the locked rent (lamports) is returned to
  * a destination account, and the token account is wiped from the blockchain.
- * Accounts the scan flagged as delegated get a Revoke instruction first, so
- * the delegate is cleared in the same atomic transaction.
+ * Accounts flagged needsRevoke (an active delegate on a non-frozen account)
+ * get a Revoke instruction first, so the delegate is cleared in the same
+ * atomic transaction. A frozen delegated account closes without a Revoke:
+ * the on-chain Revoke rejects frozen accounts, and the close itself ends
+ * the delegation with the account.
  *
  * Safety properties enforced here:
  *   - The destination for recovered SOL is ALWAYS the user's own wallet.
