@@ -211,15 +211,21 @@ export function DelegationSection({
   rescan,
   repairInFlight,
   unwrapInFlight,
+  burnInFlight,
+  excessInFlight,
   onActionInFlightChange,
 }: {
   scan: ScanResult;
   rescan: () => void;
   repairInFlight: boolean;
-  /** G.3 §8.11: the unwrap action's in-flight signal, folded into the
+  /** The unwrap action's in-flight signal, folded into the
    *  existing affordance; the mutex, not buttons, remains the
    *  guarantee. */
   unwrapInFlight?: boolean;
+  /** The dust burn action's in-flight signal (Revision 1). */
+  burnInFlight?: boolean;
+  /** The G.4 excess-withdrawal action's in-flight signal. */
+  excessInFlight?: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
 }) {
   const connection = useRpcConnection();
@@ -362,7 +368,11 @@ export function DelegationSection({
   }
 
   const busy = actionInFlight;
-  const otherActionInFlight = repairInFlight || unwrapInFlight === true;
+  const otherActionInFlight =
+    repairInFlight ||
+    unwrapInFlight === true ||
+    burnInFlight === true ||
+    excessInFlight === true;
 
   return (
     <div

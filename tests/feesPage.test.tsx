@@ -146,6 +146,22 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
     expect(screen.getByText(/That asymmetry is the honest cost/i)).toBeTruthy();
   });
 
+  it("states the dust burn-and-close rule (the owner's 2026-09-26 ruling)", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /the same 1% fee on the rent the close recovers/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /The burn itself destroys the token balance permanently and is charged nothing/i
+      )
+    ).toBeTruthy();
+  });
+
   it("keeps the pre-existing 1% conformance copy intact", () => {
     mockHook([]);
     render(<FeesPage />);

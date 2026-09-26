@@ -123,19 +123,20 @@ export default function FeesPage() {
           receipt; judge for yourself.
         </p>
 
-        {/* The two fee rules, side by side (G.3 spec §7.7, the Revision 2
-            decision's stated condition): the 1%-of-recovered rule for
-            repair closes and the no-fee rule for wrapped-SOL unwrap share
-            one rationale, written beside both — we charge for unlocking
-            rent a user cannot reach themselves, never for returning the
-            user's own principal. The asymmetry the rules create (an empty
-            wrapped-SOL account unwraps fee-free while an empty ordinary
-            account pays 1% of the same kind of rent recovery, decided by
-            the account's type, not by a user choice) is stated here
-            rather than papered over. */}
+        {/* The fee rules, side by side (G.3 spec §7.7 + the dust rule
+            from the 2026-09-26 owner ruling): the 1%-of-recovered rule
+            for repair closes, the same rule for dust burn-and-close,
+            and the no-fee rule for wrapped-SOL unwrap share one
+            rationale, written beside them — we charge for unlocking
+            rent a user cannot reach themselves, never for returning
+            the user's own principal. The asymmetry the rules create
+            (an empty wrapped-SOL account unwraps fee-free while an
+            empty ordinary account pays 1% of the same kind of rent
+            recovery, decided by the account's type, not by a user
+            choice) is stated here rather than papered over. */}
         <div className="mb-6 rounded-md border border-zinc-800 p-3 text-xs leading-relaxed text-zinc-400">
           <p className="font-mono text-[11px] uppercase tracking-wider text-zinc-400">
-            The fee rules, both of them
+            The fee rules
           </p>
           <p className="mt-2">
             <span className="text-zinc-300">Repair closes</span> (empty,
@@ -148,6 +149,15 @@ export default function FeesPage() {
             <span className="text-zinc-300">Wrapped-SOL unwrap and close</span>{" "}
             (wrapped-SOL accounts): no service fee. You are recovering
             your own SOL; the only cost is the network fee.
+          </p>
+          <p className="mt-2">
+            <span className="text-zinc-300">Dust burn-and-close</span>{" "}
+            (accounts holding tokens, per the owner's 2026-09-26 ruling):
+            the same 1% fee on the rent the close recovers. The burn
+            itself destroys the token balance permanently and is charged
+            nothing; the fee covers the same service as the empty-account
+            repair. SOL.REPAIR cannot judge what a token is worth, and
+            burning is not undoable.
           </p>
           <p className="mt-2">
             Why the two rules differ, and why they are stated together:

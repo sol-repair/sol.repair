@@ -1,12 +1,13 @@
 /**
- * Synchronous, app-wide mutual exclusion between the three wallet action
- * flows — the empty-account repair, the G.2 delegate revocation, and the
- * G.3 wrapped-SOL unwrap+close (spec §8.12; G.3 spec §8.11).
+ * Synchronous, app-wide mutual exclusion between the five wallet action
+ * flows — the empty-account repair, the G.2 delegate revocation, the
+ * G.3 wrapped-SOL unwrap+close, the dust burn-and-close, and the G.4
+ * excess-lamport withdrawal (spec §8.12; G.3 spec §8.11).
  *
  * Why a module-scoped lock and not per-hook state: each action hook
  * already guards its own re-entry with a synchronous ref (set before
  * the first await), but separate hooks cannot see each other's
- * refs. This lock is acquired by ALL THREE hooks immediately after
+ * refs. This lock is acquired by ALL FIVE hooks immediately after
  * their local ref guard, synchronously — before any await — so two actions
  * initiated in the same tick cannot both start: JavaScript runs each
  * action's entry up to its first await without interleaving, and the
@@ -24,18 +25,22 @@
  * Scope is the page instance: reloading the page abandons all
  * in-flight state and nothing auto-acts afterwards — the same
  * property the repair flow has always had. Cross-flow safety after a
- * release does not depend on the lock: the three flows' account sets
- * are provably disjoint by the native/non-native partition (G.3 spec
- * §8.11) — repair closes confirmed NON-native empty accounts, revoke
- * acts on confirmed non-native funded accounts, unwrap acts on
- * confirmed native accounts — and `nativeStatus` is fixed at account
- * initialization, so the partition is stable.
+ * release does not depend on the lock: the flows' account sets are
+ * provably disjoint by the native/non-native partition (G.3 spec
+ * §8.11) — repair closes confirmed NON-native EMPTY accounts, revoke
+ * acts on confirmed non-native FUNDED accounts, unwrap acts on
+ * confirmed native accounts, and burn acts on confirmed non-native
+ * FUNDED accounts whose balance the user chose to destroy — and
+ * `nativeStatus` is fixed at account initialization, so the partition
+ * is stable. Burn's set overlaps revoke's (both funded non-native),
+ * but the mutex itself keeps them from running concurrently, and a
+ * burn's own in-lock fresh read re-checks the account before signing.
  *
  * Pure TypeScript, no imports: Layer 0 under src/lib/ because it is
  * not Solana-specific and must be trivially unit-testable.
  */
 
-export type ActionKind = "repair" | "revoke" | "unwrap";
+export type ActionKind = "repair" | "revoke" | "unwrap" | "burn" | "excess";
 
 let held: ActionKind | null = null;
 

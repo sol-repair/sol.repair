@@ -58,19 +58,20 @@ Token accounts (classic SPL Token and Token-2022) that pass all of these:
    alone. The app enforces this and so does the Solana program, so it's
    checked twice.
 2. Delegation only when it can be cleared. An empty delegated account is
-   offered like any other: the tool sends a revoke instruction right before
-   the close, in the same transaction. The one combination that cannot work
-   is delegated and frozen at once, because the network rejects a revoke on
-   a frozen account.
+   offered like any other: the tool sends a revoke instruction right
+   before the close, in the same transaction. A delegated account that is
+   also frozen closes without the revoke, because the network rejects a
+   revoke on a frozen account and closing the account ends the delegation
+   with it.
 3. Close authority still with your wallet. Some accounts created by other
    programs can only be closed by those programs, so they are skipped.
 4. Not wrapped SOL. Wrapped-SOL accounts are handled by the separate
    unwrap action described below.
 5. Frozen is fine while empty. The network blocks moving or burning frozen
    balances, not closing an empty account, so an empty frozen account is
-   offered like any other. A frozen account that still holds tokens is
-   trapped by the token's freeze authority: no tool can close it, and only
-   that authority can release it.
+   offered like any other, delegate or not. A frozen account that still
+   holds tokens is trapped by the token's freeze authority: no tool can
+   close it, and only that authority can release it.
 
 Fail any one of those and the account is skipped, no exceptions. NFTs and
 any account holding tokens are protected by the zero-balance rule.
@@ -78,6 +79,13 @@ any account holding tokens are protected by the zero-balance rule.
 Funded accounts are never closed, but a funded delegated account can have
 its delegation revoked as a separate, revoke-only action that does not
 touch balances.
+
+Funded accounts can also be burned and closed per account you choose:
+the transaction destroys the account's whole token balance permanently
+and then closes the account, returning everything it held to your
+wallet. SOL.REPAIR cannot judge what a token is worth, nothing is
+selected by default, and the same 1% fee applies to the recovered
+deposit. Frozen accounts cannot be burned.
 
 Wrapped-SOL accounts get their own action: unwrap and close. A wrapped-SOL
 account is a token-program representation of SOL, typically opened by swaps
