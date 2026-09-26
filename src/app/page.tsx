@@ -8,6 +8,8 @@ import { WalletButton } from "@/components/WalletButton";
 import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { DelegationSection } from "@/components/DelegationSection";
 import { NativeAccountsSection } from "@/components/NativeAccountsSection";
+import { BurnDustSection } from "@/components/BurnDustSection";
+import { ExcessSection } from "@/components/ExcessSection";
 import { useWalletScan } from "@/hooks/useWalletScan";
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import {
@@ -213,13 +215,14 @@ export default function Home() {
   // Whether the user has clicked "Repair" and is in the confirmation step.
   const [confirming, setConfirming] = useState(false);
 
-  // G.2 §8.12 / G.3 §8.11: the three wallet actions exclude each other
-  // in all directions. repairInFlight is derived from this hook's
-  // statuses; revokeInFlight and unwrapInFlight are reported up by
-  // their sections. Buttons are the affordance — the synchronous
-  // action mutex is the guarantee.
+  // The wallet actions exclude each other in all directions. The
+  // repair's in-flight is derived from its hook's statuses; the three
+  // per-item sections report theirs upward. Buttons are the
+  // affordance — the synchronous action mutex is the guarantee.
   const [revokeInFlight, setRevokeInFlight] = useState(false);
   const [unwrapInFlight, setUnwrapInFlight] = useState(false);
+  const [burnInFlight, setBurnInFlight] = useState(false);
+  const [excessInFlight, setExcessInFlight] = useState(false);
   const REPAIR_IN_FLIGHT_STATUSES = [
     "building",
     "awaiting-signature",
@@ -725,6 +728,12 @@ export default function Home() {
                                 · Token-2022
                               </span>
                             )}
+                            {account.frozen && (
+                              <span className="text-sky-400/80">
+                                {" "}
+                                · frozen, close only
+                              </span>
+                            )}
                             {account.needsRevoke && (
                               <span className="text-sky-400/80">
                                 {" "}
@@ -787,7 +796,11 @@ export default function Home() {
                 <button
                   onClick={() => setConfirming(true)}
                   disabled={
-                    selectedCount === 0 || revokeInFlight || unwrapInFlight
+                    selectedCount === 0 ||
+                    revokeInFlight ||
+                    unwrapInFlight ||
+                    burnInFlight ||
+                    excessInFlight
                   }
                   className="w-full rounded-lg bg-[#14F195] px-4 py-3 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -798,7 +811,10 @@ export default function Home() {
                     Select at least one account above to repair.
                   </p>
                 )}
-                {(revokeInFlight || unwrapInFlight) && (
+                {(revokeInFlight ||
+                  unwrapInFlight ||
+                  burnInFlight ||
+                  excessInFlight) && (
                   <p className="text-xs text-zinc-400">
                     Another wallet action is underway. Wait for it to finish.
                   </p>
@@ -907,8 +923,8 @@ export default function Home() {
                   </summary>
                   <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                     {feeReady
-                      ? "Every transaction contains a revoke instruction for each account with an active delegate (clears the delegate), then closeAccount instructions (classic Token Program or Token-2022, matching each account), plus one transfer for the 1% service fee to the published fee address. No token approvals, no other authority changes, nothing else. Rent goes back to your own address."
-                      : "Every transaction contains a revoke instruction for each account with an active delegate (clears the delegate), then closeAccount instructions (classic Token Program or Token-2022, matching each account). No fee transfer. No token approvals, no other authority changes, nothing else. Rent goes back to your own address."}
+                      ? "A revoke instruction runs for each delegated account that is not frozen (the network rejects revoking a frozen account, and closing the account ends the delegation with it), then closeAccount instructions (classic Token Program or Token-2022, matching each account), plus one transfer for the 1% service fee to the published fee address. No token approvals, no other authority changes, nothing else. Rent goes back to your own address."
+                      : "A revoke instruction runs for each delegated account that is not frozen (the network rejects revoking a frozen account, and closing the account ends the delegation with it), then closeAccount instructions (classic Token Program or Token-2022, matching each account). No fee transfer. No token approvals, no other authority changes, nothing else. Rent goes back to your own address."}
                     {batchCount > 1 &&
                       ` Showing the first of ${batchCount} transactions.`}
                   </p>
@@ -1100,6 +1116,8 @@ export default function Home() {
               rescan={rescan}
               repairInFlight={repairInFlight}
               unwrapInFlight={unwrapInFlight}
+              burnInFlight={burnInFlight}
+              excessInFlight={excessInFlight}
               onActionInFlightChange={setRevokeInFlight}
             />
 
@@ -1111,7 +1129,36 @@ export default function Home() {
               rescan={rescan}
               repairInFlight={repairInFlight}
               revokeInFlight={revokeInFlight}
+              burnInFlight={burnInFlight}
+              excessInFlight={excessInFlight}
               onActionInFlightChange={setUnwrapInFlight}
+            />
+
+            {/* Dust burn-and-close (per-item consent, one account per
+                action, owner-approved 2026-09-26). Renders nothing when
+                the scan has no eligible dust accounts. */}
+            <BurnDustSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              revokeInFlight={revokeInFlight}
+              unwrapInFlight={unwrapInFlight}
+              excessInFlight={excessInFlight}
+              feeReady={feeReady}
+              onActionInFlightChange={setBurnInFlight}
+            />
+
+            {/* G.4: excess-lamport withdrawal (per-item consent, one
+                account per action, owner-approved 2026-09-26). Detects
+                on mount and renders nothing without candidates. */}
+            <ExcessSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              revokeInFlight={revokeInFlight}
+              unwrapInFlight={unwrapInFlight}
+              burnInFlight={burnInFlight}
+              onActionInFlightChange={setExcessInFlight}
             />
           </div>
         )}
@@ -1144,6 +1191,13 @@ export default function Home() {
               className="underline underline-offset-2 hover:text-zinc-400"
             >
               Understand a transaction
+            </Link>
+            {" · "}
+            <Link
+              href="/report"
+              className="underline underline-offset-2 hover:text-zinc-400"
+            >
+              Health report
             </Link>
             {" · "}
             <Link
