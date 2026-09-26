@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { IS_MAINNET } from "@/lib/solana/connection";
 import { DEV_FEE_WALLET, MAINNET_FEE_WALLET } from "@/lib/solana/fees";
 import {
   FEE_LEDGER_ENDPOINTS,
@@ -71,7 +72,13 @@ export function errorMessage(e: unknown): string {
 }
 
 export function useFeeLedger() {
-  const [cluster, setCluster] = useState<FeeLedgerCluster>("mainnet-beta");
+  // Open the ledger on the network the app itself is running: the
+  // cluster toggle is right there for anyone who wants the other one.
+  // On mainnet (the only production deployment) this is mainnet-beta,
+  // so production behavior is unchanged.
+  const [cluster, setCluster] = useState<FeeLedgerCluster>(
+    IS_MAINNET ? "mainnet-beta" : "devnet"
+  );
   const [rows, setRows] = useState<FeeLedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);

@@ -143,9 +143,9 @@ export default function UnderstandPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-2xl">
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-y-2">
           <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-4">
             <NetworkBadge />
             <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
               ← Back

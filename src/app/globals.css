@@ -4,6 +4,17 @@
  * SOL.repair is always dark, on purpose: dark, minimal, utility/terminal
  * feel. Values are set directly at :root instead of gated behind a
  * prefers-color-scheme media query.
+ *
+ * Button doctrine (audit F10), applied across the app:
+ *   - Brand green #14F195 (black text): the ONLY style for controls that
+ *     start a wallet-signing flow (connect, repair, revoke, unwrap).
+ *     If a button is green, the user's wallet will be asked to sign.
+ *   - Solid white (zinc-100, black text): read-only submits that touch
+ *     no wallet (the explainer's Explain it).
+ *   - Bordered (zinc-700 border, zinc text): navigation and secondary
+ *     actions - page links, cancel, dismiss, retry, disclosure toggles.
+ * Never mix the styles: a green button must never be a navigation, and
+ * a navigation must never be green.
  */
 :root {
   --background: #0a0a0a;

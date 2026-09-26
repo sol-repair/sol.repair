@@ -140,6 +140,13 @@ describe("useFeeLedger loadMore stale-response guard", () => {
 
     const { result } = renderHook(() => useFeeLedger());
 
+    // The hook opens on the app's own network (devnet in this test
+    // environment, audit F9); these scenarios are written against
+    // mainnet, so switch before asserting the mainnet page.
+    await act(async () => {
+      result.current.setCluster("mainnet-beta");
+    });
+
     // Page 1 on mainnet lands: one fee row (m-1), raw cursor m-2.
     await waitFor(() => {
       expect(result.current.rows.map((r) => r.signature)).toEqual(["m-1"]);
@@ -233,6 +240,12 @@ describe("useFeeLedger loadMore duplicate signatures", () => {
     );
 
     const { result } = renderHook(() => useFeeLedger());
+
+    // Same as the stale-response scenario: open on the app's own
+    // network, then switch to the mainnet ledger under test.
+    await act(async () => {
+      result.current.setCluster("mainnet-beta");
+    });
 
     await waitFor(() => {
       expect(result.current.rows.map((r) => r.signature)).toEqual([

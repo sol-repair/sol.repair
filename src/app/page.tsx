@@ -548,7 +548,7 @@ export default function Home() {
               Example scan. Your accounts appear here
             </p>
             <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
-              <div className="flex items-baseline justify-between gap-3">
+              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
                 <span className="flex items-start gap-2">
                   <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
                   <span>7kPqX…9mZ2 · mint 4dTvN…xW5a</span>
@@ -557,7 +557,7 @@ export default function Home() {
                   0.002039 SOL
                 </span>
               </div>
-              <div className="flex items-baseline justify-between gap-3">
+              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
                 <span className="flex items-start gap-2">
                   <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
                   <span>
@@ -571,7 +571,7 @@ export default function Home() {
                   0.002074 SOL
                 </span>
               </div>
-              <div className="flex items-baseline justify-between gap-3">
+              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
                 <span className="flex items-start gap-2">
                   <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
                   <span>5wNtY…vB7u · mint 6hGfA…kL1o</span>
