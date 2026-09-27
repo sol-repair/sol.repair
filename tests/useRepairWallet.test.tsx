@@ -774,4 +774,213 @@ describe("useRepairWallet", () => {
       BigInt(MAX_ACCOUNTS_PER_RUN) * 2039280n
     );
   });
+
+  it("reconciles and retries when an on-chain failure leaves part of the batch already closed", async () => {
+    // A stale scan: the run's first transaction contains an account that
+    // something else closed before the run started. The CloseAccount on
+    // a nonexistent account fails the WHOLE transaction on-chain - and
+    // under error-classification-by-message-shape that dead-stopped the
+    // run with a wasted approval. An on-chain failure is atomic (the
+    // transaction closed nothing itself), so a proper-subset closure is
+    // external evidence, exactly like the expiry path's reconciliation:
+    // rebuild from the accounts the chain still reports open,
+    // recalculate the fee on the retry batch, and ask for one more
+    // approval.
+    const accounts = makeAccounts(20); // one batch of 20
+    const stale = accounts[0].pubkey;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) =>
+        pks.map((pk) => (pk.toBase58() === stale ? null : STILL_OPEN))
+    );
+    let pollCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) {
+        // The transaction lands WITH an on-chain error: the stale
+        // account's close fails the whole atomic transaction.
+        return {
+          value: [
+            {
+              err: { InstructionError: [0, { Custom: 311 }] },
+              confirmationStatus: "confirmed",
+            },
+          ],
+        };
+      }
+      // The reconciled 19-account retry lands cleanly.
+      return { value: [{ err: null, confirmationStatus: "confirmed" }] };
+    });
+
+    const approvals: Array<{ closes: number; feeLamports: bigint | null }> = [];
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      const closes = tx.instructions.filter(
+        (ix) => ix.data.length === 1 && ix.data[0] === 9
+      ).length;
+      const feeIx = tx.instructions.find(
+        (ix) => ix.programId.toBase58() === SystemProgram.programId.toBase58()
+      );
+      approvals.push({
+        closes,
+        feeLamports: feeIx ? feeIx.data.readBigUInt64LE(4) : null,
+      });
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    // Approval 2 is the reconciled retry: the 19 still-open accounts
+    // only, with the fee recalculated on the retry batch only.
+    expect(approvals).toHaveLength(2);
+    expect(approvals[0].closes).toBe(20);
+    expect(approvals[0].feeLamports).toBe(407856n); // floor(20 x 2039280 / 100)
+    expect(approvals[1].closes).toBe(19);
+    expect(approvals[1].feeLamports).toBe(387463n); // floor(19 x 2039280 / 100)
+    // The retry landed; the run reports every account in its slice closed.
+    expect(result.current.status).toBe("done");
+    expect(result.current.closedCount).toBe(20);
+    expect(result.current.recoveredLamports).toBe(20n * 2039280n);
+    expect(pollCalls).toBe(2);
+  });
+
+  it("does not retry an on-chain failure when nothing in the batch closed", async () => {
+    // The other half of the reconcile rule, pinned so it cannot be
+    // broadened blindly: a subset closure is external evidence and
+    // justifies one rebuilt retry; with NOTHING closed the failure cause
+    // is still inside the batch (frozen account, foreign authority,
+    // program error), so the identical batch would fail the same way
+    // again. The run stops with the honest on-chain-failure report
+    // instead of spending a second approval on a doomed retry.
+    const accounts = makeAccounts(20);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [
+        {
+          err: { InstructionError: [0, { Custom: 311 }] },
+          confirmationStatus: "confirmed",
+        },
+      ],
+    });
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(result.current.closedCount).toBe(0);
+    expect(result.current.recoveredLamports).toBe(0n);
+    expect(result.current.error).toMatch(/confirmed on-chain but failed/);
+  });
+
+  it("does not credit accounts from batches it never attempted", async () => {
+    // The two-truths defect: the error path re-read the ENTIRE run
+    // slice and REPLACED the confirmed bookkeeping with that read. A
+    // pre-existing closure in a batch the run never reached was
+    // reported as this run's progress, and landed batches were erased
+    // behind the same stale chain view. Here batch 1 lands (a receipt
+    // on chain), the user rejects batch 2's approval, and batch 3's
+    // stale account was closed before the run ever started - a batch
+    // the run never attempted. The honest report is 20 of 42 - the
+    // landed batch - never 1 of 42, and never 21 with the unattempted
+    // batch's closure folded in.
+    const accounts = makeAccounts(42); // batches: 20 + 20 + 2
+    const stale = accounts[41].pubkey; // batch 3: never attempted
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) =>
+        pks.map((pk) => (pk.toBase58() === stale ? null : STILL_OPEN))
+    );
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      if (signCalls === 2) {
+        throw new Error("User rejected the request.");
+      }
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(2);
+    // Batch 1's receipt is kept AND its progress is counted.
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.closedCount).toBe(20);
+    expect(result.current.recoveredLamports).toBe(20n * 2039280n);
+    expect(result.current.error).toMatch(/stopped after 20 of 42/);
+    expect(result.current.error).toMatch(/You cancelled the remaining approvals/);
+  });
+
+  it("credits a last batch that landed unseen, and keeps the landed batches behind it", async () => {
+    // The self-submission race at the outer catch: batch 1 lands
+    // normally; batch 2's send is rejected (the wallet submitted the
+    // signed transaction itself), and the attempt-level verification
+    // runs while the RPC is down. When the outer catch's read recovers,
+    // the chain shows batch 2's account closed. The report must carry
+    // BOTH batches - 21 of 21 - instead of the whole-slice read's
+    // stale answer replacing the confirmed bookkeeping with whatever
+    // that single read happened to see.
+    const accounts = makeAccounts(21); // batches: 20 + 1
+    let sendCalls = 0;
+    mocks.conn.sendRawTransaction.mockImplementation(async () => {
+      sendCalls += 1;
+      // Batch 2's send only: the wallet submitted the signed transaction
+      // itself, so our own submission is rejected.
+      if (sendCalls === 2) throw new Error("already submitted");
+      return "signed-tx-id";
+    });
+    let verifyCalls = 0;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => {
+        verifyCalls += 1;
+        if (verifyCalls === 1) throw new Error("RPC unavailable");
+        return pks.map((pk) =>
+          pk.toBase58() === accounts[20].pubkey ? null : STILL_OPEN
+        );
+      }
+    );
+
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(2);
+    // Batch 1's confirmed receipt AND batch 2's verified landing.
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.closedCount).toBe(21);
+    expect(result.current.recoveredLamports).toBe(21n * 2039280n);
+    expect(result.current.error).toMatch(/stopped after 21 of 21/);
+  });
 });

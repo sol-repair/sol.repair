@@ -40,6 +40,13 @@
  * actual on-chain state via verifyAccountsClosed(). The chain is the only
  * source of truth.
  *
+ * Stale scans get the same discipline: an on-chain failure whose batch shows
+ * a proper subset already closed is reconciled like an expiry (rebuilt from
+ * the accounts the chain still reports open, fee recalculated on the retry),
+ * and the error report reads only the batch the run was executing - accounts
+ * from batches the run never attempted are never credited to it, and the
+ * report unions the confirmed bookkeeping instead of replacing it.
+ *
  * This hook NEVER signs anything itself. It hands the unsigned transaction to
  * the wallet adapter, which hands it to Phantom for the user to approve.
  */
@@ -178,7 +185,7 @@ async function confirmByPolling(
     });
     const status = statuses.value[0];
     if (status?.err) {
-      throw new FriendlyError(
+      throw new OnChainFailureError(
         "The transaction was confirmed on-chain but failed. Nothing was closed and nothing was lost - run the repair again."
       );
     }
@@ -204,6 +211,13 @@ async function confirmByPolling(
  *  never print it as the main line, so it moves to errorDetail and is
  *  rendered collapsed behind a toggle. */
 class FriendlyError extends Error {}
+
+/** A FriendlyError whose cause is an OBSERVED on-chain failure: the
+ *  transaction landed and its instructions errored. It is atomic - it
+ *  closed nothing itself - so a chain-verified partial closure around
+ *  one is external evidence, and the attempt loop can reconcile the
+ *  retry on it exactly as it does on an expiry. */
+class OnChainFailureError extends FriendlyError {}
 
 export function useRepairWallet() {
   const connection = useRpcConnection();
@@ -286,6 +300,14 @@ export function useRepairWallet() {
         const closedSoFar = new Set<string>();
         const batches = chunkInstructions(runAccounts);
 
+        // The batch under execution when the run stopped. The outer
+        // catch's chain re-read is scoped to it: batches never attempted
+        // keep whatever state they have - a stale scan's pre-existing
+        // closures included - and reading the whole slice is what let
+        // the error report credit accounts this run never touched, or
+        // erase confirmed batches behind a stale chain view.
+        let currentBatch: ClosableAccount[] | null = null;
+
         // feeReady is decided once by the page (does the fee account exist
         // on-chain?) and passed in, so the preview, the confirmation copy,
         // and this transaction can never disagree about the fee.
@@ -314,6 +336,9 @@ export function useRepairWallet() {
                 "The connected wallet changed during the repair. Stopped before signing anything else. Reconnect the original wallet and run the repair again for the remaining accounts."
               );
             }
+            // The batch this run is executing; the outer catch's
+            // verification reads only this (see there).
+            currentBatch = batch;
             let instructions = buildCloseAccountInstructions(
               batch,
               repairOwner
@@ -423,9 +448,20 @@ export function useRepairWallet() {
                     attemptError instanceof Error
                       ? attemptError.message
                       : String(attemptError);
+                  // An on-chain failure is atomic: the transaction closed
+                  // nothing itself, so a proper-subset closure means other
+                  // accounts were closed externally (a stale scan among
+                  // them). Rebuilding from the still-open accounts removes
+                  // the failing element the same way the expiry retry
+                  // does. With NOTHING closed the failure cause is still
+                  // inside the batch, and a rebuilt retry would be the
+                  // same doomed transaction twice.
+                  const onChainFailure =
+                    attemptError instanceof OnChainFailureError;
                   if (
                     attempt < MAX_ATTEMPTS &&
-                    isBlockhashExpiry(message)
+                    (isBlockhashExpiry(message) ||
+                      (onChainFailure && closedPubkeys.length > 0))
                   ) {
                     // A transaction is atomic, so this batch cannot have
                     // partially landed on its own - accounts the chain
@@ -499,8 +535,19 @@ export function useRepairWallet() {
             // The UI must not claim "sent" while the chain is being asked
             // what actually landed.
             setRunState({ status: "checking" });
-            const verified = await verifyAccountsClosed(connection, runAccounts);
-            closedPubkeys = verified.closedPubkeys;
+            // Scope the re-read to the batch the run was executing - the
+            // only slice this run's work window can speak for. An account
+            // closed inside it may be this run's self-submitted
+            // transaction (the race this catch exists for); an account
+            // closed anywhere else was never this run's work, however
+            // the chain looks.
+            if (currentBatch) {
+              const verified = await verifyAccountsClosed(
+                connection,
+                currentBatch
+              );
+              closedPubkeys = verified.closedPubkeys;
+            }
           } catch {
             // Verification itself failed. Fall back to the run's own
             // confirmed bookkeeping below instead of reporting zero
@@ -508,11 +555,13 @@ export function useRepairWallet() {
             verifyFailed = true;
           }
 
-          // When the chain could not be asked, the run's receipts are the
-          // honest source: closedSoFar only ever grew from batches whose
-          // confirmation resolved (or whose on-chain verification said
-          // closed), each with a kept signature.
-          const reportClosed = verifyFailed ? [...closedSoFar] : closedPubkeys;
+          // The union, not the replacement: closedSoFar is this run's
+          // confirmed bookkeeping (batches whose confirmation resolved,
+          // each with a kept signature); the scoped chain read can only
+          // add the executed batch's verified closures on top of it.
+          const reportClosed = verifyFailed
+            ? [...closedSoFar]
+            : [...new Set([...closedSoFar, ...closedPubkeys])];
           const closed = reportClosed.length;
           const partial = closed > 0;
 
