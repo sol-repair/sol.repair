@@ -95,6 +95,14 @@ wallet owner. Offered for both empty and funded wrapped-SOL accounts the scan
 confirms as native, one account per approval, with no service fee: the money
 recovered is the user's own.
 
+Some Token-2022 accounts hold more lamports than they need: a balance
+above the account's current rent-exempt reserve. An excess-lamports
+withdrawal moves that surplus straight to your wallet and leaves the
+account open at exactly its reserve. Nothing is closed, so there is no
+service fee - the lamports are your own principal. It is offered for
+accounts the scan confirms as non-native Token-2022, including frozen
+ones, because the on-chain instruction does not check frozen state.
+
 ## Running it locally
 
 Node.js 20 or newer.
@@ -126,9 +134,12 @@ npm test
 ```
 
 The suite covers the account eligibility rules, transaction building, fee
-math, the repair flow, the fee-ledger decoder, and the transaction
-explainer's instruction and left-behind analysis. It runs against local
-fixtures, never the live chain, so it is safe to run anywhere.
+math, the repair flow, the per-item action flows (revoke, unwrap, burn,
+excess withdrawal) and the shared transaction lifecycle they run on -
+fresh-read gates, expiry corroboration, the cross-action mutex - the
+fee-ledger decoder, and the transaction explainer's instruction and
+left-behind analysis. It runs against local fixtures, never the live
+chain, so it is safe to run anywhere.
 
 ## Tech stack
 
@@ -146,11 +157,13 @@ isolated under src/lib/solana/, so moving to v2 later won't mean a rewrite.
 ```
 src/app/          Next.js App Router pages and layout
 src/components/   UI components (wallet button, network badge)
-src/hooks/        React hooks for the scan and repair flow
+src/hooks/        React hooks for the scan, the repair, and the per-item
+                  action flows
 src/lib/security/ Content security policy builder
 src/lib/solana/   Solana domain logic: scanning, eligibility, transactions,
-                  decoding, and the plain-language explanation of a
-                  transaction's instructions and what they leave behind
+                  decoding, the shared transaction lifecycle beneath the
+                  per-item actions, and the plain-language explanation of
+                  a transaction's instructions and what they leave behind
 scripts/          Operator tooling: the fee-ledger audit script
 tests/            Vitest suite: units, chain fixtures, page and hook tests
 ```
