@@ -14,7 +14,7 @@ import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import bs58 from "bs58";
 
 import { acquireAction, heldAction, releaseAction } from "../src/lib/actionMutex";
-import { useBurnDust } from "../src/hooks/useBurnDust";
+import { useBurnDust, type BurnState } from "../src/hooks/useBurnDust";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -45,6 +45,7 @@ import { useRpcConnection } from "@/hooks/useRpcConnection";
 void useRpcConnection;
 
 const OWNER = Keypair.generate();
+const SWITCHED = Keypair.generate();
 const ACCOUNT = Keypair.generate().publicKey;
 const MINT = Keypair.generate().publicKey;
 
@@ -423,4 +424,311 @@ describe("useBurnDust lifecycle", () => {
     expect(result.current.accountPresentAfterAction).toBe(false);
     expect(heldAction()).toBeNull();
   }, 30000);
+});
+
+/**
+ * The §8.5 transition matrix, backfilled to match the useUnwrapNative /
+ * useRevokeDelegate suites, which pin the same shared lifecycle for the
+ * older flows. Only the RPC boundary and the wallet adapter are mocked;
+ * the hook under test is the real one. Fake timers drive the poll and
+ * corroboration-space intervals, so every branch runs instantly: the
+ * unanimous corroboration re-sign, the asymmetric drift block, the
+ * late-status win, the mid-corroboration on-chain error, the bounded
+ * second-expiry terminals, the mid-flight wallet switch, the
+ * processed-status totality rule, and the lock's release points.
+ */
+describe("the §8.5 evidence standard, the wallet switch, and remaining terminals (fake timers)", () => {
+  const WINDOW = 1000;
+  const UNOBSERVED = { value: [null] };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Wipe unconsumed Once-queues from earlier tests: a leftover queued
+    // answer would silently shift every later read/status sequence.
+    mocks.conn.getParsedAccountInfo.mockReset();
+    mocks.conn.getLatestBlockhash.mockReset();
+    mocks.conn.sendRawTransaction.mockReset();
+    mocks.conn.getSignatureStatuses.mockReset();
+    mocks.conn.getBlockHeight.mockReset();
+    mocks.conn.getLatestBlockhash.mockResolvedValue({
+      blockhash: "BLOCKHASH",
+      lastValidBlockHeight: WINDOW,
+      feeCalculator: {},
+    });
+    mocks.conn.sendRawTransaction.mockResolvedValue("SIG");
+    mocks.conn.getBlockHeight.mockResolvedValue(WINDOW - 10);
+  });
+
+  afterEach(() => {
+    // The module-scoped mutex outlives a test; never leak a hold into
+    // the next test (the unresolved terminal intentionally keeps it).
+    releaseAction("burn");
+    vi.useRealTimers();
+  });
+
+  function renderBurn() {
+    return renderHook(() => useBurnDust());
+  }
+
+  async function flushUntil(
+    result: { current: BurnState | undefined },
+    until: (status: BurnState["status"]) => boolean,
+    maxMs = 240_000
+  ) {
+    for (let elapsed = 0; elapsed <= maxMs; elapsed += 250) {
+      const current = result.current;
+      if (current && until(current.status)) return;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+    }
+    throw new Error(
+      `flow did not reach its terminal state; status=${result.current?.status}`
+    );
+  }
+
+  it("re-signs once when every corroboration read is unanimous", async () => {
+    mocks.conn.getSignatureStatuses
+      .mockResolvedValueOnce(UNOBSERVED) // resolve poll 1 (trigger only)
+      .mockResolvedValueOnce(UNOBSERVED) // corroboration status 1
+      .mockResolvedValueOnce(UNOBSERVED) // corroboration status 2
+      .mockResolvedValue(confirmedStatus()); // after the re-sign
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1) // past the window
+      .mockResolvedValueOnce(WINDOW + 2) // still past, second check
+      .mockResolvedValue(WINDOW + 1);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(gateRead()) // corroboration read 1
+      .mockResolvedValueOnce(gateRead()) // read 2: identical lamports
+      .mockResolvedValue({ value: null }); // verify after the re-sign: gone
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(result.current.accountPresentAfterAction).toBe(false);
+    expect(result.current.signatures).toHaveLength(2);
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(2);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(mocks.conn.getLatestBlockhash).toHaveBeenCalledTimes(2);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("lamports drift between the corroboration reads blocks the re-sign (asymmetric rule)", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(gateRead()) // corroboration read 1
+      .mockResolvedValue(readShape({ lamports: 999999 })); // read 2: drift
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "unverified");
+    expect(result.current.outcome).toBe("unresolved-outcome");
+    expect(result.current.errorDetail).toContain(
+      "lamports changed between the two corroboration reads"
+    );
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(result.current.actionInFlight).toBe(true);
+    expect(heldAction()).toBe("burn");
+    // Dismissal is the only release from the unresolved terminal.
+    await act(async () => {
+      result.current.reset();
+    });
+    expect(heldAction()).toBeNull();
+  });
+
+  it("never re-signs while the blockhash window is still open", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight.mockResolvedValue(WINDOW - 10);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(gateRead());
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      // Let a few resolution rounds run inside the window.
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(result.current.status).toBe("confirming");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    // The transaction then lands and resolves normally.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    mocks.conn.getParsedAccountInfo.mockResolvedValue({ value: null });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("a status resolving mid-corroboration wins over the re-sign", async () => {
+    mocks.conn.getSignatureStatuses
+      .mockResolvedValueOnce(UNOBSERVED) // resolve poll 1
+      .mockResolvedValueOnce(UNOBSERVED) // corroboration status 1
+      .mockResolvedValue(confirmedStatus()); // corroboration status 2
+    mocks.conn.getBlockHeight.mockResolvedValueOnce(WINDOW + 1);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(gateRead()) // corroboration read 1
+      .mockResolvedValue({ value: null }); // verify: gone
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("a mid-corroboration on-chain error resolves to on-chain-failure", async () => {
+    mocks.conn.getSignatureStatuses
+      .mockResolvedValueOnce(UNOBSERVED) // resolve poll 1
+      .mockResolvedValueOnce(UNOBSERVED) // corroboration status 1
+      .mockResolvedValue({
+        value: [
+          { err: "InstructionError", confirmationStatus: "confirmed" },
+        ],
+      }); // corroboration status 2
+    mocks.conn.getBlockHeight.mockResolvedValueOnce(WINDOW + 1);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(gateRead()) // corroboration read 1
+      .mockResolvedValue(gateRead()); // after-observation: present
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("on-chain-failure");
+    expect(result.current.accountPresentAfterAction).toBe(true);
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("stops with an honest expired report after a second corroborated expiry", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2)
+      .mockResolvedValue(WINDOW + 1);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(gateRead());
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("expired");
+    expect(result.current.error).toContain("expired again");
+    expect(result.current.error).toContain("the account still existed");
+    expect(result.current.accountPresentAfterAction).toBe(true);
+    // Exactly one re-sign: two attempts, no third.
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(2);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("the second expiry finding the account gone routes to close-unattributed, never success", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2)
+      .mockResolvedValue(WINDOW + 1);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(gateRead()) // first corroboration read 1
+      .mockResolvedValueOnce(gateRead()) // first corroboration read 2
+      .mockResolvedValueOnce(gateRead()) // second corroboration read 1
+      .mockResolvedValueOnce(gateRead()) // second corroboration read 2
+      .mockResolvedValue({ value: null }); // second-expiry observation: gone
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("close-unattributed");
+    expect(result.current.accountPresentAfterAction).toBe(false);
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(2);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("stops with a changed-wallet report when the wallet switches mid-flight", async () => {
+    let resolveGate!: (read: unknown) => void;
+    mocks.conn.getParsedAccountInfo.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGate = resolve;
+        })
+    );
+    const { result, rerender } = renderBurn();
+    act(() => {
+      void result.current.burn(CANDIDATE, false);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // The wallet switches while the gate read is pending.
+    mocks.wallet.publicKey = SWITCHED.publicKey;
+    rerender();
+    await act(async () => {
+      resolveGate(gateRead());
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.error).toContain(
+      "The connected wallet changed. Stopped before signing anything."
+    );
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+    expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
+    expect(heldAction()).toBeNull();
+  });
+
+  it("a confirmed burn whose follow-up read fails stays unverified with the receipt", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockRejectedValue(new Error("rpc down")); // verify reads fail
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "unverified");
+    expect(result.current.outcome).toBe("confirmed-verification-unavailable");
+    expect(result.current.accountPresentAfterAction).toBeNull();
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.actionInFlight).toBe(false);
+    // Confirmed-landed means only the read is missing: auto-release.
+    expect(heldAction()).toBeNull();
+  });
+
+  it("a processed-only status routes to verification instead of keep-polling", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: null, confirmationStatus: "processed" }],
+    });
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValue({ value: null }); // verify: gone
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
 });
