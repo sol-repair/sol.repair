@@ -314,6 +314,22 @@ export async function resolveTransaction<D = never>(
   }
 }
 
+/** A spent blockhash surfaces with several wordings: "Blockhash not
+ *  found" when the RPC rejects the submission outright, "Signature
+ *  ... has expired: block height exceeded." when the transaction dies
+ *  while awaiting confirmation, and the wallets' "Transaction expired" /
+ *  "TransactionExpiredBlockheightExceededError" refusals when their
+ *  pre-prompt simulation outlived the window and they refuse to sign
+ *  at all. All of them mean the same thing — the transaction is dead
+ *  on arrival and the only fix is a fresh blockhash and a new
+ *  signature. Used by classifySignRefusal at the sign stage.
+ *  useRepairWallet keeps its own copy deliberately: the §10.7 guard
+ *  freezes that hook's import surface, so the shape is duplicated
+ *  exactly twice — here and there — and nowhere else. */
+function isBlockhashExpiry(message: string): boolean {
+  return /blockhash|block height|blockheight|expired/i.test(message);
+}
+
 /** The sign-stage refusal classes (spec §8.5): message shapes are used
  *  ONLY where no signature exists and nothing can land. A rejection is
  *  a cancelled nothing-sent action; an expiry-shaped refusal is
@@ -325,7 +341,7 @@ export function classifySignRefusal(error: unknown): SignRefusal | null {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
   if (lower.includes("rejected")) return "rejected";
-  if (/blockhash|block height|blockheight|expired/i.test(message)) {
+  if (isBlockhashExpiry(message)) {
     return "expired-refusal";
   }
   return null;

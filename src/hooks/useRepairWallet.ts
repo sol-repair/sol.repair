@@ -148,7 +148,9 @@ const MAX_ATTEMPTS = 2;
  *  "TransactionExpiredBlockheightExceededError" when its pre-prompt
  *  simulation outlived the window and it refuses to sign at all. All
  *  of them must trigger the fresh-blockhash retry; matching only some
- *  of these shapes historically dead-stopped the repair on the rest. */
+ *  of these shapes historically dead-stopped the repair on the rest.
+ *  Local by the §10.7 import-surface guard; actionLifecycle's
+ *  classifySignRefusal keeps the same shape for the sign stage. */
 function isBlockhashExpiry(message: string): boolean {
   return /blockhash|block height|blockheight|expired/i.test(message);
 }
@@ -409,7 +411,7 @@ export function useRepairWallet() {
                 await confirmByPolling(
                   connection,
                   sentSignature,
-                  transaction.lastValidBlockHeight!
+                  transaction.lastValidBlockHeight
                 );
 
                 batchLanded = true;
@@ -521,9 +523,9 @@ export function useRepairWallet() {
           // already landed are still repaired; report that honestly instead
           // of all-or-nothing.
           const message = err instanceof Error ? err.message : String(err);
-          const rejected =
-            message.toLowerCase().includes("user rejected") ||
-            message.toLowerCase().includes("rejected");
+          // "user rejected" is covered by the substring match; one
+          // check is enough.
+          const rejected = message.toLowerCase().includes("rejected");
           // A blockhash expiry is a dead transaction, never a lost one.
           const expired = isBlockhashExpiry(message);
 

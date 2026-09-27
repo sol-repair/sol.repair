@@ -900,6 +900,33 @@ describe("the §8.11 action mutex across three flows", () => {
     releaseAction("revoke");
   });
 
+  it("keeps the failed submission's diagnostic on the unresolved card", async () => {
+    // The send error classifies nothing (the evidence loop asks the
+    // chain), but when the outcome genuinely cannot be established the
+    // raw submission failure belongs on the uncertainty card's detail.
+    mocks.conn.sendRawTransaction.mockRejectedValue(new Error("boom"));
+    mocks.conn.getSignatureStatuses.mockRejectedValue(new Error("down"));
+    mocks.conn.getBlockHeight.mockResolvedValue(null);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(parsedAccount());
+    const { result } = renderUnwrap();
+    await act(async () => {
+      void result.current.unwrap(CANDIDATE);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "unverified");
+    expect(result.current.outcome).toBe("unresolved-outcome");
+    expect(result.current.errorDetail).toContain(
+      "the submission itself failed with: boom"
+    );
+    expect(result.current.errorDetail).toContain(
+      "the RPC could not be reached"
+    );
+    // Dismissal still releases the hold.
+    act(() => {
+      result.current.reset();
+    });
+    expect(heldAction()).toBeNull();
+  });
 });
 
 function closableAccount(): ClosableAccount {

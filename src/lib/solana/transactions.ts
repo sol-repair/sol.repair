@@ -29,11 +29,23 @@ import {
  * @param instructions  The CloseAccount instructions to include (<= 20).
  * @returns             An unsigned Transaction ready for signing.
  */
+/**
+ * A transaction whose blockhash lifetime is guaranteed to be set:
+ * buildTransaction pins it from getLatestBlockhash, and every caller
+ * needs it to bound its confirmation polling. The field is optional on
+ * web3.js's Transaction, so the guarantee is stated once here — at the
+ * single site that constructs the options — instead of as a non-null
+ * assertion at every call site.
+ */
+export type BlockhashPinnedTransaction = Transaction & {
+  lastValidBlockHeight: number;
+};
+
 export async function buildTransaction(
   connection: Connection,
   payer: PublicKey,
   instructions: TransactionInstruction[]
-): Promise<Transaction> {
+): Promise<BlockhashPinnedTransaction> {
   // Confirmed, not the finalized default: a finalized blockhash is
   // several seconds behind the tip (further under congestion), so the
   // transaction's approval window is already partly spent before the
@@ -48,7 +60,9 @@ export async function buildTransaction(
     lastValidBlockHeight,
   }).add(...instructions);
 
-  return transaction;
+  // The constructor stores the options above, so the intersection's
+  // extra requirement holds by construction.
+  return transaction as BlockhashPinnedTransaction;
 }
 
 /**

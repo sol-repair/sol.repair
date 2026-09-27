@@ -814,4 +814,27 @@ describe("the §8.5 evidence standard, the wallet switch, and remaining terminal
     releaseAction("repair");
   });
 
+  it("keeps the failed submission's diagnostic on the unresolved card", async () => {
+    // The send error classifies nothing (the evidence loop asks the
+    // chain), but when the outcome genuinely cannot be established the
+    // raw submission failure belongs on the uncertainty card's detail.
+    mocks.conn.sendRawTransaction.mockRejectedValue(new Error("boom"));
+    mocks.conn.getSignatureStatuses.mockRejectedValue(new Error("rpc down"));
+    mocks.conn.getBlockHeight.mockResolvedValue(5000);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(gateRead());
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "unverified");
+    expect(result.current.outcome).toBe("unresolved-outcome");
+    expect(result.current.errorDetail).toContain(
+      "the submission itself failed with: boom"
+    );
+    await act(async () => {
+      result.current.reset();
+    });
+    expect(heldAction()).toBeNull();
+  });
 });

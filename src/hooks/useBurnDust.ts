@@ -417,11 +417,18 @@ export function useBurnDust() {
             note: null,
           }));
 
-          const lastValidBlockHeight = unsigned.lastValidBlockHeight!;
+          const lastValidBlockHeight = unsigned.lastValidBlockHeight;
+          let sendFailure: string | null = null;
           try {
             await connection.sendRawTransaction(signed.serialize());
-          } catch {
-            // fall through to the evidence loop
+          } catch (sendError) {
+            // The error classifies nothing (the evidence loop asks the
+            // chain), but the raw text is kept for the one terminal
+            // that reports genuine uncertainty.
+            sendFailure =
+              sendError instanceof Error
+                ? sendError.message
+                : String(sendError);
           }
 
           setRunState({ status: "confirming" });
@@ -532,7 +539,9 @@ export function useBurnDust() {
             setRunState({
               status: "unverified",
               outcome: "unresolved-outcome",
-              errorDetail: resolution.detail,
+              errorDetail: sendFailure
+                ? `${resolution.detail}; the submission itself failed with: ${sendFailure}`
+                : resolution.detail,
               error:
                 "We could not verify whether the burn landed. The transaction's outcome could not be established. It may still land. Nothing more will be sent automatically.",
             });
