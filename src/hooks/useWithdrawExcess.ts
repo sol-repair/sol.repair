@@ -329,6 +329,30 @@ export function useWithdrawExcess() {
     statusRef.current = state.status;
   }, [state.status]);
 
+  // The unresolved-outcome hold is owned by THIS instance: set when the
+  // action acquires the mutex, cleared when that action's finally (or
+  // the dismissal reset) releases it. The unmount cleanup below refuses
+  // to release any hold this instance did not acquire.
+  const holdsLockRef = useRef(false);
+  // Set once the component unmounts (client-side navigation). An action
+  // still running past the unmount can no longer show a dismissal card,
+  // so its unresolved terminal must not keep the mutex.
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      if (
+        holdsLockRef.current &&
+        statusRef.current === "unverified" &&
+        heldAction() === "excess"
+      ) {
+        releaseAction("excess");
+        holdsLockRef.current = false;
+      }
+    };
+  }, []);
+
   const withdraw = useCallback(
     async (candidate: ExcessCandidate) => {
       if (withdrawInFlight.current) return;
@@ -354,6 +378,7 @@ export function useWithdrawExcess() {
           });
           return;
         }
+        holdsLockRef.current = true;
 
         const actionOwner = wallet.publicKey;
         const signer = wallet.signTransaction;
@@ -702,8 +727,13 @@ export function useWithdrawExcess() {
           errorDetail: friendly ? null : message,
         }));
       } finally {
-        if (!holdLockForDismissal) {
+        // The unresolved hold survives only while the dismissal card is
+        // mounted. Past an unmount no card can ever be shown, so the
+        // hold releases there instead of orphaning the mutex against
+        // the remounted page.
+        if (!holdLockForDismissal || unmountedRef.current) {
           releaseAction("excess");
+          holdsLockRef.current = false;
         }
         withdrawInFlight.current = false;
       }
@@ -714,6 +744,7 @@ export function useWithdrawExcess() {
   const reset = useCallback(() => {
     if (statusRef.current === "unverified" && heldAction() === "excess") {
       releaseAction("excess");
+      holdsLockRef.current = false;
     }
     setState(INITIAL_STATE);
   }, []);

@@ -19,8 +19,13 @@
  * action's `finally`; the one terminal that may still be in flight
  * (`unverified / unresolved-outcome`) holds the lock until the user
  * explicitly dismisses it — the hook calls releaseAction on that
- * dismissal. `releaseAction` refuses to release a hold owned by the
- * other kind, so a bug in one hook cannot free the other's lock.
+ * dismissal — or until the hook unmounts (client-side navigation),
+ * whichever comes first: past an unmount no dismissal card exists,
+ * and keeping the hold would lock out the remounted page exactly like
+ * the page reload this module's scope already treats as a fresh
+ * start. `releaseAction` refuses to release a hold owned by the
+ * other kind, so a bug in one hook cannot free the other's lock; the
+ * hooks' unmount release is likewise guarded to their own hold.
  *
  * Scope is the page instance: reloading the page abandons all
  * in-flight state and nothing auto-acts afterwards — the same

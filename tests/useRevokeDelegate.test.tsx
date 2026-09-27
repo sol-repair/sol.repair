@@ -859,6 +859,71 @@ describe("the §8.12 action mutex", () => {
     });
     expect(heldAction()).toBeNull();
   });
+
+  it("releases the unresolved hold on unmount so a remounted page is not locked out", async () => {
+    mocks.conn.getSignatureStatuses.mockRejectedValue(new Error("down"));
+    mocks.conn.getBlockHeight.mockResolvedValue(null);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(parsedAccount());
+    const first = renderRevoke();
+    await act(async () => {
+      void first.result.current.revoke(DELEGATION);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(first.result, (s) => s === "unverified");
+    expect(first.result.current.outcome).toBe("unresolved-outcome");
+    expect(heldAction()).toBe("revoke");
+
+    // Client-side navigation: the instance unmounts WITHOUT the
+    // dismissal the hold waits for.
+    first.unmount();
+    // The hold must not survive into the remounted page.
+    expect(heldAction()).toBeNull();
+
+    // The remounted page is fully usable: the gate finds the delegate
+    // already absent and the action reaches its done terminal.
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(
+      parsedAccount({ delegate: null })
+    );
+    const second = renderRevoke();
+    await act(async () => {
+      void second.result.current.revoke(DELEGATION);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(second.result, (s) => s === "done");
+    expect(second.result.current.outcome).toBe("already-revoked");
+  });
+
+  it("releases the hold when the unresolved terminal arrives after an unmount", async () => {
+    mocks.conn.getSignatureStatuses.mockRejectedValue(new Error("down"));
+    mocks.conn.getBlockHeight.mockResolvedValue(null);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(parsedAccount());
+    const { result, unmount } = renderRevoke();
+    await act(async () => {
+      void result.current.revoke(DELEGATION);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Still genuinely in flight: the unmount itself must NOT drop the
+    // lock — a running action keeps it until its own finally.
+    expect(heldAction()).toBe("revoke");
+    unmount();
+    expect(heldAction()).toBe("revoke");
+    // The action reaches its unresolved terminal after the unmount. No
+    // dismissal card can ever be shown, so keeping the hold would
+    // orphan the mutex: it releases at the terminal instead.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(heldAction()).toBeNull();
+  });
+
+  it("never releases another kind's hold on unmount", async () => {
+    expect(acquireAction("unwrap")).toBe(true);
+    const { unmount } = renderRevoke();
+    unmount();
+    expect(heldAction()).toBe("unwrap");
+    releaseAction("unwrap");
+  });
+
 });
 
 function closableAccount(): ClosableAccount {

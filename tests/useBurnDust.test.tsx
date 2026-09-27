@@ -731,4 +731,87 @@ describe("the §8.5 evidence standard, the wallet switch, and remaining terminal
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
   });
 
+  it("releases the unresolved hold on unmount so a remounted page is not locked out", async () => {
+    // Drive to the unresolved terminal: every status query fails while
+    // the block height is readable past the window.
+    mocks.conn.getSignatureStatuses.mockRejectedValue(new Error("rpc down"));
+    mocks.conn.getBlockHeight.mockResolvedValue(5000);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(gateRead());
+    const first = renderBurn();
+    await act(async () => {
+      void first.result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(first.result, (s) => s === "unverified");
+    expect(first.result.current.outcome).toBe("unresolved-outcome");
+    expect(heldAction()).toBe("burn");
+
+    // Client-side navigation: the instance unmounts WITHOUT the
+    // dismissal the hold waits for.
+    first.unmount();
+    // The hold must not survive into the remounted page.
+    expect(heldAction()).toBeNull();
+
+    // The remounted page is fully usable: a fresh action runs to a
+    // terminal instead of the action-conflict dead end.
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(
+      readShape({
+        data: {
+          parsed: {
+            info: {
+              mint: MINT.toBase58(),
+              owner: OWNER.publicKey.toBase58(),
+              tokenAmount: {
+                amount: "0",
+                decimals: 6,
+                uiAmount: 0,
+                uiAmountString: "0",
+              },
+              state: "initialized",
+              isNative: false,
+            },
+          },
+        },
+      })
+    );
+    const second = renderBurn();
+    await act(async () => {
+      void second.result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(second.result, (s) => s === "done");
+    expect(second.result.current.outcome).toBe("already-empty");
+  });
+
+  it("releases the hold when the unresolved terminal arrives after an unmount", async () => {
+    mocks.conn.getSignatureStatuses.mockRejectedValue(new Error("rpc down"));
+    mocks.conn.getBlockHeight.mockResolvedValue(5000);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(gateRead());
+    const { result, unmount } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Still genuinely in flight: the unmount itself must NOT drop the
+    // lock — a running action keeps it until its own finally.
+    expect(heldAction()).toBe("burn");
+    unmount();
+    expect(heldAction()).toBe("burn");
+    // The action reaches its unresolved terminal after the unmount. No
+    // dismissal card can ever be shown, so keeping the hold would
+    // orphan the mutex: it releases at the terminal instead.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(heldAction()).toBeNull();
+  });
+
+  it("never releases another kind's hold on unmount", async () => {
+    expect(acquireAction("repair")).toBe(true);
+    const { unmount } = renderBurn();
+    unmount();
+    expect(heldAction()).toBe("repair");
+    releaseAction("repair");
+  });
+
 });
