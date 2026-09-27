@@ -21,10 +21,19 @@ import { useWallet } from "@solana/wallet-adapter-react";
 
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import bs58 from "bs58";
-import type { Connection, Transaction } from "@solana/web3.js";
+import type { Transaction } from "@solana/web3.js";
 
 import { acquireAction, heldAction, releaseAction } from "@/lib/actionMutex";
 import { buildTransaction } from "@/lib/solana/transactions";
+import {
+  classifySignRefusal,
+  corroborateNonLanding,
+  RESOLVE_POLL_INTERVAL_MS,
+  resolveTransaction,
+  sleep,
+  type CorroborationRead,
+  type CorroborationVerdict,
+} from "@/lib/solana/actionLifecycle";
 import {
   buildWithdrawExcessInstruction,
   evaluateExcessGate,
@@ -91,214 +100,14 @@ const INITIAL_STATE: ExcessState = {
   errorDetail: null,
 };
 
+/** The read shape the corroboration judge narrows to. */
+type ExcessReadAccount = Extract<ExcessRead, { kind: "read" }>;
+
 class FriendlyError extends Error {
   outcome: ExcessOutcome;
   constructor(message: string, outcome: ExcessOutcome = "cancelled") {
     super(message);
     this.outcome = outcome;
-  }
-}
-
-const RESOLVE_POLL_INTERVAL_MS = 1500;
-const MAX_STATUS_RPC_ATTEMPTS = 3;
-const MAX_FAILED_ROUNDS = 3;
-
-const sleep = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-type StatusOutcome =
-  | { kind: "resolved"; err: unknown }
-  | { kind: "unobserved" }
-  | { kind: "rpc-failed" };
-
-async function querySignatureStatus(
-  connection: Connection,
-  signature: string
-): Promise<StatusOutcome> {
-  for (let attempt = 1; attempt <= MAX_STATUS_RPC_ATTEMPTS; attempt++) {
-    try {
-      const statuses = await connection.getSignatureStatuses([signature], {
-        searchTransactionHistory: false,
-      });
-      const status = statuses.value[0];
-      if (!status) return { kind: "unobserved" };
-      return { kind: "resolved", err: status.err ?? null };
-    } catch {
-      if (attempt < MAX_STATUS_RPC_ATTEMPTS) {
-        await sleep(RESOLVE_POLL_INTERVAL_MS);
-      }
-    }
-  }
-  return { kind: "rpc-failed" };
-}
-
-async function readBlockHeight(connection: Connection): Promise<number | null> {
-  try {
-    return await connection.getBlockHeight({ commitment: "confirmed" });
-  } catch {
-    return null;
-  }
-}
-
-type Corroboration =
-  | { type: "standard-met" }
-  | { type: "resolved"; err: unknown }
-  | { type: "account-gone" }
-  | { type: "cannot-establish"; detail: string };
-
-/**
- * The non-landing evidence standard, with the withdrawal substitution:
- * the account is EXPECTED to remain, so presence alone is not evidence
- * of non-landing — the lamports figure must be identical across the
- * two spaced reads (a landed withdrawal changes it).
- */
-async function corroborateNonLanding(
-  connection: Connection,
-  signature: string,
-  lastValidBlockHeight: number,
-  candidate: ExcessCandidate
-): Promise<Corroboration> {
-  const readOnce = async (): Promise<ExcessRead | { kind: "rpc-failed" }> => {
-    try {
-      return await readExcessState(connection, candidate.pubkey);
-    } catch {
-      return { kind: "rpc-failed" };
-    }
-  };
-
-  const status1 = await querySignatureStatus(connection, signature);
-  if (status1.kind === "resolved") {
-    return { type: "resolved", err: status1.err };
-  }
-  if (status1.kind === "rpc-failed") {
-    return {
-      type: "cannot-establish",
-      detail: "the signature status could not be read",
-    };
-  }
-
-  const read1 = await readOnce();
-  if (read1.kind === "rpc-failed") {
-    return { type: "cannot-establish", detail: "the account read failed" };
-  }
-  if (read1.kind === "missing") {
-    return { type: "account-gone" };
-  }
-
-  await sleep(RESOLVE_POLL_INTERVAL_MS);
-
-  const status2 = await querySignatureStatus(connection, signature);
-  if (status2.kind === "resolved") {
-    return { type: "resolved", err: status2.err };
-  }
-  if (status2.kind === "rpc-failed") {
-    return {
-      type: "cannot-establish",
-      detail: "the signature status could not be read",
-    };
-  }
-
-  const height2 = await readBlockHeight(connection);
-  if (height2 === null) {
-    return {
-      type: "cannot-establish",
-      detail: "the block height could not be read",
-    };
-  }
-  if (height2 <= lastValidBlockHeight) {
-    return {
-      type: "cannot-establish",
-      detail: "the block height moved back inside the transaction window",
-    };
-  }
-
-  const read2 = await readOnce();
-  if (read2.kind === "rpc-failed") {
-    return { type: "cannot-establish", detail: "the account read failed" };
-  }
-  if (read2.kind === "missing") {
-    return { type: "account-gone" };
-  }
-  if (
-    read2.lamports !== read1.lamports ||
-    read2.excess !== read1.excess
-  ) {
-    return {
-      type: "cannot-establish",
-      detail:
-        "the account's lamports changed between the two corroboration reads, so its continuity is not established",
-    };
-  }
-
-  return { type: "standard-met" };
-}
-
-type Resolution =
-  | { type: "confirmed" }
-  | { type: "on-chain-error" }
-  | { type: "expired-standard-met" }
-  | { type: "account-gone" }
-  | { type: "unresolved"; detail: string };
-
-async function resolveTransaction(
-  connection: Connection,
-  signature: string,
-  lastValidBlockHeight: number,
-  candidate: ExcessCandidate,
-  setRunState: (patch: Partial<ExcessState>) => void
-): Promise<Resolution> {
-  let failedRounds = 0;
-  for (;;) {
-    const status = await querySignatureStatus(connection, signature);
-    if (status.kind === "resolved") {
-      return status.err !== null
-        ? { type: "on-chain-error" }
-        : { type: "confirmed" };
-    }
-
-    const height = await readBlockHeight(connection);
-    if (height !== null && height > lastValidBlockHeight) {
-      if (status.kind === "unobserved") {
-        setRunState({
-          status: "confirming",
-          note: "Checking the chain for what actually landed...",
-        });
-        const verdict = await corroborateNonLanding(
-          connection,
-          signature,
-          lastValidBlockHeight,
-          candidate
-        );
-        switch (verdict.type) {
-          case "standard-met":
-            return { type: "expired-standard-met" };
-          case "resolved":
-            return verdict.err !== null
-              ? { type: "on-chain-error" }
-              : { type: "confirmed" };
-          case "account-gone":
-            return { type: "account-gone" };
-          case "cannot-establish":
-            return { type: "unresolved", detail: verdict.detail };
-        }
-      }
-    }
-
-    const unresolvable =
-      status.kind === "rpc-failed" ||
-      (status.kind === "unobserved" && height === null);
-    if (unresolvable) {
-      failedRounds += 1;
-      if (failedRounds >= MAX_FAILED_ROUNDS) {
-        return {
-          type: "unresolved",
-          detail: "the RPC could not be reached to establish the outcome",
-        };
-      }
-    } else {
-      failedRounds = 0;
-    }
-    await sleep(RESOLVE_POLL_INTERVAL_MS);
   }
 }
 
@@ -457,6 +266,40 @@ export function useWithdrawExcess() {
         let refusalRetryUsed = false;
         let lastResolutionNote: string | null = null;
 
+        // The §8.5 corroboration policy for one read, with the
+        // withdrawal substitution: the account is EXPECTED to remain,
+        // so presence alone is not evidence of non-landing — the
+        // lamports AND excess figures must be identical across the two
+        // spaced reads (a landed withdrawal changes them).
+        const readOnce = async (): Promise<
+          CorroborationRead<ExcessReadAccount>
+        > => {
+          try {
+            const read = await readExcessState(connection, candidate.pubkey);
+            if (read.kind === "read") return { kind: "read", value: read };
+            if (read.kind === "missing") return { kind: "missing" };
+            return { kind: "unusable" };
+          } catch {
+            return { kind: "unusable" };
+          }
+        };
+        const judge = (
+          read: ExcessReadAccount,
+          prior: ExcessReadAccount | null
+        ): CorroborationVerdict | null => {
+          if (
+            prior &&
+            (prior.lamports !== read.lamports || prior.excess !== read.excess)
+          ) {
+            return {
+              type: "cannot-establish",
+              detail:
+                "the account's lamports changed between the two corroboration reads, so its continuity is not established",
+            };
+          }
+          return null;
+        };
+
         const build = async () =>
           buildTransaction(connection, actionOwner, [
             buildWithdrawExcessInstruction(candidate, actionOwner),
@@ -488,17 +331,13 @@ export function useWithdrawExcess() {
           try {
             signed = await signer(unsigned);
           } catch (signError) {
-            const message =
-              signError instanceof Error
-                ? signError.message
-                : String(signError);
-            const lower = message.toLowerCase();
-            if (lower.includes("rejected")) {
+            const refusal = classifySignRefusal(signError);
+            if (refusal === "rejected") {
               throw new FriendlyError(
                 "Transaction cancelled. Nothing was sent."
               );
             }
-            if (/blockhash|block height|blockheight|expired/i.test(message)) {
+            if (refusal === "expired-refusal") {
               if (!refusalRetryUsed) {
                 refusalRetryUsed = true;
                 lastResolutionNote =
@@ -510,6 +349,10 @@ export function useWithdrawExcess() {
                 "expired"
               );
             }
+            const message =
+              signError instanceof Error
+                ? signError.message
+                : String(signError);
             const raw = new Error(message);
             raw.name = signError instanceof Error ? signError.name : "Error";
             throw raw;
@@ -540,7 +383,14 @@ export function useWithdrawExcess() {
             connection,
             signature,
             lastValidBlockHeight,
-            candidate,
+            () =>
+              corroborateNonLanding(
+                connection,
+                signature,
+                lastValidBlockHeight,
+                readOnce,
+                judge
+              ),
             setRunState
           );
 

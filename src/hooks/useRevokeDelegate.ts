@@ -26,8 +26,9 @@
  * repair hook is acquired synchronously before the first await. The
  * lock is released in `finally` at provably safe terminals — and held
  * past `unverified / unresolved-outcome` (a transaction that may still
- * land) until the user explicitly dismisses it via reset(). Release is
- * never timer-based.
+ * land) until the user explicitly dismisses it via reset(), or until
+ * the hook unmounts, whichever comes first (past an unmount no
+ * dismissal card exists). Release is never timer-based.
  *
  * This hook NEVER signs anything itself: the unsigned transaction goes
  * to the wallet adapter and the user approves.
@@ -38,7 +39,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import bs58 from "bs58";
-import type { Connection, Transaction } from "@solana/web3.js";
+import type { Transaction } from "@solana/web3.js";
 
 import { acquireAction, heldAction, releaseAction } from "@/lib/actionMutex";
 import {
@@ -51,6 +52,15 @@ import {
   type RevocableDelegation,
 } from "@/lib/solana/revokeDelegation";
 import { buildTransaction } from "@/lib/solana/transactions";
+import {
+  classifySignRefusal,
+  corroborateNonLanding,
+  RESOLVE_POLL_INTERVAL_MS,
+  resolveTransaction,
+  sleep,
+  type CorroborationRead,
+  type CorroborationVerdict,
+} from "@/lib/solana/actionLifecycle";
 
 export type RevokeStatus =
   | "idle"
@@ -126,281 +136,13 @@ class FriendlyError extends Error {
   }
 }
 
-/** Interval between resolution polls; also spaces the §8.5
- *  corroboration reads. */
-const RESOLVE_POLL_INTERVAL_MS = 1500;
-
-/** Bounded in-place retries for transient RPC failures of a single
- *  status query (spec §8.5: reads are retried in place, never
- *  submissions). */
-const MAX_STATUS_RPC_ATTEMPTS = 3;
-
-/** Consecutive fully-failed resolution rounds tolerated before the
- *  lifecycle stops and reports uncertainty (spec §8.4 S6). */
-const MAX_FAILED_ROUNDS = 3;
-
-const sleep = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-type StatusOutcome =
-  | { kind: "resolved"; err: unknown }
-  | { kind: "unobserved" }
-  | { kind: "rpc-failed" };
-
-/**
- * One signature-status query with bounded in-place retries for
- * transient RPC failures. A null (unobserved) answer is ABSENCE OF
- * EVIDENCE, never proof of failure (spec §8.5). Any OBSERVED status —
- * processed, confirmed, or finalized — means the transaction LANDED
- * (spec §8.5 totality): processed is landing too and must route to
- * verification, never fall through as keep-polling.
- */
-async function querySignatureStatus(
-  connection: Connection,
-  signature: string
-): Promise<StatusOutcome> {
-  for (let attempt = 1; attempt <= MAX_STATUS_RPC_ATTEMPTS; attempt++) {
-    try {
-      const statuses = await connection.getSignatureStatuses([signature], {
-        searchTransactionHistory: false,
-      });
-      const status = statuses.value[0];
-      if (!status) return { kind: "unobserved" };
-      return { kind: "resolved", err: status.err ?? null };
-    } catch {
-      if (attempt < MAX_STATUS_RPC_ATTEMPTS) {
-        await sleep(RESOLVE_POLL_INTERVAL_MS);
-      }
-    }
-  }
-  return { kind: "rpc-failed" };
-}
-
-async function readBlockHeight(connection: Connection): Promise<number | null> {
-  try {
-    return await connection.getBlockHeight({ commitment: "confirmed" });
-  } catch {
-    return null;
-  }
-}
-
-/** What the §8.5 corroboration pass concluded about a past-the-window
- *  transaction with no observed status. */
+/** The revoke-specific corroboration verdicts: the shared base already
+ *  covers standard-met / resolved / account-gone / cannot-establish;
+ *  these two carry the delegate evidence the §8.9 mapping needs. */
 type ReadAccount = Extract<DelegatedAccountRead, { kind: "read" }>;
-type Corroboration =
-  | { type: "standard-met" }
+type RevokeCorroboration =
   | { type: "delegate-absent"; read: ReadAccount }
-  | { type: "resolved"; err: unknown }
-  | { type: "delegate-changed"; current: string }
-  | { type: "account-gone" }
-  | { type: "cannot-establish"; detail: string };
-
-/**
- * The §8.5 non-landing evidence standard. Called only when a status
- * query came back unobserved AND the block height is already beyond
- * the transaction's window: a spent blockhash proves the transaction
- * cannot land in the FUTURE; non-landing in the past requires
- * corroborated reads — two spaced status queries both unobserved, and
- * two spaced account reads both showing the reviewed delegate present
- * with the identical address. ONE inconsistent observation blocks the
- * re-sign (the asymmetric rule): evidence of an outcome always wins.
- */
-async function corroborateNonLanding(
-  connection: Connection,
-  signature: string,
-  lastValidBlockHeight: number,
-  delegation: RevocableDelegation
-): Promise<Corroboration> {
-  const readOnce = async (): Promise<
-    DelegatedAccountRead | { kind: "rpc-failed" }
-  > => {
-    try {
-      return await readDelegatedAccountState(connection, delegation.pubkey);
-    } catch {
-      return { kind: "rpc-failed" };
-    }
-  };
-
-  // Post-close evidence only (spec §8.5, verification fix): the
-  // detecting iteration queried the status BEFORE reading the height,
-  // so that query is not provably post-close and is NOT counted. The
-  // standard's two spaced status queries start HERE, now that the
-  // window is known to be closed — the first of them immediately, the
-  // second one poll interval later.
-  const status1 = await querySignatureStatus(connection, signature);
-  if (status1.kind === "resolved") {
-    return { type: "resolved", err: status1.err };
-  }
-  if (status1.kind === "rpc-failed") {
-    return {
-      type: "cannot-establish",
-      detail: "the signature status could not be read",
-    };
-  }
-
-  // First corroboration read.
-  const read1 = await readOnce();
-  if (read1.kind === "rpc-failed" || read1.kind === "unreadable") {
-    return { type: "cannot-establish", detail: "the account read failed" };
-  }
-  if (read1.kind === "missing") {
-    // The window is provably closed here: the honest terminal is
-    // "the account is gone", never "it may still land" (§8.9).
-    return { type: "account-gone" };
-  }
-  if (read1.delegate === null) {
-    return { type: "delegate-absent", read: read1 };
-  }
-  if (read1.delegate !== delegation.delegate) {
-    return { type: "delegate-changed", current: read1.delegate };
-  }
-
-  // Space the rounds (the standard: SPACED queries and reads).
-  await sleep(RESOLVE_POLL_INTERVAL_MS);
-
-  // Second status query: an outcome resolving now always wins.
-  const status2 = await querySignatureStatus(connection, signature);
-  if (status2.kind === "resolved") {
-    return { type: "resolved", err: status2.err };
-  }
-  if (status2.kind === "rpc-failed") {
-    return {
-      type: "cannot-establish",
-      detail: "the signature status could not be read",
-    };
-  }
-
-  // Second height check: the window must still be past.
-  const height2 = await readBlockHeight(connection);
-  if (height2 === null) {
-    return {
-      type: "cannot-establish",
-      detail: "the block height could not be read",
-    };
-  }
-  if (height2 <= lastValidBlockHeight) {
-    // Height disagreement — the view cannot currently distinguish
-    // landed from not-landed (spec §8.5, RPC disagreement).
-    return {
-      type: "cannot-establish",
-      detail: "the block height moved back inside the transaction window",
-    };
-  }
-
-  // Second account read: must agree with the first.
-  const read2 = await readOnce();
-  if (read2.kind === "rpc-failed" || read2.kind === "unreadable") {
-    return { type: "cannot-establish", detail: "the account read failed" };
-  }
-  if (read2.kind === "missing") {
-    return { type: "account-gone" };
-  }
-  if (read2.delegate === null) {
-    return { type: "delegate-absent", read: read2 };
-  }
-  if (
-    read2.delegate !== delegation.delegate ||
-    read2.delegate !== read1.delegate
-  ) {
-    return { type: "delegate-changed", current: read2.delegate };
-  }
-
-  // Every observation is consistent with a transaction that never
-  // landed. Unanimous — the standard is met.
-  return { type: "standard-met" };
-}
-
-/** How resolving ONE signed transaction ended (spec §8.4 states). */
-type Resolution =
-  | { type: "confirmed" }
-  | { type: "on-chain-error" }
-  | { type: "expired-standard-met" }
-  | { type: "delegate-absent"; read: ReadAccount }
-  | { type: "delegate-changed"; current: string }
-  | { type: "account-gone" }
-  | { type: "unresolved"; detail: string };
-
-/**
- * Resolve ONE signed, (possibly) submitted transaction to an §8.4
- * state, by evidence only (spec §8.5). The send step has already
- * happened — or failed — before this runs; a send error classifies
- * nothing.
- */
-async function resolveTransaction(
-  connection: Connection,
-  signature: string,
-  lastValidBlockHeight: number,
-  delegation: RevocableDelegation,
-  setRunState: (patch: Partial<RevokeState>) => void
-): Promise<Resolution> {
-  let failedRounds = 0;
-  for (;;) {
-    const status = await querySignatureStatus(connection, signature);
-    // Totality: an observed status means the transaction landed — at
-    // processed, confirmed, OR finalized commitment. It routes to the
-    // verify path (or the on-chain-error report) and never falls
-    // through as keep-polling.
-    if (status.kind === "resolved") {
-      return status.err !== null
-        ? { type: "on-chain-error" }
-        : { type: "confirmed" };
-    }
-
-    const height = await readBlockHeight(connection);
-    if (height !== null && height > lastValidBlockHeight) {
-      if (status.kind === "unobserved") {
-        setRunState({
-          status: "confirming",
-          note: "Checking the chain for what actually landed...",
-        });
-        const verdict = await corroborateNonLanding(
-          connection,
-          signature,
-          lastValidBlockHeight,
-          delegation
-        );
-        switch (verdict.type) {
-          case "standard-met":
-            return { type: "expired-standard-met" };
-          case "delegate-absent":
-            return { type: "delegate-absent", read: verdict.read };
-          case "delegate-changed":
-            return { type: "delegate-changed", current: verdict.current };
-          case "resolved":
-            return verdict.err !== null
-              ? { type: "on-chain-error" }
-              : { type: "confirmed" };
-          case "account-gone":
-            return { type: "account-gone" };
-          case "cannot-establish":
-            return { type: "unresolved", detail: verdict.detail };
-        }
-      }
-      // status rpc-failed past the window: the standard cannot even
-      // start, so this round is unresolvable — counted below.
-    }
-
-    // Window still open (or height unreadable): keep resolving. A
-    // round that could not gather classifiable evidence — the status
-    // stream down, or no status and no readable height — counts
-    // toward the bounded stop; any progress resets it.
-    const unresolvable =
-      status.kind === "rpc-failed" ||
-      (status.kind === "unobserved" && height === null);
-    if (unresolvable) {
-      failedRounds += 1;
-      if (failedRounds >= MAX_FAILED_ROUNDS) {
-        return {
-          type: "unresolved",
-          detail: "the RPC could not be reached to establish the outcome",
-        };
-      }
-    } else {
-      failedRounds = 0;
-    }
-    await sleep(RESOLVE_POLL_INTERVAL_MS);
-  }
-}
+  | { type: "delegate-changed"; current: string };
 
 /** The in-flight statuses for the cross-action affordance (§8.12). */
 const IN_FLIGHT_STATUSES: ReadonlySet<RevokeStatus> = new Set([
@@ -568,6 +310,38 @@ export function useRevokeDelegate() {
         let refusalRetryUsed = false;
         let lastResolutionNote: string | null = null;
 
+        // The §8.5 corroboration policy for one read: the delegate
+        // field is the identity being judged (the asymmetric rule —
+        // one inconsistent observation terminalizes corroboration and
+        // blocks the re-sign). Revoke's checks are per-read, so the
+        // second call's `prior` read is unused: read1's delegate
+        // already matched the reviewed one, so any read2 disagreement
+        // with the reviewed delegate is caught by the same check.
+        const readOnce = async (): Promise<CorroborationRead<ReadAccount>> => {
+          try {
+            const read = await readDelegatedAccountState(
+              connection,
+              delegation.pubkey
+            );
+            if (read.kind === "read") return { kind: "read", value: read };
+            if (read.kind === "missing") return { kind: "missing" };
+            return { kind: "unusable" };
+          } catch {
+            return { kind: "unusable" };
+          }
+        };
+        const judge = (
+          read: ReadAccount
+        ): CorroborationVerdict<RevokeCorroboration> | null => {
+          if (read.delegate === null) {
+            return { type: "delegate-absent", read };
+          }
+          if (read.delegate !== delegation.delegate) {
+            return { type: "delegate-changed", current: read.delegate };
+          }
+          return null;
+        };
+
         // Sign-stage classification (spec §8.5): message shapes are
         // used ONLY here, where no signature exists and nothing can
         // land. Rejection → cancelled; expiry-shaped refusal → one
@@ -607,17 +381,13 @@ export function useRevokeDelegate() {
           try {
             signed = await signer(unsigned);
           } catch (signError) {
-            const message =
-              signError instanceof Error
-                ? signError.message
-                : String(signError);
-            const lower = message.toLowerCase();
-            if (lower.includes("rejected")) {
+            const refusal = classifySignRefusal(signError);
+            if (refusal === "rejected") {
               throw new FriendlyError(
                 "Transaction cancelled. Nothing was sent."
               );
             }
-            if (/blockhash|block height|blockheight|expired/i.test(message)) {
+            if (refusal === "expired-refusal") {
               if (!refusalRetryUsed) {
                 refusalRetryUsed = true;
                 lastResolutionNote =
@@ -629,6 +399,10 @@ export function useRevokeDelegate() {
                 "expired"
               );
             }
+            const message =
+              signError instanceof Error
+                ? signError.message
+                : String(signError);
             const raw = new Error(message);
             raw.name = signError instanceof Error ? signError.name : "Error";
             throw raw;
@@ -661,7 +435,14 @@ export function useRevokeDelegate() {
             connection,
             signature,
             lastValidBlockHeight,
-            delegation,
+            () =>
+              corroborateNonLanding(
+                connection,
+                signature,
+                lastValidBlockHeight,
+                readOnce,
+                judge
+              ),
             setRunState
           );
 
@@ -758,26 +539,26 @@ export function useRevokeDelegate() {
             return;
           }
 
-          if (resolution.type === "delegate-absent") {
-            // The delegate is gone but no confirmed signature status
-            // exists: the state is good, causation is not claimed
-            // (spec §8.9 row 7).
-            setRunState({
-              status: "done",
-              outcome: "delegate-absent-unattributed",
-              balanceAfterAction: resolution.read.balance,
-              delegatePresentAtLastRead: false,
-              error:
-                "The delegate is no longer on this account. Whether this app's transaction caused that could not be established.",
-            });
-            return;
-          }
-
-          if (resolution.type === "delegate-changed") {
+          if (resolution.type === "domain") {
+            // Revoke's own corroboration verdicts (§8.9 rows 7 and 5).
+            if (resolution.verdict.type === "delegate-absent") {
+              // The delegate is gone but no confirmed signature status
+              // exists: the state is good, causation is not claimed
+              // (spec §8.9 row 7).
+              setRunState({
+                status: "done",
+                outcome: "delegate-absent-unattributed",
+                balanceAfterAction: resolution.verdict.read.balance,
+                delegatePresentAtLastRead: false,
+                error:
+                  "The delegate is no longer on this account. Whether this app's transaction caused that could not be established.",
+              });
+              return;
+            }
             setRunState({
               status: "error",
               outcome: "gate-state-changed",
-              error: `The delegate on this account is now a different address (${resolution.current}). The permission you reviewed is out of date. Rescan to see the current state.`,
+              error: `The delegate on this account is now a different address (${resolution.verdict.current}). The permission you reviewed is out of date. Rescan to see the current state.`,
             });
             return;
           }
