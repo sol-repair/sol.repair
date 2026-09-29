@@ -10,12 +10,39 @@
 // itself a finding. Run from the repo root: node scripts/check-fee-ledger.mjs
 //
 // Exit 0 = all rows conform (or no rows). Exit 1 = ALARM, a row's
-// transferred lamports differ from the 1% rule. Exit 2 = could not
-// complete the check (network/rpc) - no verdict, never an alarm.
+// transferred lamports differ from the 1% rule, or this script's fee
+// wallet disagrees with the app's. Exit 2 = could not complete the check
+// (network/rpc) - no verdict, never an alarm.
+
+import { readFileSync } from "node:fs";
 
 import bs58 from "bs58";
 
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
+
+// Address-sync guard (audit 2026-09-29, finding F1): the fee-rule
+// derivation below stays a second independent implementation, but the
+// audited ADDRESS is pinned to the app's. Without this, a fee wallet
+// rotated in src/lib/solana/fees.ts would leave this script reading the
+// old address forever: no new rows, exit 0, a silent unaudited gap. The
+// app's MAINNET_FEE_WALLET is extracted from fees.ts and compared as a
+// full string - a mismatch, or a fees.ts whose constant can no longer be
+// found (refactor), is an alarm, never a pass.
+const appFeeWallet = readFileSync(
+  new URL("../src/lib/solana/fees.ts", import.meta.url),
+  "utf8"
+).match(/MAINNET_FEE_WALLET\s*=\s*new\s+PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]+)"/)
+  ?.[1];
+if (appFeeWallet !== FEE_WALLET) {
+  console.log(
+    "ALARM: fee wallet sync failure - scripts/check-fee-ledger.mjs and src/lib/solana/fees.ts disagree."
+  );
+  console.log(`  this script: ${FEE_WALLET}`);
+  console.log(
+    `  fees.ts:     ${appFeeWallet ?? "(MAINNET_FEE_WALLET constant not found)"}`
+  );
+  process.exit(1);
+}
 const ENDPOINT = "https://api.mainnet-beta.solana.com";
 const TOKEN_PROGRAMS = new Set([
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

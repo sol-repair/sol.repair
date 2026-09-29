@@ -26,6 +26,7 @@ import {
   SystemProgram,
   Transaction,
   type Connection,
+  type TransactionInstruction,
 } from "@solana/web3.js";
 
 import {
@@ -34,6 +35,7 @@ import {
 } from "../src/hooks/useRepairWallet";
 import { MAX_CLOSE_INSTRUCTIONS_PER_TX } from "../src/lib/solana/transactions";
 import {
+  TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   type ClosableAccount,
 } from "../src/lib/solana/tokenAccounts";
@@ -167,6 +169,45 @@ describe("useRepairWallet", () => {
     });
     expect(result.current.status).toBe("done");
     expect(signC).toHaveBeenCalledTimes(1);
+  });
+
+  it("appends the fee transfer as the final instruction of the signed transaction", async () => {
+    // The 1% service fee rides AFTER the closes so the rent they return
+    // inside the same atomic transaction can cover it - a wallet holding
+    // no spare SOL must still be able to pay the service fee (fees.ts).
+    // The ordering is load-bearing, not cosmetic, so it is pinned here
+    // (audit 2026-09-29, finding F4): every instruction before the last
+    // is a token-program instruction, and the System transfer is last.
+    const accounts = makeAccounts(2);
+    const seenInstructions: TransactionInstruction[][] = [];
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      seenInstructions.push(tx.instructions);
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+    expect(result.current.status).toBe("done");
+
+    expect(seenInstructions).toHaveLength(1);
+    const ixs = seenInstructions[0];
+    // Both accounts are clean (no delegate), so everything before the fee
+    // is a closeAccount against one of the two token programs.
+    expect(ixs).toHaveLength(3);
+    for (const ix of ixs.slice(0, -1)) {
+      expect(
+        ix.programId.equals(TOKEN_PROGRAM_ID) ||
+          ix.programId.equals(TOKEN_2022_PROGRAM_ID)
+      ).toBe(true);
+    }
+    const fee = ixs[ixs.length - 1];
+    expect(fee.programId.equals(SystemProgram.programId)).toBe(true);
+    // floor(1% of 2 x 2,039,280) = 40,785 lamports, u64 LE at offset 4.
+    expect(fee.data.readBigUInt64LE(4)).toBe(40785n);
   });
 
   it("stops and reports the change when the wallet switches mid-repair", async () => {
