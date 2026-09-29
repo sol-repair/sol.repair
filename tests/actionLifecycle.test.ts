@@ -20,6 +20,8 @@
  *      widening the never-hooks' union to carry domain members.
  */
 
+import { readFileSync } from "node:fs";
+
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Connection } from "@solana/web3.js";
 
@@ -130,5 +132,42 @@ describe("resolveTransaction domain passthrough (the `as D` seam)", () => {
     expectTypeOf<{ type: "delegate-absent"; read: unknown }>().not.toExtend<
       CorroborationVerdict
     >();
+  });
+});
+
+describe("duplicated isBlockhashExpiry parity (the §10.7 twin)", () => {
+  // The expiry-wording matcher exists exactly twice by design: the repair
+  // hook keeps a local copy because the §10.7 guard freezes its import
+  // surface, and actionLifecycle keeps the same shape for the per-item
+  // actions' sign stage. Each copy is exercised by its own tests, but a
+  // ONE-SIDED edit would give the repair and the per-item actions
+  // divergent retry semantics with a green suite. This pin reads both
+  // source files, extracts the function, and fails on any divergence —
+  // including a rename or deletion (a failed extraction is a failure,
+  // never a vacuous pass). Audit 2026-09-29, finding F3.
+  const EXTRACT =
+    /function isBlockhashExpiry\(message: string\): boolean \{[\s\S]*?\n\}/;
+
+  function copyOf(source: string, label: string): string {
+    const match = source.match(EXTRACT)?.[0];
+    if (match === undefined) {
+      throw new Error(`isBlockhashExpiry not found in ${label}`);
+    }
+    // Line endings are checkout artifacts (one file can be CRLF while
+    // the other is LF on a Windows clone); the parity that matters is
+    // the matcher text, so CR is normalized before comparing.
+    return match.replace(/\r/g, "");
+  }
+
+  it("useRepairWallet's copy and actionLifecycle's copy are identical", () => {
+    const hook = copyOf(
+      readFileSync("src/hooks/useRepairWallet.ts", "utf8"),
+      "src/hooks/useRepairWallet.ts"
+    );
+    const lib = copyOf(
+      readFileSync("src/lib/solana/actionLifecycle.ts", "utf8"),
+      "src/lib/solana/actionLifecycle.ts"
+    );
+    expect(hook).toBe(lib);
   });
 });

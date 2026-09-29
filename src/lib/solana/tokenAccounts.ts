@@ -227,7 +227,12 @@ export async function getClosableAccounts(
       // numbers inside are garbage. A balance or rent that cannot be read
       // as a whole number is NEVER sanitized into zero or another default:
       // the account cannot be proven safely closable, so it is reported
-      // and skipped like any other unreadable entry.
+      // and skipped like any other unreadable entry. The state field gets
+      // the same discipline (audit 2026-09-29, finding F2): a value
+      // outside the three literals would otherwise fall through check #5
+      // as "not uninitialized" and classify as eligible — the per-action
+      // single reads (unwrapNative.ts, revokeDelegation.ts) already
+      // reject that shape, and the scan must not be the weaker link.
       if (
         typeof account.lamports !== "number" ||
         !Number.isInteger(account.lamports) ||
@@ -235,7 +240,10 @@ export async function getClosableAccounts(
         typeof info.tokenAmount !== "object" ||
         info.tokenAmount === null ||
         typeof info.tokenAmount.amount !== "string" ||
-        !/^\d+$/.test(info.tokenAmount.amount)
+        !/^\d+$/.test(info.tokenAmount.amount) ||
+        (info.state !== "initialized" &&
+          info.state !== "uninitialized" &&
+          info.state !== "frozen")
       ) {
         skippedAccounts.push({
           pubkey: pubkey.toString(),

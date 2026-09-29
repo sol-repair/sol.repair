@@ -436,7 +436,7 @@ describe("getClosableAccounts eligibility checks", () => {
   });
 });
 
-describe("getClosableAccounts deep numerical fields", () => {
+describe("getClosableAccounts deep field validation", () => {
   // The parsed envelope can be intact while the numbers inside are
   // garbage. The scan must NEVER sanitize garbage into zero or another
   // default: an account whose balance or rent cannot be read as a whole
@@ -476,6 +476,19 @@ describe("getClosableAccounts deep numerical fields", () => {
           uiAmountString: "1.5",
         },
       },
+    },
+    {
+      // The state field must be one of the three literals: a garbage or
+      // missing state would otherwise fall through check #5 as "not
+      // uninitialized" and classify as eligible (audit 2026-09-29, F2).
+      name: "a state outside the three literals",
+      seed: 33,
+      overrides: { state: "available" },
+    },
+    {
+      name: "a state field missing entirely",
+      seed: 34,
+      overrides: { state: undefined },
     },
   ];
 
