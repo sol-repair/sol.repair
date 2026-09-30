@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "Terms of Service | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "Terms of Service",
   description:
     "Terms of service for SOL.repair: non-custodial use, the 1% success fee, network fees, and liability.",
-  alternates: { canonical: "/terms" },
-};
+  path: "/terms",
+});
 
 export default function TermsPage() {
   return (

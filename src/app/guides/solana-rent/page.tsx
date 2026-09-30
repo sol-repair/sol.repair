@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { RentCalculator } from "@/components/RentCalculator";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "What is Solana rent? | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "What is Solana rent?",
   description:
     "Solana accounts hold a rent deposit that comes back to you when the account closes. A plain explanation with real numbers and a simple calculator.",
-  alternates: { canonical: "/guides/solana-rent" },
-};
+  path: "/guides/solana-rent",
+});
 
 export default function SolanaRentGuide() {
   return (

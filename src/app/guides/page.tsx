@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { GUIDES } from "@/lib/guides";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "Guides | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "Guides",
   description:
     "Plain-English guides to Solana token accounts: why random tokens appear, what rent is, and how closing an empty account works.",
-  alternates: { canonical: "/guides" },
-};
+  path: "/guides",
+});
 
 export default function GuidesIndexPage() {
   return (

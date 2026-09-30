@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "What did I just sign? | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "What did I just sign?",
   description:
     "How to read a Solana transaction: the instructions it runs, and the lasting permissions it can leave behind. Plus how to check any transaction yourself.",
-  alternates: { canonical: "/guides/what-did-i-just-sign" },
-};
+  path: "/guides/what-did-i-just-sign",
+});
 
 export default function WhatDidIJustSignGuide() {
   return (
