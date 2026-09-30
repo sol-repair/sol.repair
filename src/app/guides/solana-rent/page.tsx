@@ -2,13 +2,23 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { RentCalculator } from "@/components/RentCalculator";
+import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
 import { pageMetadata } from "@/lib/pageMetadata";
+import { guideSchema } from "@/lib/guideSchema";
 
 export const metadata: Metadata = pageMetadata({
   title: "What is Solana rent?",
   description:
     "Solana accounts hold a rent deposit that comes back to you when the account closes. A plain explanation with real numbers and a simple calculator.",
   path: "/guides/solana-rent",
+});
+
+const schema = guideSchema({
+  title: "What is Solana rent?",
+  description: metadata.description as string,
+  path: "/guides/solana-rent",
+  datePublished: "2026-09-03",
+  dateModified: "2026-09-30",
 });
 
 export default function SolanaRentGuide() {
@@ -21,6 +31,8 @@ export default function SolanaRentGuide() {
             ← Back
           </Link>
         </div>
+
+        <GuideBreadcrumb title="What is Solana rent?" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           What is Solana rent?
@@ -95,7 +107,16 @@ export default function SolanaRentGuide() {
               The deposit comes from a network parameter, lamports per byte,
               and the network lowers it from time to time. Mainnet lowered it
               on September 4, 2026, and lowered it again since. If it changes
-              again, this page changes with it.
+              again, this page changes with it. The 2026 cuts are a five-step
+              schedule, and accounts funded at the older, higher minimum now
+              hold more than the network requires;{" "}
+              <Link
+                href="/guides/rent-reduction"
+                className="underline underline-offset-2 hover:text-zinc-100"
+              >
+                the rent reduction page
+              </Link>{" "}
+              covers what that means and how the excess comes back.
             </p>
           </section>
 
@@ -143,6 +164,7 @@ export default function SolanaRentGuide() {
           </p>
         </footer>
       </div>
+      <JsonLd data={schema} />
     </main>
   );
 }
