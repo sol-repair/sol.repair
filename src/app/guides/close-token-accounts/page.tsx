@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "How to close empty token accounts | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "How to close empty token accounts",
   description:
     "Closing an empty Solana token account returns its rent deposit to your wallet. Exactly what the instruction does, and how to check any tool before you use it.",
-  alternates: { canonical: "/guides/close-token-accounts" },
-};
+  path: "/guides/close-token-accounts",
+});
 
 export default function CloseTokenAccountsGuide() {
   return (

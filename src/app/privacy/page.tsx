@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "Privacy Policy",
   description:
     "Privacy policy for SOL.repair: no accounts, no tracking cookies, scanning happens in your browser.",
-  alternates: { canonical: "/privacy" },
-};
+  path: "/privacy",
+});
 
 export default function PrivacyPage() {
   return (

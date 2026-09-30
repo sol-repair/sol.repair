@@ -17,9 +17,19 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://sol.repair"),
-  title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
+  // The template appends the site name to every child page's bare
+  // title (see src/lib/pageMetadata.ts). The default is the homepage's
+  // own title: the homepage is a client component and defines no
+  // metadata of its own, so it falls back to this.
+  title: {
+    default: "SOL.repair | Reclaim SOL from Empty Token Accounts",
+    template: "%s | SOL.repair",
+  },
   description:
     "Find unused Solana token accounts and recover the SOL locked inside them as account rent. Non-custodial.",
+  // Canonical for the homepage only. Every other page overrides this
+  // with its own path via pageMetadata(); a page that silently inherits
+  // it declares itself a duplicate of the homepage.
   alternates: { canonical: "/" },
   openGraph: {
     title: "SOL.repair | Reclaim SOL from Empty Token Accounts",
@@ -38,9 +48,11 @@ export const metadata: Metadata = {
   // Hidden from search engines everywhere except mainnet. Gated on the same
   // env var as the network itself, so the mainnet launch can't forget to
   // lift it, and a misconfigured build fails hidden rather than exposed.
-  robots: IS_MAINNET
-    ? { index: true, follow: true }
-    : { index: false, follow: false },
+  // Mainnet emits NO robots meta at all (absence means the crawler default,
+  // index/follow) instead of an explicit "index, follow": the framework
+  // adds its own noindex to the not-found page, and two conflicting robots
+  // metas on one page is an ambiguous signal no page should ship.
+  robots: IS_MAINNET ? undefined : { index: false, follow: false },
 };
 
 const structuredData = {

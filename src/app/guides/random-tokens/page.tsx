@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageMetadata } from "@/lib/pageMetadata";
 
-export const metadata: Metadata = {
-  title: "Why do I have random tokens in my wallet? | SOL.repair",
+export const metadata: Metadata = pageMetadata({
+  title: "Why do I have random tokens in my wallet?",
   description:
     "Random tokens show up in Solana wallets through airdrop marketing and spam. Why they appear, what they actually cost you, and how to clean them up.",
-  alternates: { canonical: "/guides/random-tokens" },
-};
+  path: "/guides/random-tokens",
+});
 
 export default function RandomTokensGuide() {
   return (
