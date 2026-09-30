@@ -1,12 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
+import { guideSchema } from "@/lib/guideSchema";
+import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
 
 export const metadata: Metadata = pageMetadata({
   title: "What did I just sign?",
   description:
     "How to read a Solana transaction: the instructions it runs, and the lasting permissions it can leave behind. Plus how to check any transaction yourself.",
   path: "/guides/what-did-i-just-sign",
+});
+
+const schema = guideSchema({
+  title: "What did I just sign?",
+  description: metadata.description as string,
+  path: "/guides/what-did-i-just-sign",
+  datePublished: "2026-09-19",
+  dateModified: "2026-09-30",
 });
 
 export default function WhatDidIJustSignGuide() {
@@ -19,6 +29,8 @@ export default function WhatDidIJustSignGuide() {
             ← Back
           </Link>
         </div>
+
+        <GuideBreadcrumb title="What did I just sign?" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           What did I just sign?
@@ -59,7 +71,16 @@ export default function WhatDidIJustSignGuide() {
               control to a different address. Freezing locks an account
               until the freeze authority unlocks it. Your balance does not
               change when any of that happens, so the only way to notice is
-              to read the transaction itself.
+              to read the transaction itself. If you want to go deeper on
+              the approval case specifically, and how to clear approvals
+              you no longer want,{" "}
+              <Link
+                href="/guides/token-approvals"
+                className="underline underline-offset-2 hover:text-zinc-100"
+              >
+                the token approvals guide
+              </Link>{" "}
+              covers it.
             </p>
             <p className="mt-2">
               This is why a transaction from months ago can still matter
@@ -120,6 +141,7 @@ export default function WhatDidIJustSignGuide() {
           </section>
         </div>
       </div>
+      <JsonLd data={schema} />
     </main>
   );
 }

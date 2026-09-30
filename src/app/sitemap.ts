@@ -39,7 +39,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${base}/guides/rent-reduction`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${base}/guides/solana-rent`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
+      url: `${base}/guides/token-approvals`,
       lastModified: new Date(),
       changeFrequency: "monthly",
       priority: 0.6,

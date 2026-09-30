@@ -1,12 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
+import { guideSchema } from "@/lib/guideSchema";
+import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
 
 export const metadata: Metadata = pageMetadata({
   title: "Why do I have random tokens in my wallet?",
   description:
     "Random tokens show up in Solana wallets through airdrop marketing and spam. Why they appear, what they actually cost you, and how to clean them up.",
   path: "/guides/random-tokens",
+});
+
+const schema = guideSchema({
+  title: "Why do I have random tokens in my wallet?",
+  description: metadata.description as string,
+  path: "/guides/random-tokens",
+  datePublished: "2026-09-03",
+  dateModified: "2026-09-30",
 });
 
 export default function RandomTokensGuide() {
@@ -19,6 +29,8 @@ export default function RandomTokensGuide() {
             ← Back
           </Link>
         </div>
+
+        <GuideBreadcrumb title="Why do I have random tokens in my wallet?" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           Why do I have random tokens in my wallet?
@@ -126,6 +138,7 @@ export default function RandomTokensGuide() {
           </p>
         </footer>
       </div>
+      <JsonLd data={schema} />
     </main>
   );
 }
