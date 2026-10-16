@@ -276,12 +276,27 @@ describe("understand page outcomes", () => {
     ).toBeTruthy();
   });
 
-  it("shows a friendly network error with the raw detail in small print", async () => {
+  it("shows an honest read failure, naming both possible causes, with the raw detail behind a disclosure", async () => {
+    // A well-formed signature whose lookup errors at the RPC (wrong size,
+    // provider rejection, outage) must not be reported as a plain network
+    // failure: the signature may simply not exist on this network.
     mockedFetch.mockRejectedValue(new Error("429 Connection rate limits exceeded"));
     render(<UnderstandPage />);
     submitSignature(VALID_SIGNATURE);
-    expect(await screen.findByText(/Could not reach the RPC/i)).toBeTruthy();
-    expect(await screen.findByText(/429 Connection rate limits exceeded/i)).toBeTruthy();
+    expect(
+      await screen.findByText(/The transaction could not be fetched/i)
+    ).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /may not match a transaction on this network, or the RPC endpoint could not be reached/i
+      )
+    ).toBeTruthy();
+    // The raw library text stays available for debugging, demoted behind
+    // the Technical details disclosure instead of sitting in page copy.
+    expect(await screen.findByText(/Technical details/i)).toBeTruthy();
+    expect(
+      await screen.findByText(/429 Connection rate limits exceeded/i)
+    ).toBeTruthy();
   });
 
   it("fetches from the endpoint matching the site's own cluster", async () => {
