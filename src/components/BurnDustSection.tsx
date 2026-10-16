@@ -29,6 +29,7 @@ import {
   BURN_GATE_ABORT_COPY,
   buildBurnDustInstructions,
   evaluateBurnGate,
+  readMintBurnBlockers,
   readNativeAccountState,
   selectBurnableDustAccounts,
   type BurnableDustAccount,
@@ -225,15 +226,22 @@ export function BurnDustSection({
       setGatePreview({ state: "reading" });
       setSim(NO_SIM);
       // Presentation-only pre-card read; the hook re-runs the gate as
-      // its authoritative in-lock first step.
+      // its authoritative in-lock first step. Token-2022 candidates
+      // also read the mint, so the card never offers a burn the gate
+      // would abort.
       readNativeAccountState(connection, c.pubkey)
-        .then((read: NativeAccountRead) => {
+        .then(async (read: NativeAccountRead) => {
+          const mintRead =
+            c.program === "token-2022"
+              ? await readMintBurnBlockers(connection, c.mint)
+              : undefined;
           setGatePreview((prev) => {
             if (prev.state !== "reading" || !publicKey) return prev;
             const verdict = evaluateBurnGate(
               read,
               c.mint,
-              publicKey.toBase58()
+              publicKey.toBase58(),
+              mintRead
             );
             if (verdict.kind === "pass") {
               return {

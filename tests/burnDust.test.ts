@@ -306,3 +306,122 @@ describe("buildBurnDustInstructions", () => {
     ).toThrow(/nothing to burn/);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* The mint-side burn blockers (audit M2, 2026-10)                      */
+/* ------------------------------------------------------------------ */
+
+describe("evaluateBurnGate mint blockers", () => {
+  const reviewedMint = Keypair.generate().publicKey.toBase58();
+
+  function read(over: Record<string, unknown> = {}) {
+    return {
+      kind: "read",
+      program: "token-2022",
+      walletOwner: OWNER.publicKey.toBase58(),
+      mint: reviewedMint,
+      state: "initialized",
+      nativeStatus: "non-native",
+      amount: "5000",
+      decimals: 6,
+      lamports: 2039280,
+      closeAuthority: null,
+      delegate: null,
+      ...over,
+    } as const;
+  }
+
+  it("passes with a clear mint read and unchanged figures", () => {
+    const verdict = evaluateBurnGate(
+      read(),
+      reviewedMint,
+      OWNER.publicKey.toBase58(),
+      { status: "clear" }
+    );
+    expect(verdict.kind).toBe("pass");
+    if (verdict.kind === "pass") {
+      expect(verdict.balanceBeforeAction).toBe("5000");
+      expect(verdict.lamportsBeforeAction).toBe(2039280);
+    }
+  });
+
+  it("passes unchanged when no mint read is supplied (classic path)", () => {
+    const verdict = evaluateBurnGate(
+      read(),
+      reviewedMint,
+      OWNER.publicKey.toBase58()
+    );
+    expect(verdict.kind).toBe("pass");
+  });
+
+  it("aborts with the matching reason per blocker", () => {
+    for (const [blocker, reason] of [
+      ["paused", "mint-paused"],
+      ["permissioned-burn", "mint-permissioned"],
+      ["confidential-mint-burn", "mint-confidential"],
+    ] as const) {
+      const verdict = evaluateBurnGate(
+        read(),
+        reviewedMint,
+        OWNER.publicKey.toBase58(),
+        { status: "blocked", blocker }
+      );
+      expect(verdict).toEqual({ kind: "abort", reason });
+    }
+  });
+
+  it("aborts conservatively when the mint read is unreadable", () => {
+    const verdict = evaluateBurnGate(
+      read(),
+      reviewedMint,
+      OWNER.publicKey.toBase58(),
+      { status: "unreadable" }
+    );
+    expect(verdict).toEqual({ kind: "abort", reason: "mint-unreadable" });
+    expect(BURN_GATE_ABORT_COPY["mint-unreadable"]).toContain(
+      "extensions could not be read"
+    );
+  });
+
+  it("carries the approved sentence for each mint abort", () => {
+    expect(BURN_GATE_ABORT_COPY["mint-paused"]).toBe(
+      "This mint is paused. Only its authority can unpause it. Nothing was signed."
+    );
+    expect(BURN_GATE_ABORT_COPY["mint-permissioned"]).toBe(
+      "This mint requires its own burn authority to approve any burn. SOL.REPAIR cannot burn it. Nothing was signed."
+    );
+    expect(BURN_GATE_ABORT_COPY["mint-confidential"]).toBe(
+      "This mint uses confidential burning, which this tool does not support. Nothing was signed."
+    );
+  });
+
+  it("keeps every existing account abort ahead of the mint checks (drift policy unchanged)", () => {
+    // The account-drift and abort behavior must be bit-for-bit today's:
+    // account-side verdicts decide first, mint checks only convert a
+    // would-be pass.
+    const frozen = evaluateBurnGate(
+      read({ state: "frozen" }),
+      reviewedMint,
+      OWNER.publicKey.toBase58(),
+      { status: "blocked", blocker: "paused" }
+    );
+    expect(frozen).toEqual({ kind: "abort", reason: "frozen" });
+
+    const drifted = evaluateBurnGate(
+      read({ amount: "9000", lamports: 2074254 }),
+      reviewedMint,
+      OWNER.publicKey.toBase58(),
+      { status: "blocked", blocker: "paused" }
+    );
+    // Drift still passes the account side; the mint blocker aborts.
+    expect(drifted).toEqual({ kind: "abort", reason: "mint-paused" });
+
+    const empty = evaluateBurnGate(
+      read({ amount: "0" }),
+      reviewedMint,
+      OWNER.publicKey.toBase58(),
+      { status: "blocked", blocker: "paused" }
+    );
+    expect(empty.kind).toBe("already-empty");
+  });
+});

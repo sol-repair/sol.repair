@@ -44,6 +44,7 @@ import {
   BURN_GATE_ABORT_COPY,
   buildBurnDustInstructions,
   evaluateBurnGate,
+  readMintBurnBlockers,
   readNativeAccountState,
   type BurnableDustAccount,
   type BurnGateVerdict,
@@ -240,10 +241,15 @@ export function useBurnDust() {
           });
           return;
         }
+        const mintRead =
+          candidate.program === "token-2022"
+            ? await readMintBurnBlockers(connection, candidate.mint)
+            : undefined;
         const verdict: BurnGateVerdict = evaluateBurnGate(
           gateRead,
           candidate.mint,
-          actionOwner.toBase58()
+          actionOwner.toBase58(),
+          mintRead
         );
         if (verdict.kind === "abort") {
           setRunState({
@@ -518,9 +524,12 @@ export function useBurnDust() {
               outcome: "on-chain-failure",
               accountPresentAfterAction: presentAfter,
               error:
-                "The transaction was confirmed on-chain but failed. It changed nothing.",
+                "The transaction was confirmed on-chain but failed. It changed nothing." +
+                (candidate.program === "token-2022"
+                  ? " If this mint requires permissioned burning, is paused, or uses confidential burning, the burn can never succeed. Nothing was burned."
+                  : ""),
             });
-            return;
+          return;
           }
 
           if (resolution.type === "account-gone") {
