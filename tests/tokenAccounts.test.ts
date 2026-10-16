@@ -197,6 +197,9 @@ describe("getClosableAccounts eligibility checks", () => {
     const skipped = result.skippedAccounts[0];
     expect(skipped.cause).toBe("funded");
     expect(skipped.foreignCloseAuthority).toBe(true);
+    // The address itself is carried alongside the boolean, as display
+    // evidence for the summary's grouped list.
+    expect(skipped.closeAuthority).toBe(pk(32).toBase58());
   });
 
   it("records no foreignCloseAuthority when the close authority is the owner (or absent)", async () => {
@@ -206,6 +209,8 @@ describe("getClosableAccounts eligibility checks", () => {
     expect(result.skippedAccounts).toHaveLength(2);
     expect(result.skippedAccounts[0].foreignCloseAuthority).toBeUndefined();
     expect(result.skippedAccounts[1].foreignCloseAuthority).toBeUndefined();
+    expect(result.skippedAccounts[0].closeAuthority).toBeUndefined();
+    expect(result.skippedAccounts[1].closeAuthority).toBeUndefined();
   });
 
   it("offers a delegated frozen account for close only (owner-approved 2026-09-25)", async () => {
@@ -264,9 +269,27 @@ describe("getClosableAccounts eligibility checks", () => {
     );
   });
 
+  it("carries the foreign address on a close-authority skip, in both token programs", async () => {
+    const splAuthority = pk(50).toBase58();
+    const t22Authority = pk(51).toBase58();
+    const { result } = await runScan(
+      [tokenAccount(52, { closeAuthority: splAuthority })],
+      [tokenAccount(53, { closeAuthority: t22Authority })]
+    );
+    expect(result.skippedAccounts).toHaveLength(2);
+    const spl = result.skippedAccounts.find((s) => s.program === "spl");
+    const t22 = result.skippedAccounts.find((s) => s.program === "token-2022");
+    expect(spl?.cause).toBe("close-authority");
+    expect(spl?.closeAuthority).toBe(splAuthority);
+    expect(t22?.cause).toBe("close-authority");
+    expect(t22?.closeAuthority).toBe(t22Authority);
+  });
+
   it("treats an omitted closeAuthority field as owner-controlled", async () => {
     const { result } = await runScan([tokenAccount(10)]);
     expect(result.eligibleAccounts).toHaveLength(1);
+    // No skip on that basis, so no closeAuthority field is recorded.
+    expect(result.skippedAccounts).toHaveLength(0);
   });
 
   it("accepts an explicit closeAuthority equal to the owner", async () => {
@@ -274,6 +297,7 @@ describe("getClosableAccounts eligibility checks", () => {
       tokenAccount(11, { closeAuthority: OWNER.toBase58() }),
     ]);
     expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.skippedAccounts).toHaveLength(0);
   });
 
   it("skips a wrapped-SOL account", async () => {

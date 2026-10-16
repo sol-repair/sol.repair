@@ -160,6 +160,64 @@ describe("report page scan states", () => {
     expect(screen.getByText(/1 account holds tokens/i)).toBeTruthy();
   });
 
+  it("names the close-authority addresses in the inspection block", () => {
+    // Display-only evidence: the report names WHICH addresses hold the
+    // foreign close authorities, for both the empty-account skips and
+    // the funded ones. The anchors are plain short-address links, so
+    // the page keeps its no-action-controls promise.
+    mocks.wallet.publicKey = WALLET_KEYPAIR.publicKey;
+    mocks.wallet.connected = true;
+    const emptyAuthority = Keypair.generate().publicKey.toBase58();
+    const fundedAuthority = Keypair.generate().publicKey.toBase58();
+    mocks.scan.result = {
+      ...SCAN_RESULT,
+      totalAccounts: SCAN_RESULT.totalAccounts + 2,
+      skippedAccounts: [
+        ...SCAN_RESULT.skippedAccounts,
+        {
+          pubkey: Keypair.generate().publicKey.toBase58(),
+          mint: Keypair.generate().publicKey.toBase58(),
+          reason: "close authority belongs to another address",
+          program: "spl",
+          cause: "close-authority",
+          closeAuthority: emptyAuthority,
+        },
+        {
+          pubkey: Keypair.generate().publicKey.toBase58(),
+          mint: Keypair.generate().publicKey.toBase58(),
+          reason: "holds a token balance",
+          program: "spl",
+          cause: "funded",
+          balance: "9",
+          decimals: 9,
+          lamports: 100,
+          foreignCloseAuthority: true,
+          closeAuthority: fundedAuthority,
+        },
+      ],
+    };
+    const { container } = render(<ReportPage />);
+
+    // The empty-account sentence keeps its grouped list...
+    expect(screen.getByText("Who holds those authorities")).toBeTruthy();
+    // ...and the funded line gets its own.
+    expect(
+      screen.getByText(/1 funded account names a close authority other than this wallet/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Who holds the authorities on the funded accounts")
+    ).toBeTruthy();
+    // The anchors carry the FULL authority addresses in their titles.
+    const emptyLink = container.querySelector(`a[title="${emptyAuthority}"]`);
+    const fundedLink = container.querySelector(`a[title="${fundedAuthority}"]`);
+    expect(emptyLink?.getAttribute("href")).toBe(
+      `https://solscan.io/account/${emptyAuthority}?cluster=devnet`
+    );
+    expect(fundedLink?.getAttribute("href")).toBe(
+      `https://solscan.io/account/${fundedAuthority}?cluster=devnet`
+    );
+  });
+
   it("never renders an approval or signing control in any state", () => {
     mocks.wallet.publicKey = WALLET_KEYPAIR.publicKey;
     mocks.wallet.connected = true;

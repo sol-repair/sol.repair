@@ -115,7 +115,8 @@ Beyond the repair tool itself, the site ships:
 - /understand: paste a transaction signature, or connect read-only to
   walk your recent transactions, and see what each instruction did and
   what lasting permissions it left behind.
-- /report: a read-only wallet health report.
+- /report: a read-only wallet health report. Foreign close-authority
+  addresses are named there, not only counted.
 - /privacy and /terms: the policies. Vercel Analytics records aggregate
   page visits; see the privacy page for what that means.
 

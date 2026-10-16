@@ -136,6 +136,11 @@ export interface SkippedAccount {
    *  selection uses it to exclude accounts whose trailing close would
    *  always fail. Evidence only; the skip decision is unchanged. */
   foreignCloseAuthority?: boolean;
+  /** Base58 address of the close authority when it is foreign (an
+   *  address other than the wallet owner). Evidence only, carried so
+   *  the UI can show WHICH address holds the permission; the skip
+   *  decision is unchanged. */
+  closeAuthority?: string;
   /** Three-state native-status evidence, derived by strict equality on
    *  the parsed account's isNative value (see nativeStatusOf below):
    *  "native" | "non-native" | "unknown" — an omitted or non-boolean
@@ -293,10 +298,15 @@ export async function getClosableAccounts(
           // the close-authority check runs, so this is the only site
           // that can record a foreign close authority on a FUNDED
           // account. The burn selection excludes it (its trailing
-          // close could never succeed).
+          // close could never succeed). The address itself is carried
+          // for display only; the boolean and its condition are the
+          // burn selection's contract and are unchanged.
           ...(info.closeAuthority &&
           info.closeAuthority !== owner.toString()
-            ? { foreignCloseAuthority: true }
+            ? {
+                foreignCloseAuthority: true,
+                closeAuthority: info.closeAuthority,
+              }
             : {}),
           ...(info.state === "frozen" ? { frozen: true } : {}),
           nativeStatus: nativeStatusOf(info.isNative),
@@ -338,6 +348,9 @@ export async function getClosableAccounts(
           reason: "close authority belongs to another address",
           program: tag,
           cause: "close-authority",
+          // Truthy string inside this branch. Evidence for the summary's
+          // grouped display; the skip decision is unchanged.
+          closeAuthority: info.closeAuthority,
         });
         continue;
       }
