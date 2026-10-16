@@ -344,3 +344,105 @@ describe("WalletStateSummary", () => {
     expect(page).not.toMatch(/already clean/);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* close-blocked-extension rendering (2026-10 extension check)         */
+/* ------------------------------------------------------------------ */
+
+describe("WalletStateSummary close-blocked-extension", () => {
+  const blocked = (over: Partial<SkippedAccount> = {}) =>
+    skip({
+      pubkey: "BLOCKED-A",
+      program: "token-2022",
+      cause: "close-blocked-extension",
+      nativeStatus: "non-native",
+      ...over,
+    });
+
+  it("renders the count line and per-account blocker rows with full addresses in titles", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 2,
+        skippedAccounts: [
+          blocked({ extensionBlocker: "withheld-fee" }),
+          blocked({
+            pubkey: "BLOCKED-B",
+            extensionBlocker: "confidential-balance",
+          }),
+        ],
+      })
+    );
+    const { container } = render(<WalletStateSummary summary={summary} />);
+    const text = container.textContent ?? "";
+    expect(text).toContain(
+      "2 accounts hold a balance in a token extension the close would reject."
+    );
+    expect(text).toContain("Which accounts carry those balances");
+    expect(text).toContain("BLOCKE…ED-A holds a withheld transfer fee.");
+    expect(text).toContain("BLOCKE…ED-B holds an encrypted balance.");
+    expect(container.querySelector('a[title="BLOCKED-A"]')).not.toBeNull();
+    expect(container.querySelector('a[title="BLOCKED-B"]')).not.toBeNull();
+  });
+
+  it("renders the singular form", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [blocked({ extensionBlocker: "withheld-fee" })],
+      })
+    );
+    const { container } = render(<WalletStateSummary summary={summary} />);
+    expect(container.textContent).toContain(
+      "1 account holds a balance in a token extension the close would reject."
+    );
+  });
+
+  it("renders the blocker-not-recorded row for a stale entry", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [blocked()],
+      })
+    );
+    const { container } = render(<WalletStateSummary summary={summary} />);
+    expect(container.textContent).toContain("BLOCKE…ED-A blocker not recorded.");
+  });
+
+  it("renders nothing for the group when the count is zero", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        eligibleAccounts: [account()],
+        recoverableLamports: 2039280n,
+      })
+    );
+    const { container } = render(<WalletStateSummary summary={summary} />);
+    expect(container.textContent).not.toContain("the close would reject");
+    expect(container.textContent).not.toContain(
+      "Which accounts carry those balances"
+    );
+  });
+
+  it("keeps the writing rules on the new copy", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 3,
+        skippedAccounts: [
+          blocked({ extensionBlocker: "withheld-fee" }),
+          blocked({
+            pubkey: "BLOCKED-B",
+            extensionBlocker: "confidential-balance",
+          }),
+          blocked({ pubkey: "BLOCKED-C" }),
+        ],
+      })
+    );
+    const { container } = render(<WalletStateSummary summary={summary} />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("3 accounts hold a balance in a token extension");
+    expect(text).toContain("blocker not recorded.");
+    expect(text).not.toMatch(/[\u2014\u2013]/);
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+    expect(text).not.toMatch(/!/);
+  });
+});

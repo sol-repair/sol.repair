@@ -33,6 +33,7 @@ export const FINDING_KINDS = [
   "wrapped-sol",
   "frozen",
   "uninitialized",
+  "close-blocked-extension",
   "unreadable",
 ] as const;
 
@@ -82,6 +83,7 @@ function newGroups(): Record<
     "wrapped-sol": [],
     frozen: [],
     uninitialized: [],
+    "close-blocked-extension": [],
     unreadable: [],
   };
 }
@@ -96,6 +98,7 @@ function newCounts(): Record<FindingKind, number> {
     "wrapped-sol": 0,
     frozen: 0,
     uninitialized: 0,
+    "close-blocked-extension": 0,
     unreadable: 0,
   };
 }
@@ -144,6 +147,21 @@ export function summarizeWalletState(
         break;
       case "wrapped-sol":
         push("wrapped-sol", skipped);
+        break;
+      case "close-blocked-extension":
+        push("close-blocked-extension", skipped);
+        if (skipped.frozen) push("frozen", skipped);
+        if (skipped.delegated) push("active-delegation", skipped);
+        break;
+      case "extension-unreadable":
+        // The extension state could not be read, which is a read failure
+        // like any other: the unreadable kind, and the summary is
+        // incomplete. The co-occurrence evidence the scan did record
+        // (delegation, frozen) still counts.
+        push("unreadable", skipped);
+        incomplete = true;
+        if (skipped.frozen) push("frozen", skipped);
+        if (skipped.delegated) push("active-delegation", skipped);
         break;
       case "uninitialized":
         push("uninitialized", skipped);
