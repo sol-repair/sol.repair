@@ -1025,3 +1025,108 @@ describe("useRepairWallet", () => {
     expect(result.current.error).toMatch(/stopped after 21 of 21/);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* The Token-2022 post-scan race hint on the failure terminals         */
+/* (audit M1-C, 2026-10)                                               */
+/* ------------------------------------------------------------------ */
+
+const T22_ACCOUNT: ClosableAccount = {
+  pubkey: Keypair.generate().publicKey.toBase58(),
+  mint: Keypair.generate().publicKey.toBase58(),
+  lamports: 2039280,
+  program: "token-2022",
+};
+
+const TOKEN22_HINT =
+  " If the failed batch included a Token-2022 account, it may hold an extension balance the token program refuses to close. A fresh scan lists such accounts as skipped with the reason, and the repair can then close the rest.";
+
+describe("useRepairWallet Token-2022 failure hint", () => {
+  it("appends the extension hint to the nothing-closed failure when the batch has a Token-2022 account", async () => {
+    const RAW = new Error(
+      "SendTransactionError: failed to send transaction: Transaction simulation failed: Error: Account found, but not closed. Catch the `SendTransactionError` and call `getLogs()` on it for full details."
+    );
+    mocks.conn.sendRawTransaction.mockRejectedValue(RAW);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([T22_ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe(
+      "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open." +
+        TOKEN22_HINT
+    );
+    // The raw library text still moves to errorDetail.
+    expect(result.current.errorDetail).toMatch(/SendTransactionError/);
+  });
+
+  it("keeps the classic-batch failure copy unchanged, with no hint", async () => {
+    const RAW = new Error("SendTransactionError: failed to send transaction");
+    mocks.conn.sendRawTransaction.mockRejectedValue(RAW);
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).not.toMatch(/Token-2022 account/);
+    expect(result.current.error).not.toMatch(/extension balance/);
+  });
+
+  it("appends the rescan hint to the partial-failure copy when the failed batch has a Token-2022 account", async () => {
+    // Batch one (20 classic accounts) lands; batch two (one Token-2022
+    // account) fails with nothing closed, so the run stops partial.
+    const classics = Array.from({ length: 20 }, () => ({
+      ...ACCOUNT,
+      pubkey: Keypair.generate().publicKey.toBase58(),
+      mint: Keypair.generate().publicKey.toBase58(),
+    }));
+    let sendCalls = 0;
+    mocks.conn.sendRawTransaction.mockImplementation(async () => {
+      sendCalls += 1;
+      if (sendCalls === 1) return "batch-one-sig";
+      throw new Error("SendTransactionError: failed to send transaction");
+    });
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => pks.map(() => STILL_OPEN)
+    );
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([...classics, T22_ACCOUNT], true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toMatch(
+      /Repair stopped after 20 of 21 accounts were closed/
+    );
+    expect(result.current.error).toMatch(
+      /0\.040786 SOL recovered/
+    );
+    expect(result.current.error).toContain(TOKEN22_HINT);
+  });
+});
