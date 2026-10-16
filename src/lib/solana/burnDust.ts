@@ -26,6 +26,7 @@ import {
 } from "@solana/spl-token";
 
 import { readNativeAccountState, type NativeAccountRead } from "./unwrapNative";
+import { readMintBurnBlockers, type MintBurnRead } from "./t22MintBurnBlockers";
 import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -33,8 +34,8 @@ import {
   type TokenProgram,
 } from "./tokenAccounts";
 
-export { readNativeAccountState };
-export type { NativeAccountRead };
+export { readNativeAccountState, readMintBurnBlockers };
+export type { NativeAccountRead, MintBurnRead };
 
 const PROGRAM_IDS: Record<TokenProgram, PublicKey> = {
   spl: TOKEN_PROGRAM_ID,
@@ -166,7 +167,14 @@ export type BurnGateAbortReason =
   | "foreign-close-authority"
   | "frozen"
   | "native-status"
-  | "mint-mismatch";
+  | "mint-mismatch"
+  // Token-2022 mint-side burn blockers (audit M2): the on-chain standard
+  // Burn refuses these mints, so the gate aborts before anything is
+  // signed. Classic mints cannot carry extensions and never see these.
+  | "mint-paused"
+  | "mint-permissioned"
+  | "mint-confidential"
+  | "mint-unreadable";
 
 export type BurnGateVerdict =
   | {
@@ -188,11 +196,18 @@ export type BurnGateVerdict =
  * the card and the user consents to burn exactly what the fresh read
  * shows. A delegate present is NOT an abort: the owner can always burn
  * their own account's balance, and the delegation ends with the close.
+ *
+ * The optional mint read (audit M2) is ADDITIVE: every account-side
+ * verdict below decides first, exactly as before, and the mint
+ * blockers only convert a would-be pass into an abort. Undefined means
+ * the candidate is classic-program (no mint extensions possible) and
+ * the gate behaves bit-for-bit as before the mint check existed.
  */
 export function evaluateBurnGate(
   read: NativeAccountRead,
   reviewedMint: string,
-  connectedOwner: string
+  connectedOwner: string,
+  mintRead?: MintBurnRead
 ): BurnGateVerdict {
   if (read.kind === "missing") return { kind: "already-gone" };
   if (read.kind === "unreadable") return { kind: "abort", reason: "unreadable" };
@@ -209,6 +224,22 @@ export function evaluateBurnGate(
   if (read.mint !== reviewedMint)
     return { kind: "abort", reason: "mint-mismatch" };
   if (BigInt(read.amount) === 0n) return { kind: "already-empty" };
+  if (mintRead !== undefined) {
+    if (mintRead.status === "unreadable") {
+      return { kind: "abort", reason: "mint-unreadable" };
+    }
+    if (mintRead.status === "blocked") {
+      return {
+        kind: "abort",
+        reason:
+          mintRead.blocker === "paused"
+            ? "mint-paused"
+            : mintRead.blocker === "permissioned-burn"
+              ? "mint-permissioned"
+              : "mint-confidential",
+      };
+    }
+  }
   return {
     kind: "pass",
     balanceBeforeAction: read.amount,
@@ -233,6 +264,14 @@ export const BURN_GATE_ABORT_COPY: Record<BurnGateAbortReason, string> = {
     "The fresh read reports this account as a wrapped-SOL account. Use the unwrap action for wrapped SOL. Nothing was signed.",
   "mint-mismatch":
     "The fresh read shows a different mint on this account than the scan recorded. Nothing was signed.",
+  "mint-paused":
+    "This mint is paused. Only its authority can unpause it. Nothing was signed.",
+  "mint-permissioned":
+    "This mint requires its own burn authority to approve any burn. SOL.REPAIR cannot burn it. Nothing was signed.",
+  "mint-confidential":
+    "This mint uses confidential burning, which this tool does not support. Nothing was signed.",
+  "mint-unreadable":
+    "The mint's extensions could not be read. Nothing was signed.",
 };
 
 /** Terminal sentences for the two non-abort gate specials. */

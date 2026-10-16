@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   },
   conn: {
     getParsedAccountInfo: vi.fn(),
+    getAccountInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
     getSignatureStatuses: vi.fn(),
@@ -43,6 +44,8 @@ vi.mock("@/hooks/useRpcConnection", () => ({
 
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 void useRpcConnection;
+
+import { TOKEN_2022_PROGRAM_ID as T22_PROGRAM_ID } from "../src/lib/solana/tokenAccounts";
 
 const OWNER = Keypair.generate();
 const SWITCHED = Keypair.generate();
@@ -122,6 +125,16 @@ beforeEach(() => {
   });
   mocks.conn.sendRawTransaction.mockResolvedValue("SIG");
   mocks.conn.getBlockHeight.mockResolvedValue(999);
+  // Default mint read for token-2022 candidates: a clean, extension-free
+  // Token-2022 mint (82 bytes, no TLV), so fixtures that only exercise the
+  // account side are unaffected.
+  mocks.conn.getAccountInfo.mockResolvedValue({
+    owner: T22_PROGRAM_ID,
+    lamports: 1461600,
+    data: Buffer.alloc(82),
+    executable: false,
+    rentEpoch: 0,
+  });
 });
 
 afterEach(cleanup);
@@ -836,5 +849,167 @@ describe("the §8.5 evidence standard, the wallet switch, and remaining terminal
       result.current.reset();
     });
     expect(heldAction()).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The mint-side burn blockers (audit M2, 2026-10)                      */
+/* ------------------------------------------------------------------ */
+
+describe("useBurnDust mint blockers", () => {
+  const T22_CANDIDATE = {
+    ...CANDIDATE,
+    program: "token-2022" as const,
+    mint: Keypair.generate().publicKey.toBase58(),
+  };
+
+  function t22GateRead() {
+    return readShape({
+      owner: T22_PROGRAM_ID,
+      data: {
+        parsed: {
+          info: {
+            mint: T22_CANDIDATE.mint,
+            owner: OWNER.publicKey.toBase58(),
+            tokenAmount: {
+              amount: "5000",
+              decimals: 6,
+              uiAmount: 0.005,
+              uiAmountString: "0.005",
+            },
+            state: "initialized",
+            isNative: false,
+          },
+        },
+      },
+    });
+  }
+
+  function pausedMint() {
+    const head = Buffer.alloc(4);
+    head.writeUInt16LE(26, 0);
+    head.writeUInt16LE(33, 2);
+    const pausable = Buffer.alloc(33);
+    pausable.writeUInt8(1, 32);
+    return Buffer.concat([Buffer.alloc(165), Buffer.from([1]), head, pausable]);
+  }
+
+  it("aborts in-lock on a paused mint with the approved sentence, nothing signed", async () => {
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(t22GateRead());
+    mocks.conn.getAccountInfo.mockResolvedValue({
+      owner: T22_PROGRAM_ID,
+      lamports: 1461600,
+      data: pausedMint(),
+      executable: false,
+      rentEpoch: 0,
+    });
+    const signCalls = vi.fn();
+    mocks.wallet.signTransaction = vi.fn(async (tx) => {
+      signCalls();
+      void tx;
+      return fakeSigned();
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(T22_CANDIDATE, false);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe(
+      "This mint is paused. Only its authority can unpause it. Nothing was signed."
+    );
+    expect(signCalls).not.toHaveBeenCalled();
+    expect(mocks.conn.getAccountInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts conservatively when the mint is owned by another program", async () => {
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(t22GateRead());
+    mocks.conn.getAccountInfo.mockResolvedValue({
+      owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      lamports: 1461600,
+      data: Buffer.alloc(82),
+      executable: false,
+      rentEpoch: 0,
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(T22_CANDIDATE, false);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe(
+      "The mint's extensions could not be read. Nothing was signed."
+    );
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("proceeds through signing for a clean token-2022 mint", async () => {
+    mocks.conn.getParsedAccountInfo.mockImplementation(async () => {
+      calls += 1;
+      return calls === 1 ? t22GateRead() : { value: null };
+    });
+    let calls = 0;
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(T22_CANDIDATE, false);
+    });
+
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.getAccountInfo).toHaveBeenCalledTimes(1);
+    expect(result.current.outcome).toBe("burn-verified");
+  });
+
+  it("never reads the mint for a classic candidate", async () => {
+    mocks.conn.getParsedAccountInfo.mockImplementation(async () => {
+      goneCalls += 1;
+      return goneCalls === 1 ? gateRead() : { value: null };
+    });
+    let goneCalls = 0;
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(CANDIDATE, false);
+    });
+
+    expect(mocks.conn.getAccountInfo).not.toHaveBeenCalled();
+    expect(result.current.outcome).toBe("burn-verified");
+  });
+
+  it("names the possible mint cause on the on-chain-failure terminal for token-2022", async () => {
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(t22GateRead());
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: { InstructionError: [0, { Custom: 17 }] }, confirmationStatus: "confirmed" }],
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(T22_CANDIDATE, false);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("on-chain-failure");
+    expect(result.current.error).toContain(
+      "If this mint requires permissioned burning, is paused, or uses confidential burning, the burn can never succeed. Nothing was burned."
+    );
+  });
+
+  it("keeps the classic on-chain-failure terminal unchanged", async () => {
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(gateRead());
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: { InstructionError: [0, { Custom: 17 }] }, confirmationStatus: "confirmed" }],
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(CANDIDATE, false);
+    });
+
+    expect(result.current.outcome).toBe("on-chain-failure");
+    expect(result.current.error).not.toContain("permissioned burning");
   });
 });
