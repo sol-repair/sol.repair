@@ -574,6 +574,22 @@ export function useRepairWallet() {
               ? null
               : message;
 
+          // The post-scan withheld-fee race (audit M1): a Token-2022
+          // account can receive an extension balance after the scan
+          // passed it, and the token program then refuses its close -
+          // the same blocker the scan itself now skips, seen here only
+          // because the scan's view went stale. When the failed batch
+          // contained one, say so and point at the rescan, which lists
+          // such accounts as skipped with the reason. Hedged on purpose:
+          // without the failed transaction's logs this is a possible
+          // cause, not a diagnosed one.
+          const token22Hint =
+            currentBatch?.some(
+              (account) => account.program === "token-2022"
+            ) ?? false
+              ? " If the failed batch included a Token-2022 account, it may hold an extension balance the token program refuses to close. A fresh scan lists such accounts as skipped with the reason, and the repair can then close the rest."
+              : "";
+
           setState({
             status: "error",
             signature: confirmed[0] ?? null,
@@ -583,14 +599,15 @@ export function useRepairWallet() {
             recoveredLamports: recoveredOf(reportClosed),
             progress: null,
             error: partial
-              ? `Repair stopped after ${closed} of ${runAccounts.length} accounts were closed (${lamportsToSol(recoveredOf(reportClosed))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}${verifyFailed ? " On-chain verification could not be reached, so this count is from the confirmed transactions - the linked signature is the receipt." : ""}`
+              ? `Repair stopped after ${closed} of ${runAccounts.length} accounts were closed (${lamportsToSol(recoveredOf(reportClosed))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}${verifyFailed ? " On-chain verification could not be reached, so this count is from the confirmed transactions - the linked signature is the receipt." : ""}${token22Hint}`
               : rejected
                 ? "Transaction cancelled. Nothing was sent."
                 : expired
                   ? "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly."
                   : err instanceof FriendlyError
                     ? message
-                    : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open.",
+                    : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open." +
+                      token22Hint,
             errorDetail: rawDetail,
           });
         }
