@@ -73,6 +73,12 @@ Token accounts (classic SPL Token and Token-2022) that pass all of these:
    offered like any other, delegate or not. A frozen account that still
    holds tokens is trapped by the token's freeze authority: no tool can
    close it, and only that authority can release it.
+6. Token-2022 extensions with a balance. A Token-2022 account that holds
+   a withheld transfer fee or an encrypted balance in a privacy extension
+   is skipped, because the token program refuses to close those until the
+   balance is released. The scan reads the extension state directly to
+   see this; other extensions (such as immutable owner, which every
+   Token-2022 token account carries) do not block a close.
 
 Fail any one of those and the account is skipped, no exceptions. NFTs and
 any account holding tokens are protected by the zero-balance rule.

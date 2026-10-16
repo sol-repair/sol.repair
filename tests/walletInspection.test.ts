@@ -337,3 +337,86 @@ describe("summarizeWalletState", () => {
     expect(summary.rentLamports.recoverable).toBe(11n);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* The Token-2022 close-blocker causes (2026-10 extension check)       */
+/* ------------------------------------------------------------------ */
+
+describe("close-blocked-extension and extension-unreadable mapping", () => {
+  it("counts a close-blocked-extension skip under its own kind", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: "B1",
+            program: "token-2022",
+            cause: "close-blocked-extension",
+            nativeStatus: "non-native",
+            extensionBlocker: "withheld-fee",
+          }),
+        ],
+      })
+    );
+    expect(summary.totals.byKind["close-blocked-extension"]).toBe(1);
+    expect(summary.groups["close-blocked-extension"]).toHaveLength(1);
+    expect(summary.incomplete).toBe(false);
+  });
+
+  it("keeps the co-occurrence tags on a blocked skip", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: "B2",
+            program: "token-2022",
+            cause: "close-blocked-extension",
+            delegated: true,
+            frozen: true,
+          }),
+        ],
+      })
+    );
+    expect(summary.totals.byKind["close-blocked-extension"]).toBe(1);
+    expect(summary.totals.byKind["active-delegation"]).toBe(1);
+    expect(summary.totals.byKind.frozen).toBe(1);
+  });
+
+  it("maps extension-unreadable onto the unreadable kind and flags incomplete", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: "B3",
+            program: "token-2022",
+            cause: "extension-unreadable",
+            nativeStatus: "non-native",
+          }),
+        ],
+      })
+    );
+    expect(summary.totals.byKind.unreadable).toBe(1);
+    expect(summary.totals.byKind["close-blocked-extension"]).toBe(0);
+    expect(summary.incomplete).toBe(true);
+  });
+
+  it("keeps the delegation tag on an unreadable-extension skip", () => {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: "B4",
+            program: "token-2022",
+            cause: "extension-unreadable",
+            delegated: true,
+          }),
+        ],
+      })
+    );
+    expect(summary.totals.byKind.unreadable).toBe(1);
+    expect(summary.totals.byKind["active-delegation"]).toBe(1);
+  });
+});

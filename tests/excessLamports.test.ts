@@ -261,3 +261,56 @@ describe("evaluateExcessGate", () => {
     });
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* The close-blocked-extension side effect, pinned on owner order      */
+/* ------------------------------------------------------------------ */
+
+describe("collectToken2022Keys keeps close-blocked skips excess-detectable", () => {
+  function scanWithSkipped(skipped: SkippedAccount[]): ScanResult {
+    return {
+      totalAccounts: skipped.length,
+      eligibleAccounts: [],
+      recoverableLamports: 0n,
+      skippedAccounts: skipped,
+    };
+  }
+
+  it("includes a close-blocked-extension skip with non-native status", () => {
+    const keys = collectToken2022Keys(
+      scanWithSkipped([
+        {
+          pubkey: Keypair.generate().publicKey.toBase58(),
+          mint: Keypair.generate().publicKey.toBase58(),
+          reason:
+            "holds a withheld transfer fee only the mint's fee authority can release",
+          program: "token-2022",
+          cause: "close-blocked-extension",
+          lamports: 2039280,
+          nativeStatus: "non-native",
+          extensionBlocker: "withheld-fee",
+        },
+      ])
+    );
+    expect(keys).toHaveLength(1);
+    expect(keys[0].nativeStatus).toBe("non-native");
+    expect(keys[0].frozen).toBe(false);
+  });
+
+  it("includes an extension-unreadable skip the same way", () => {
+    const keys = collectToken2022Keys(
+      scanWithSkipped([
+        {
+          pubkey: Keypair.generate().publicKey.toBase58(),
+          mint: Keypair.generate().publicKey.toBase58(),
+          reason: "its extensions could not be read",
+          program: "token-2022",
+          cause: "extension-unreadable",
+          lamports: 2039280,
+          nativeStatus: "non-native",
+        },
+      ])
+    );
+    expect(keys).toHaveLength(1);
+  });
+});

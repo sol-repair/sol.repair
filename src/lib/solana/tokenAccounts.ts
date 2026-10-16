@@ -12,6 +12,8 @@
 
 import { Connection, PublicKey } from "@solana/web3.js";
 
+import { readCloseBlockers } from "./t22CloseBlockers";
+
 /** The standard SPL Token Program. */
 export const TOKEN_PROGRAM_ID = new PublicKey(
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
@@ -101,7 +103,14 @@ export type SkipCause =
   // of 2026-09-25 (a frozen delegated account is now eligible). The
   // member and the inspection mapping stay so a stale fixture or a
   // future site cannot silently misaggregate.
-  | "frozen-with-delegate";
+  | "frozen-with-delegate"
+  // Token-2022 only, produced by the extension close-blocker check that
+  // runs after the five parsed checks: the on-chain CloseAccount refuses
+  // the account until the extension balance is released.
+  | "close-blocked-extension"
+  // Token-2022 only: the extension state could not be read or decoded,
+  // so closability cannot be judged. Fail toward not promising.
+  | "extension-unreadable";
 
 /** An account we skip on purpose, with the reason.
  *  Shown to the user so the scan is verifiable, not a black box. */
@@ -148,6 +157,12 @@ export interface SkippedAccount {
    *  the skip decision and the close flow's own isNative check are
    *  unchanged. */
   nativeStatus?: NativeStatus;
+  /** Which extension balance blocks the close, carried only on
+   *  close-blocked-extension skips (Token-2022 accounts). The exact
+   *  closable rules are source-verified against the on-chain program
+   *  (see t22CloseBlockers.ts). Evidence only; the skip decision is
+   *  what acts on it. */
+  extensionBlocker?: "withheld-fee" | "confidential-balance";
   /** True when the parsed state is "frozen" (funded skips; frozen EMPTY
    *  accounts are eligible and carry the flag on ClosableAccount). */
   frozen?: boolean;
@@ -420,9 +435,76 @@ export async function getClosableAccounts(
     }
   }
 
+  // --- The Token-2022 extension close-blocker check ---
+  //
+  // The five parsed checks cannot see token extensions: the parsed RPC
+  // response omits them. A Token-2022 account that passed all five can
+  // still be unclosable, because the on-chain CloseAccount refuses an
+  // account with a withheld transfer fee or an encrypted balance in a
+  // privacy extension (the closable() rules are source-verified; see
+  // t22CloseBlockers.ts). Offering such an account would build a batch
+  // whose close always fails, and one such account fails its whole
+  // 20-close transaction. So the eligible Token-2022 accounts get one
+  // chunked raw read (100 keys per call, the RPC cap): accounts whose
+  // extensions hold a blocker, or whose extensions cannot be read, move
+  // to the skipped list — fail toward not promising. Classic-program
+  // accounts cannot carry extensions and are never read. This runs at
+  // the same node-default commitment as the parsed scan above.
+  let finalEligible = eligibleAccounts;
+  const t22Eligible = eligibleAccounts.filter(
+    (account) => account.program === "token-2022"
+  );
+  if (t22Eligible.length > 0) {
+    const reads = await readCloseBlockers(
+      connection,
+      t22Eligible.map((account) => account.pubkey)
+    );
+    const kept: ClosableAccount[] = [];
+    for (const account of eligibleAccounts) {
+      if (account.program !== "token-2022") {
+        kept.push(account);
+        continue;
+      }
+      const read = reads.get(account.pubkey);
+      if (read !== undefined && read.status === "clear") {
+        kept.push(account);
+        continue;
+      }
+      const blockedRead =
+        read !== undefined && read.status === "blocked" ? read : null;
+      skippedAccounts.push({
+        pubkey: account.pubkey,
+        mint: account.mint,
+        reason:
+          blockedRead !== null
+            ? blockedRead.blocker === "withheld-fee"
+              ? "holds a withheld transfer fee only the mint's fee authority can release"
+              : "holds an encrypted balance in a privacy extension that only a supporting wallet can release"
+            : "its extensions could not be read",
+        program: "token-2022",
+        cause:
+          blockedRead !== null
+            ? "close-blocked-extension"
+            : "extension-unreadable",
+        lamports: account.lamports,
+        ...(blockedRead !== null
+          ? { extensionBlocker: blockedRead.blocker }
+          : {}),
+        // The account passed check #4 on the parsed read, so its native
+        // status is confirmed non-native; recorded explicitly because
+        // the excess-detection selector keys on it.
+        nativeStatus: "non-native",
+        ...(account.needsRevoke ? { delegated: true } : {}),
+        ...(account.frozen ? { frozen: true } : {}),
+      });
+      recoverableLamports -= BigInt(account.lamports);
+    }
+    finalEligible = kept;
+  }
+
   return {
     totalAccounts,
-    eligibleAccounts,
+    eligibleAccounts: finalEligible,
     recoverableLamports,
     skippedAccounts,
   };

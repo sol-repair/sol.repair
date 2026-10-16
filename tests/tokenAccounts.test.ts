@@ -1,5 +1,7 @@
 /**
- * Fixture tests for the five eligibility checks in tokenAccounts.ts.
+ * Fixture tests for the eligibility checks in tokenAccounts.ts: the five
+ * parsed-state checks plus the Token-2022 extension-level close-blocker
+ * check that runs after them.
  *
  * The account data here is frozen in the exact nested shape the parsed
  * RPC returns (account.data.parsed.info), including the cases where the
@@ -86,11 +88,17 @@ function brokenData(
 }
 
 /** The one mocked boundary: the parsed-accounts RPC call, keyed by
- *  program id, exactly as the scan consumes it. */
+ * program id, exactly as the scan consumes it. The extension-check raw
+ * read is mocked alongside it: rawByPubkey maps an account pubkey to the
+ * raw Token-2022 account the chunked read returns (null = vanished);
+ * accounts not in the map get a clean, extension-free account, so
+ * fixtures that only exercise the parsed checks are unaffected. */
 function mockConnection(
-  byProgram: Record<string, ReturnType<typeof tokenAccount>[]>
+  byProgram: Record<string, ReturnType<typeof tokenAccount>[]>,
+  rawByPubkey: Record<string, { owner: PublicKey; data: Buffer } | null> = {}
 ) {
   const queried: string[] = [];
+  const rawCalls: number[] = [];
   const connection = {
     async getParsedTokenAccountsByOwner(
       _owner: PublicKey,
@@ -99,20 +107,40 @@ function mockConnection(
       queried.push(filter.programId.toBase58());
       return { value: byProgram[filter.programId.toBase58()] ?? [] };
     },
+    async getMultipleAccountsInfo(keys: PublicKey[]) {
+      rawCalls.push(keys.length);
+      return keys.map((key) =>
+        key.toBase58() in rawByPubkey
+          ? rawByPubkey[key.toBase58()]
+          : {
+              lamports: 2_039_280,
+              owner: TOKEN_2022_PROGRAM_ID,
+              data: Buffer.alloc(165),
+            }
+      );
+    },
   };
-  return { connection: connection as unknown as Connection, queried };
+  return {
+    connection: connection as unknown as Connection,
+    queried,
+    rawCalls,
+  };
 }
 
 async function runScan(
   splAccounts: ReturnType<typeof tokenAccount>[] = [],
-  token22Accounts: ReturnType<typeof tokenAccount>[] = []
+  token22Accounts: ReturnType<typeof tokenAccount>[] = [],
+  rawByPubkey: Record<string, { owner: PublicKey; data: Buffer } | null> = {}
 ) {
-  const { connection, queried } = mockConnection({
-    [TOKEN_PROGRAM_ID.toBase58()]: splAccounts,
-    [TOKEN_2022_PROGRAM_ID.toBase58()]: token22Accounts,
-  });
+  const { connection, queried, rawCalls } = mockConnection(
+    {
+      [TOKEN_PROGRAM_ID.toBase58()]: splAccounts,
+      [TOKEN_2022_PROGRAM_ID.toBase58()]: token22Accounts,
+    },
+    rawByPubkey
+  );
   const result = await getClosableAccounts(connection, OWNER);
-  return { result, queried };
+  return { result, queried, rawCalls };
 }
 
 describe("getClosableAccounts eligibility checks", () => {
@@ -557,4 +585,197 @@ describe("getClosableAccounts deep field validation", () => {
       expect(skipped.mint).toBe(pk(seed + 100).toBase58());
     });
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* The Token-2022 extension close-blocker check (scan level)           */
+/* ------------------------------------------------------------------ */
+
+/** A Token-2022 fixture in the parsed shape (the parsed owner field is
+ * display evidence only; the parsed scan never checks it). */
+function t22Parsed(seed: number, overrides: Record<string, unknown> = {}) {
+  return tokenAccount(seed, overrides, {
+    owner: TOKEN_2022_PROGRAM_ID.toBase58(),
+  });
+}
+
+/** Raw Token-2022 account data for the extension read: 165-byte base,
+ * the account-type byte 2 (AccountType.Account; Mint is 1), then the
+ * TLV entries (u16 LE type, u16 LE length, value) exactly as the
+ * program serializes them. */
+function rawT22(entries: Array<[number, Buffer]>): Buffer {
+  const chunks = entries.map(([type, value]) => {
+    const head = Buffer.alloc(4);
+    head.writeUInt16LE(type, 0);
+    head.writeUInt16LE(value.length, 2);
+    return Buffer.concat([head, value]);
+  });
+  return Buffer.concat([Buffer.alloc(165), Buffer.from([2]), ...chunks]);
+}
+
+function u64le(amount: bigint): Buffer {
+  const value = Buffer.alloc(8);
+  value.writeBigUInt64LE(amount);
+  return value;
+}
+
+/** A full-size ConfidentialTransferAccount value with one non-zero byte
+ * at the given offset (a non-zero ciphertext). */
+function confidentialValue(nonZeroOffset: number | null): Buffer {
+  const value = Buffer.alloc(331);
+  if (nonZeroOffset !== null) value[nonZeroOffset] = 1;
+  return value;
+}
+
+describe("getClosableAccounts Token-2022 close-blocker check", () => {
+  it("keeps a Token-2022 account with only ImmutableOwner eligible (over-exclusion guard)", async () => {
+    const seed = 20;
+    const { result, rawCalls } = await runScan(
+      [],
+      [t22Parsed(seed)],
+      {
+        [pk(seed).toBase58()]: {
+          owner: TOKEN_2022_PROGRAM_ID,
+          data: rawT22([[7, Buffer.alloc(0)]]),
+        },
+      }
+    );
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].program).toBe("token-2022");
+    expect(result.recoverableLamports).toBe(2_039_280n);
+    expect(result.skippedAccounts).toHaveLength(0);
+    expect(rawCalls).toEqual([1]);
+  });
+
+  it("skips a withheld-fee account with the approved reason and evidence", async () => {
+    const seed = 21;
+    const { result } = await runScan(
+      [],
+      [t22Parsed(seed)],
+      {
+        [pk(seed).toBase58()]: {
+          owner: TOKEN_2022_PROGRAM_ID,
+          data: rawT22([[2, u64le(500n)]]),
+        },
+      }
+    );
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.recoverableLamports).toBe(0n);
+    expect(result.skippedAccounts).toHaveLength(1);
+    const skipped = result.skippedAccounts[0];
+    expect(skipped.cause).toBe("close-blocked-extension");
+    expect(skipped.extensionBlocker).toBe("withheld-fee");
+    expect(skipped.reason).toBe(
+      "holds a withheld transfer fee only the mint's fee authority can release"
+    );
+    expect(skipped.program).toBe("token-2022");
+    expect(skipped.nativeStatus).toBe("non-native");
+    expect(skipped.lamports).toBe(2_039_280);
+  });
+
+  it("skips an encrypted-balance account (confidential pending) with the approved reason", async () => {
+    const seed = 22;
+    const { result } = await runScan(
+      [],
+      [t22Parsed(seed)],
+      {
+        [pk(seed).toBase58()]: {
+          owner: TOKEN_2022_PROGRAM_ID,
+          data: rawT22([[5, confidentialValue(33)]]),
+        },
+      }
+    );
+    expect(result.skippedAccounts).toHaveLength(1);
+    expect(result.skippedAccounts[0].cause).toBe("close-blocked-extension");
+    expect(result.skippedAccounts[0].extensionBlocker).toBe(
+      "confidential-balance"
+    );
+    expect(result.skippedAccounts[0].reason).toBe(
+      "holds an encrypted balance in a privacy extension that only a supporting wallet can release"
+    );
+  });
+
+  it("skips a vanished raw read with the unreadable-extensions cause", async () => {
+    const seed = 23;
+    const { result } = await runScan(
+      [],
+      [t22Parsed(seed)],
+      { [pk(seed).toBase58()]: null }
+    );
+    expect(result.eligibleAccounts).toHaveLength(0);
+    expect(result.skippedAccounts).toHaveLength(1);
+    expect(result.skippedAccounts[0].cause).toBe("extension-unreadable");
+    expect(result.skippedAccounts[0].reason).toBe(
+      "its extensions could not be read"
+    );
+    expect(result.skippedAccounts[0].nativeStatus).toBe("non-native");
+  });
+
+  it("skips a malformed extension list with the unreadable-extensions cause", async () => {
+    const seed = 24;
+    const { result } = await runScan(
+      [],
+      [t22Parsed(seed)],
+      {
+        [pk(seed).toBase58()]: {
+          owner: TOKEN_2022_PROGRAM_ID,
+          data: rawT22([[5, Buffer.alloc(10)]]),
+        },
+      }
+    );
+    expect(result.skippedAccounts).toHaveLength(1);
+    expect(result.skippedAccounts[0].cause).toBe("extension-unreadable");
+    expect(result.recoverableLamports).toBe(0n);
+  });
+
+  it("keeps a classic neighbor eligible and counts only its rent", async () => {
+    const seed = 25;
+    const { result, rawCalls } = await runScan(
+      [tokenAccount(26)],
+      [t22Parsed(seed)],
+      {
+        [pk(seed).toBase58()]: {
+          owner: TOKEN_2022_PROGRAM_ID,
+          data: rawT22([[2, u64le(1n)]]),
+        },
+      }
+    );
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(result.eligibleAccounts[0].program).toBe("spl");
+    expect(result.recoverableLamports).toBe(2_039_280n);
+    expect(result.skippedAccounts).toHaveLength(1);
+    // The raw read covers only the Token-2022 candidate, never classic.
+    expect(rawCalls).toEqual([1]);
+  });
+
+  it("carries the delegated flag onto a blocked skip", async () => {
+    const seed = 27;
+    const { result } = await runScan(
+      [],
+      [t22Parsed(seed, { delegate: pk(28).toBase58() })],
+      {
+        [pk(seed).toBase58()]: {
+          owner: TOKEN_2022_PROGRAM_ID,
+          data: rawT22([[2, u64le(1n)]]),
+        },
+      }
+    );
+    expect(result.skippedAccounts).toHaveLength(1);
+    expect(result.skippedAccounts[0].delegated).toBe(true);
+  });
+
+  it("issues no raw read when only classic accounts are eligible", async () => {
+    const { result, rawCalls } = await runScan([tokenAccount(30)]);
+    expect(result.eligibleAccounts).toHaveLength(1);
+    expect(rawCalls).toEqual([]);
+  });
+
+  it("chunks the raw read at 100 accounts", async () => {
+    const accounts = Array.from({ length: 150 }, (_, i) =>
+      t22Parsed(100 + i)
+    );
+    const { result, rawCalls } = await runScan([], accounts);
+    expect(result.eligibleAccounts).toHaveLength(150);
+    expect(rawCalls).toEqual([100, 50]);
+  });
 });

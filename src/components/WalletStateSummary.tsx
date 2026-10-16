@@ -261,6 +261,46 @@ export function WalletStateSummary({
             wrapped-SOL accounts are counted under accounts holding tokens.
           </li>
         )}
+        {count("close-blocked-extension") > 0 && (
+          <li>
+            {count("close-blocked-extension")}{" "}
+            {plural(
+              count("close-blocked-extension"),
+              "account holds",
+              "accounts hold"
+            )}{" "}
+            a balance in a token extension the close would reject. The skip
+            list names the blocker on each account.
+            <details className="mt-1">
+              <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+                Which accounts carry those balances
+              </summary>
+              <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
+                {groups["close-blocked-extension"].map((entry) => {
+                  // Only SkippedAccount carries the blocker evidence, so
+                  // the union narrows on the key.
+                  const blocker =
+                    "extensionBlocker" in entry
+                      ? entry.extensionBlocker
+                      : undefined;
+                  return (
+                    <div key={entry.pubkey} className="break-all">
+                      <AccountLink address={entry.pubkey} />{" "}
+                      {blocker === "withheld-fee"
+                        ? "holds a withheld transfer fee."
+                        : blocker === "confidential-balance"
+                          ? "holds an encrypted balance."
+                          : // No blocker on the entry: reachable only from
+                            // a hand-built or stale summary, never from the
+                            // scan.
+                            "blocker not recorded."}
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          </li>
+        )}
         {count("frozen") > 0 && (
           <li>
             {count("frozen")} frozen{" "}
