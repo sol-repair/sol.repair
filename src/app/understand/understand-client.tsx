@@ -269,10 +269,29 @@ export default function UnderstandPage() {
 
         {state.kind === "error" && (
           <div className="mb-6">
-            <p className="text-sm text-red-400">Could not reach the RPC.</p>
-            <p className="mt-1 break-all text-xs text-zinc-400">
-              {state.detail}
+            <p className="text-sm text-red-400">
+              The transaction could not be fetched.
             </p>
+            <p className="mt-1 text-sm text-zinc-300">
+              The signature may not match a transaction on this network, or
+              the RPC endpoint could not be reached. Check the signature and
+              try again.
+            </p>
+            {/* Raw library text stays available for debugging but off the
+                primary surface: the same idiom as the repair card. The
+                detail can carry fee-ledger vocabulary, because the fetch
+                layer is shared with the ledger page; it is diagnostic, not
+                page copy. */}
+            {state.detail && (
+              <details className="mt-2">
+                <summary className="cursor-pointer py-1 text-xs text-zinc-400">
+                  Technical details
+                </summary>
+                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-zinc-400">
+                  {state.detail}
+                </pre>
+              </details>
+            )}
           </div>
         )}
 
