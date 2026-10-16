@@ -33,8 +33,9 @@ trust it, don't use it.
 - Not a swap tool. It doesn't trade your tokens for anything.
 - Not a custody service. It never has your money, so there is nothing to
   run off with.
-- Not financial advice. It's a utility that runs one specific on-chain
-  operation and nothing else.
+- Not financial advice. It's a set of repair actions on your own token
+  accounts, plus read-only tools that explain what you are signing, and
+  nothing beyond that.
 
 ## The fee ledger
 
@@ -103,6 +104,21 @@ service fee - the lamports are your own principal. It is offered for
 accounts the scan confirms as non-native Token-2022, including frozen
 ones, because the on-chain instruction does not check frozen state.
 
+## Guides and read-only tools
+
+Beyond the repair tool itself, the site ships:
+
+- Six guides under /guides: what Solana rent is, how to close empty token
+  accounts, why random tokens show up in your wallet, how to check and
+  revoke token approvals, how rent cuts let you reclaim excess SOL, and
+  what to check after signing something you did not fully read.
+- /understand: paste a transaction signature, or connect read-only to
+  walk your recent transactions, and see what each instruction did and
+  what lasting permissions it left behind.
+- /report: a read-only wallet health report.
+- /privacy and /terms: the policies. Vercel Analytics records aggregate
+  page visits; see the privacy page for what that means.
+
 ## Running it locally
 
 Node.js 20 or newer.
@@ -155,15 +171,20 @@ isolated under src/lib/solana/, so moving to v2 later won't mean a rewrite.
 ## Layout
 
 ```
-src/app/          Next.js App Router pages and layout
-src/components/   UI components (wallet button, network badge)
-src/hooks/        React hooks for the scan, the repair, and the per-item
-                  action flows
+src/app/          Next.js App Router pages and layout (repair tool, fee
+                  ledger, guides, understand, report, privacy, terms)
+src/components/   UI components: wallet button, network badge, per-action
+                  sections, guides, explainer and report views
+src/hooks/        React hooks for the scan, the repair, the per-item
+                  action flows, the fee ledger, and the RPC connection
+src/lib/          Shared app code: guide content schema, page metadata,
+                  rent math, the cross-action mutex
 src/lib/security/ Content security policy builder
-src/lib/solana/   Solana domain logic: scanning, eligibility, transactions,
-                  decoding, the shared transaction lifecycle beneath the
-                  per-item actions, and the plain-language explanation of
-                  a transaction's instructions and what they leave behind
+src/lib/solana/   Solana domain logic: scanning, eligibility, wallet
+                  inspection, transactions, decoding, the shared
+                  transaction lifecycle beneath the per-item actions, and
+                  the plain-language explanation of a transaction's
+                  instructions and what they leave behind
 scripts/          Operator tooling: the fee-ledger audit script
 tests/            Vitest suite: units, chain fixtures, page and hook tests
 ```
@@ -177,8 +198,8 @@ tests/            Vitest suite: units, chain fixtures, page and hook tests
   connected wallet's public key is used.
 - Recovered SOL always goes back to the connected wallet.
 
-Found a security issue? Email admin@sol.repair with the details. Please
-don't open a public issue for security problems.
+Found a security issue? See SECURITY.md for how to report it
+(admin@sol.repair, or a private GitHub security advisory).
 
 ## License
 
