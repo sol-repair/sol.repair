@@ -29,6 +29,7 @@ export const FINDING_KINDS = [
   "funded-holding",
   "active-delegation",
   "foreign-close-authority",
+  "funded-foreign-close-authority",
   "wrapped-sol",
   "frozen",
   "uninitialized",
@@ -77,6 +78,7 @@ function newGroups(): Record<
     "funded-holding": [],
     "active-delegation": [],
     "foreign-close-authority": [],
+    "funded-foreign-close-authority": [],
     "wrapped-sol": [],
     frozen: [],
     uninitialized: [],
@@ -90,6 +92,7 @@ function newCounts(): Record<FindingKind, number> {
     "funded-holding": 0,
     "active-delegation": 0,
     "foreign-close-authority": 0,
+    "funded-foreign-close-authority": 0,
     "wrapped-sol": 0,
     frozen: 0,
     uninitialized: 0,
@@ -126,6 +129,9 @@ export function summarizeWalletState(
         push("funded-holding", skipped);
         if (skipped.frozen) push("frozen", skipped);
         if (skipped.delegated) push("active-delegation", skipped);
+        if (skipped.foreignCloseAuthority) {
+          push("funded-foreign-close-authority", skipped);
+        }
         inFundedAccounts += BigInt(skipped.lamports ?? 0);
         break;
       }

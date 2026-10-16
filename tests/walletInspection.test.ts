@@ -181,6 +181,58 @@ describe("summarizeWalletState", () => {
     }
   });
 
+  it("lands a close-authority skip in its group with the authority address carried", () => {
+    const entry = skip({
+      cause: "close-authority",
+      closeAuthority: "AUTH",
+    });
+    const summary = summarizeWalletState(
+      scan({ totalAccounts: 1, skippedAccounts: [entry] })
+    );
+    expect(summary.totals.byKind["foreign-close-authority"]).toBe(1);
+    expect(summary.groups["foreign-close-authority"][0]).toBe(entry);
+    // The grouped entry is the original object, so its evidence came
+    // with it; the guard narrows the union to SkippedAccount.
+    const grouped = summary.groups["foreign-close-authority"][0];
+    expect("cause" in grouped && grouped.closeAuthority).toBe("AUTH");
+  });
+
+  it("counts a funded foreign-close-authority skip in BOTH kinds, by reference", () => {
+    const fundedForeign = skip({
+      cause: "funded",
+      reason: "holds a token balance",
+      balance: "9",
+      decimals: 6,
+      lamports: 100,
+      foreignCloseAuthority: true,
+      closeAuthority: "AUTH",
+    });
+    const summary = summarizeWalletState(
+      scan({ totalAccounts: 1, skippedAccounts: [fundedForeign] })
+    );
+    expect(summary.totals.byKind["funded-holding"]).toBe(1);
+    expect(summary.totals.byKind["funded-foreign-close-authority"]).toBe(1);
+    expect(summary.groups["funded-holding"][0]).toBe(fundedForeign);
+    expect(summary.groups["funded-foreign-close-authority"][0]).toBe(
+      fundedForeign
+    );
+  });
+
+  it("keeps a funded skip without the foreign flag out of the new kind", () => {
+    const funded = skip({
+      cause: "funded",
+      reason: "holds a token balance",
+      balance: "5",
+      lamports: 1,
+    });
+    const summary = summarizeWalletState(
+      scan({ totalAccounts: 1, skippedAccounts: [funded] })
+    );
+    expect(summary.totals.byKind["funded-holding"]).toBe(1);
+    expect(summary.totals.byKind["funded-foreign-close-authority"]).toBe(0);
+    expect(summary.groups["funded-foreign-close-authority"]).toHaveLength(0);
+  });
+
   it("counts a frozen delegated empty account in BOTH kinds", () => {
     const frozenDelegated = skip({
       cause: "frozen-with-delegate",
