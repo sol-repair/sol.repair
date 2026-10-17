@@ -124,15 +124,13 @@ afterEach(() => {
 });
 
 describe("in-flight repair progress panel", () => {
-  it("shows motion and a ticking counter while the network confirms", async () => {
+  it("shows motion and a ticking counter while the transaction is in flight", async () => {
     vi.useFakeTimers();
-    mocks.repair.status = "verifying";
+    mocks.repair.status = "sending";
     render(<Home />);
 
     const box = screen.getByRole("status");
-    expect(box.textContent).toContain(
-      "Sent. Waiting for the network to confirm it..."
-    );
+    expect(box.textContent).toContain("Approved. Sending to the network...");
     expect(box.querySelector("svg.animate-spin")).toBeTruthy();
     expect(screen.getByText("0s")).toBeTruthy();
     // The ticking number must stay out of the live region (audit F5):
@@ -143,6 +141,21 @@ describe("in-flight repair progress panel", () => {
     });
     expect(screen.getByText("3s")).toBeTruthy();
     expect(screen.queryByText("0s")).toBeNull();
+  });
+
+  it("never renders a verifying card: the repair hook never sets that status", async () => {
+    // The hook goes from "sending" straight to "checking" (a refused or
+    // failed submission never proved "sent"), so a "verifying" card would
+    // be dead display code claiming a state that cannot exist. Pin its
+    // absence: even with the hook force-fed the dead status, no copy may
+    // claim the network is confirming.
+    mocks.repair.status = "verifying";
+    render(<Home />);
+
+    expect(screen.queryByText(/Sent\. Waiting for the network/)).toBeNull();
+    expect(
+      screen.queryByText(/Waiting for the network to confirm/)
+    ).toBeNull();
   });
 
   it("marks the sending stage as approved and in flight", () => {
@@ -177,7 +190,7 @@ describe("in-flight repair progress panel", () => {
 
   it("keeps the owner's writing rules on the in-flight copy", () => {
     const panels: string[] = [];
-    for (const status of ["sending", "verifying"]) {
+    for (const status of ["sending", "checking"] as const) {
       mocks.repair.status = status;
       const { unmount } = render(<Home />);
       panels.push(screen.getByRole("status").textContent ?? "");
