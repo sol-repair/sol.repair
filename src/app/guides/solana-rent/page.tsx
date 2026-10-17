@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { RentCalculator } from "@/components/RentCalculator";
+import { SiteHeader } from "@/components/SiteHeader";
 import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
+import { GuideToc } from "@/components/GuideToc";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { guideSchema } from "@/lib/guideSchema";
 
@@ -25,12 +27,7 @@ export default function SolanaRentGuide() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <GuideBreadcrumb title="What is Solana rent?" />
 
@@ -38,11 +35,17 @@ export default function SolanaRentGuide() {
           What is Solana rent?
         </h1>
 
+        <GuideToc
+          items={[
+            { href: "#rent-is-a-deposit-not-a-fee", label: "Rent is a deposit, not a fee" },
+            { href: "#where-the-number-comes-from", label: "Where the number comes from" },
+            { href: "#getting-it-back", label: "Getting it back" },
+          ]}
+        />
+
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Rent is a deposit, not a fee
-            </h2>
+            <h2 id="rent-is-a-deposit-not-a-fee" className="mb-2 text-lg font-semibold text-zinc-50">Rent is a deposit, not a fee</h2>
             <p>
               Solana charges for the space your accounts use on the chain. For
               token accounts, the network does not collect that rent a little
@@ -100,9 +103,7 @@ export default function SolanaRentGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Where the number comes from
-            </h2>
+            <h2 id="where-the-number-comes-from" className="mb-2 text-lg font-semibold text-zinc-50">Where the number comes from</h2>
             <p>
               The deposit comes from a network parameter, lamports per byte,
               and the network lowers it from time to time. Mainnet lowered it
@@ -121,7 +122,7 @@ export default function SolanaRentGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">Getting it back</h2>
+            <h2 id="getting-it-back" className="mb-2 text-lg font-semibold text-zinc-50">Getting it back</h2>
             <p>
               Closing an empty token account is one instruction. The rent goes
               to a destination address, normally your own wallet, and it lands

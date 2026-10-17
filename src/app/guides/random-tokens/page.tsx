@@ -3,6 +3,8 @@ import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { guideSchema } from "@/lib/guideSchema";
 import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
+import { SiteHeader } from "@/components/SiteHeader";
+import { GuideToc } from "@/components/GuideToc";
 
 export const metadata: Metadata = pageMetadata({
   title: "Why do I have random tokens in my wallet?",
@@ -23,12 +25,7 @@ export default function RandomTokensGuide() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <GuideBreadcrumb title="Why do I have random tokens in my wallet?" />
 
@@ -36,11 +33,18 @@ export default function RandomTokensGuide() {
           Why do I have random tokens in my wallet?
         </h1>
 
+        <GuideToc
+          items={[
+            { href: "#it-is-normal-and-usually-harmless", label: "It is normal, and usually harmless" },
+            { href: "#why-people-send-them", label: "Why people send them" },
+            { href: "#what-they-actually-cost-you", label: "What they actually cost you" },
+            { href: "#how-to-clean-it-up", label: "How to clean it up" },
+          ]}
+        />
+
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              It is normal, and usually harmless
-            </h2>
+            <h2 id="it-is-normal-and-usually-harmless" className="mb-2 text-lg font-semibold text-zinc-50">It is normal, and usually harmless</h2>
             <p>
               You open your wallet and there are tokens you never bought. Maybe
               several. Names you do not recognize, and balances of 1, or 5, or
@@ -51,9 +55,7 @@ export default function RandomTokensGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Why people send them
-            </h2>
+            <h2 id="why-people-send-them" className="mb-2 text-lg font-semibold text-zinc-50">Why people send them</h2>
             <p>
               Most random tokens are advertising. Someone minted millions of
               tokens for almost nothing and sent them to thousands of wallets,
@@ -70,9 +72,7 @@ export default function RandomTokensGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What they actually cost you
-            </h2>
+            <h2 id="what-they-actually-cost-you" className="mb-2 text-lg font-semibold text-zinc-50">What they actually cost you</h2>
             <p>
               The tokens are not the cost. The account holding them is. Every
               token account on Solana must keep a deposit of rent to stay
@@ -90,7 +90,7 @@ export default function RandomTokensGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">How to clean it up</h2>
+            <h2 id="how-to-clean-it-up" className="mb-2 text-lg font-semibold text-zinc-50">How to clean it up</h2>
             <p>
               Accounts with a zero balance can be closed. Closing one returns
               its rent deposit to your wallet in the same transaction. That is

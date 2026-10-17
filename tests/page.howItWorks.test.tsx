@@ -67,29 +67,31 @@ describe("homepage how-it-works strip guides a first-timer", () => {
   it("renders all four steps when no wallet is connected", () => {
     render(<Home />);
 
-    expect(screen.getByText("How it works")).toBeTruthy();
-    expect(
-      screen.getByText(
-        /Have a wallet handy: Phantom, Solflare, or Backpack/
-      )
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /How it works/ })).toBeTruthy();
     expect(
       screen.getByText(/Connect to scan\. No transaction is signed/)
     ).toBeTruthy();
     expect(
-      screen.getByText(/Review your scan\. The page lists your empty token accounts/)
+      screen.getByText(
+        /Review your scan: each empty account and the SOL locked in it/
+      )
     ).toBeTruthy();
     expect(
-      screen.getByText(/Claim only if you want to\. Pick the accounts, review the fees/)
+      screen.getByText(/Pick the accounts and check the fee/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Approve each transaction yourself/)
     ).toBeTruthy();
   });
 
   it("keeps the owner's writing rules on the strip", () => {
     render(<Home />);
 
-    // Scope to the strip card: the cannot-do list is also a list, but it
-    // is trust copy, not a step in the walkthrough.
-    const strip = screen.getByText("How it works").closest("div");
+    // Scope to the strip section: the cannot-do list is also a list, but
+    // it is trust copy, not a step in the walkthrough.
+    const strip = screen
+      .getByRole("heading", { name: /How it works/ })
+      .closest("section");
     expect(strip).toBeTruthy();
     const steps = within(strip as HTMLElement).getAllByRole("listitem");
     expect(steps).toHaveLength(4);

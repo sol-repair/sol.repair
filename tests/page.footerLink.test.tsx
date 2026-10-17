@@ -66,26 +66,25 @@ vi.mock("next/link", () => ({
 afterEach(cleanup);
 
 describe("homepage links to the transaction explainer", () => {
-  it("offers the explainer from the footer with the right target", () => {
+  it("offers the explainer from the tools section and the footer with the right target", () => {
     render(<Home />);
-    const link = screen.getByRole("link", {
+    // The explainer is reachable twice: the numbered tools section and
+    // the footer. Every match must point at /understand.
+    const links = screen.getAllByRole("link", {
       name: /understand a transaction/i,
     });
-    expect(link.getAttribute("href")).toBe("/understand");
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    for (const link of links) {
+      expect(link.getAttribute("href")).toBe("/understand");
+    }
   });
 
-  it("surfaces the explainer in its own section with a working link", () => {
+  it("surfaces the explainer in the tools section with the read-only promise", () => {
     render(<Home />);
+    expect(screen.getByText("Tools")).toBeTruthy();
     expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: /understand a transaction/i,
-      })
+      screen.getByText(/Paste any signature and read what the transaction did/)
     ).toBeTruthy();
-    expect(
-      screen.getByText(/never asks for an approval/i)
-    ).toBeTruthy();
-    const link = screen.getByRole("link", { name: /open the explainer/i });
-    expect(link.getAttribute("href")).toBe("/understand");
+    expect(screen.getByText(/Read-only\./)).toBeTruthy();
   });
 });

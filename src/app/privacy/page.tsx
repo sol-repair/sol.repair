@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { SiteHeader } from "@/components/SiteHeader";
 import { pageMetadata } from "@/lib/pageMetadata";
 
 export const metadata: Metadata = pageMetadata({
@@ -13,12 +13,7 @@ export default function PrivacyPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader />
 
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
           Privacy Policy
@@ -27,7 +22,7 @@ export default function PrivacyPage() {
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               The short version
             </h2>
             <p>
@@ -44,7 +39,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               1. What is processed, and where
             </h2>
             <p>
@@ -62,7 +57,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               2. Third parties we rely on
             </h2>
             <p>
@@ -84,7 +79,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               3. Cookies and local storage
             </h2>
             <p>
@@ -96,7 +91,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               4. Analytics
             </h2>
             <p>
@@ -110,7 +105,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               5. What we never do
             </h2>
             <ul className="list-disc space-y-1 pl-5 text-zinc-400">
@@ -123,7 +118,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               6. Changes to this policy
             </h2>
             <p>
@@ -133,7 +128,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">Contact</h2>
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">Contact</h2>
             <p>
               Privacy questions:{" "}
               <a

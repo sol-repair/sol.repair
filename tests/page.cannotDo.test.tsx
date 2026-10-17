@@ -69,16 +69,14 @@ describe("homepage cannot-do section is receipt-backed trust copy", () => {
 
     expect(screen.getByText("What SOL.repair cannot do")).toBeTruthy();
     expect(
-      screen.getByText(/It cannot access your private key or seed phrase/)
+      screen.getByText(/Access your private key or seed phrase/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Move your funds without a transaction you approve/)
     ).toBeTruthy();
     expect(
       screen.getByText(
-        /It cannot move your funds without a transaction you approve in your wallet/
-      )
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        /It cannot close an account unless the required on-chain authority allows it/
+        /Close an account the on-chain authority does not allow/
       )
     ).toBeTruthy();
   });
@@ -88,7 +86,7 @@ describe("homepage cannot-do section is receipt-backed trust copy", () => {
 
     const section = screen
       .getByText("What SOL.repair cannot do")
-      .closest("div");
+      .closest("section");
     expect(section).toBeTruthy();
     const lines = within(section as HTMLElement).getAllByRole("listitem");
     expect(lines).toHaveLength(3);

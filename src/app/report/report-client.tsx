@@ -11,7 +11,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 
-import { NetworkBadge } from "@/components/NetworkBadge";
+import { SiteHeader } from "@/components/SiteHeader";
 import { WalletButton } from "@/components/WalletButton";
 import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { useWalletScan } from "@/hooks/useWalletScan";
@@ -29,27 +29,21 @@ export default function ReportPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-2xl">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-y-2">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <div className="flex flex-wrap items-center gap-4">
-            <NetworkBadge />
-            <Link
-              href="/"
-              className="text-sm text-zinc-400 hover:text-zinc-300"
-            >
-              &larr; Back
-            </Link>
-          </div>
-        </div>
+        <SiteHeader />
 
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
           Wallet health report
         </h1>
-        <p className="mb-6 text-sm leading-relaxed text-zinc-400">
+        <p className="mb-4 text-sm leading-relaxed text-zinc-400">
           Connect to read your wallet&rsquo;s token accounts and see the
           whole picture on one page. Read-only: this page never asks you to
           sign anything and nothing here moves funds. Every action lives on
           the home page.
+        </p>
+        <p className="mb-6">
+          <span className="inline-block rounded border border-zinc-700 px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-zinc-400">
+            Read-only · nothing to sign
+          </span>
         </p>
 
         <div className="mb-8">

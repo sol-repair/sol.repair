@@ -3,6 +3,8 @@ import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { guideSchema } from "@/lib/guideSchema";
 import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
+import { SiteHeader } from "@/components/SiteHeader";
+import { GuideToc } from "@/components/GuideToc";
 
 export const metadata: Metadata = pageMetadata({
   title: "How to close empty token accounts",
@@ -23,12 +25,7 @@ export default function CloseTokenAccountsGuide() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <GuideBreadcrumb title="How to close empty token accounts" />
 
@@ -36,11 +33,24 @@ export default function CloseTokenAccountsGuide() {
           How to close empty token accounts
         </h1>
 
+        <GuideToc
+          items={[
+            { href: "#what-closing-actually-does", label: "What closing actually does" },
+            { href: "#three-ways-to-do-it", label: "Three ways to do it" },
+            { href: "#accounts-that-cannot-be-closed", label: "Accounts that cannot be closed" },
+            { href: "#token-2022-accounts", label: "Token-2022 accounts" },
+            { href: "#delegated-accounts", label: "Delegated accounts" },
+            { href: "#wrapped-sol", label: "Wrapped SOL" },
+            { href: "#batching-and-practical-limits", label: "Batching and practical limits" },
+            { href: "#what-closing-never-does", label: "What closing never does" },
+            { href: "#how-to-check-any-tool-before-you-use-it", label: "How to check any tool before you use it" },
+            { href: "#what-we-charge", label: "What we charge" },
+          ]}
+        />
+
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What closing actually does
-            </h2>
+            <h2 id="what-closing-actually-does" className="mb-2 text-lg font-semibold text-zinc-50">What closing actually does</h2>
             <p>
               A token account is a small record on the chain that ties your
               wallet to one specific token. When it is empty, it serves no
@@ -72,9 +82,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Three ways to do it
-            </h2>
+            <h2 id="three-ways-to-do-it" className="mb-2 text-lg font-semibold text-zinc-50">Three ways to do it</h2>
             <p>
               Your wallet. Some wallets, including Phantom and Solflare,
               can close empty token accounts from their own settings or
@@ -106,9 +114,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Accounts that cannot be closed
-            </h2>
+            <h2 id="accounts-that-cannot-be-closed" className="mb-2 text-lg font-semibold text-zinc-50">Accounts that cannot be closed</h2>
             <p>
               The network rejects closing an account that holds any token
               balance at all, even a fraction of a cent of dust. Nothing
@@ -123,9 +129,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Token-2022 accounts
-            </h2>
+            <h2 id="token-2022-accounts" className="mb-2 text-lg font-semibold text-zinc-50">Token-2022 accounts</h2>
             <p>
               There are two token programs on Solana: the classic SPL Token
               Program and the newer one, Token-2022, which many newer
@@ -139,9 +143,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Delegated accounts
-            </h2>
+            <h2 id="delegated-accounts" className="mb-2 text-lg font-semibold text-zinc-50">Delegated accounts</h2>
             <p>
               A token account can carry a delegate: another address
               allowed to move that token up to an approved amount. An
@@ -162,7 +164,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">Wrapped SOL</h2>
+            <h2 id="wrapped-sol" className="mb-2 text-lg font-semibold text-zinc-50">Wrapped SOL</h2>
             <p>
               Wrapped SOL (wSOL) accounts are token accounts whose token is
               SOL itself. They cannot be closed while they hold SOL:
@@ -175,9 +177,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Batching and practical limits
-            </h2>
+            <h2 id="batching-and-practical-limits" className="mb-2 text-lg font-semibold text-zinc-50">Batching and practical limits</h2>
             <p>
               A Solana transaction has a size limit, so large cleanups are
               split across several transactions, each needing its own
@@ -198,9 +198,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What closing never does
-            </h2>
+            <h2 id="what-closing-never-does" className="mb-2 text-lg font-semibold text-zinc-50">What closing never does</h2>
             <p>
               It never touches a token balance. An account holding tokens
               cannot be closed; the network rejects it. It never needs your
@@ -211,9 +209,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              How to check any tool before you use it
-            </h2>
+            <h2 id="how-to-check-any-tool-before-you-use-it" className="mb-2 text-lg font-semibold text-zinc-50">How to check any tool before you use it</h2>
             <p>
               Ours included. Look at the destination address on the close
               instruction before you sign. It should be yours. Look at what
@@ -229,7 +225,7 @@ export default function CloseTokenAccountsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">What we charge</h2>
+            <h2 id="what-we-charge" className="mb-2 text-lg font-semibold text-zinc-50">What we charge</h2>
             <p>
               One percent of what you recover, per transaction, only when it
               succeeds. If a transaction fails, there is no fee. Every fee we
