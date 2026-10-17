@@ -60,6 +60,12 @@ const TOKEN_INITIALIZE_ACCOUNT3_TAG = 18;
 const TOKEN_INITIALIZE_MINT2_TAG = 20;
 const TOKEN_GET_ACCOUNT_DATA_SIZE_TAG = 21;
 const TOKEN_INITIALIZE_IMMUTABLE_OWNER_TAG = 22;
+/* WithdrawExcessLamports exists ONLY in Token-2022 (the classic program
+ * has no tag 38). Wire shape verified against this app's own hand-built
+ * builder (excessLamports.ts) and the interface crate's pack(): the tag
+ * byte alone, with source (writable), destination (writable), and the
+ * owner as signing authority. */
+const TOKEN_WITHDRAW_EXCESS_LAMPORTS_TAG = 38;
 
 /* SetAuthority authority types shared by both token programs. */
 const AUTHORITY_LABELS: Record<number, string> = {
@@ -326,6 +332,17 @@ function explainTokenInstruction(
   if (tag === TOKEN_SYNC_NATIVE_TAG && accounts(1)) {
     return {
       text: "Update the wrapped-SOL balance of this account to match the SOL it holds.",
+      limitation: null,
+    };
+  }
+  if (
+    label === PROGRAM_LABELS[TOKEN_2022] &&
+    tag === TOKEN_WITHDRAW_EXCESS_LAMPORTS_TAG &&
+    data.byteLength === 1 &&
+    accounts(3)
+  ) {
+    return {
+      text: `Withdraw the SOL that Token-2022 account ${accountPubkeys[0]} holds above its rent reserve and send it to ${accountPubkeys[1]}. The account stays open and its tokens are untouched. Only its owner can do this.`,
       limitation: null,
     };
   }

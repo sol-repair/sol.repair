@@ -48,6 +48,11 @@ const TOKEN_INITIALIZE_MINT2_TAG = 20;
 const TOKEN_GET_ACCOUNT_DATA_SIZE_TAG = 21;
 const TOKEN_INITIALIZE_IMMUTABLE_OWNER_TAG = 22;
 const TOKEN_THAW_TAG = 11;
+/* WithdrawExcessLamports: Token-2022 only (the classic program has no
+ * tag 38), tag byte alone, source/destination/owner-authority. It moves
+ * the SOL above the account's rent reserve to the destination now and
+ * leaves the account, its tokens, and every permission as they were. */
+const TOKEN_WITHDRAW_EXCESS_LAMPORTS_TAG = 38;
 const SYSTEM_CREATE_ACCOUNT_TAG = 0;
 const SYSTEM_ASSIGN_TAG = 1;
 const SYSTEM_TRANSFER_TAG = 2;
@@ -294,6 +299,17 @@ function tokenEffect(ix: DecodedInstruction): Finding[] {
       tag === TOKEN_GET_ACCOUNT_DATA_SIZE_TAG ||
       tag === TOKEN_SYNC_NATIVE_TAG) &&
     accountPubkeys.length >= 1
+  ) {
+    return [];
+  }
+  // The same is true of WithdrawExcessLamports, but only where it
+  // exists: the classic program has no tag 38, so the same bytes there
+  // stay an honest unknown.
+  if (
+    tag === TOKEN_WITHDRAW_EXCESS_LAMPORTS_TAG &&
+    ix.programId === TOKEN_2022 &&
+    data.byteLength === 1 &&
+    accountPubkeys.length >= 3
   ) {
     return [];
   }
