@@ -551,7 +551,7 @@ export function DelegationSection({
               <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                 Network fee: ~{lamportsToSol(estimateNetworkFee())} SOL, paid
                 from your wallet. No service fee: the 1% fee applies only to
-                recovered rent, and this transaction recovers none. Your
+                the SOL a close returns, and this transaction returns none. Your
                 wallet may add its own priority fee.
               </p>
               <details className="mt-2 rounded-md border border-zinc-800 p-2">

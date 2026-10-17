@@ -2,7 +2,7 @@
 
 /**
  * Render tests for the /fees page's conformance marker: a row whose
- * transferred amount is not exactly 1% of the rent its closes freed
+ * transferred amount is not exactly 1% of the SOL its closes returned
  * (onePercentMatch === false) shows the amber "not a 1% fee" tag, and
  * the intro states the rule openly. Conforming and unverifiable rows
  * stay untagged.
@@ -101,7 +101,7 @@ describe("fees page 1% conformance marker", () => {
     render(<FeesPage />);
 
     expect(
-      screen.getByText(/not exactly 1% of the rent/i)
+      screen.getByText(/not exactly 1% of the SOL/i)
     ).toBeTruthy();
   });
 });
@@ -166,6 +166,6 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
     mockHook([]);
     render(<FeesPage />);
 
-    expect(screen.getByText(/not exactly 1% of the rent/i)).toBeTruthy();
+    expect(screen.getByText(/not exactly 1% of the SOL/i)).toBeTruthy();
   });
 });

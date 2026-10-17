@@ -88,7 +88,7 @@ export type FeeLedgerRow = {
   blockTime: number | null;
   lamports: number;
   /** Conformance to the fee rule: true when the inbound lamports equal
-   *  exactly floor(1%) of the rent this transaction's closeAccount
+   *  exactly floor(1%) of the SOL this transaction's closeAccount
    *  instructions freed — the shape every real SOL.repair fee has. False
    *  when they differ: the page marks the row (never hides it), because a
    *  crafted transfer inside a repair-shaped transaction must not display

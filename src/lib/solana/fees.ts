@@ -9,7 +9,8 @@ import { IS_MAINNET } from "./connection";
 import type { ClosableAccount } from "./tokenAccounts";
 
 /**
- * The 1% success fee, charged on recovered rent.
+ * The 1% success fee, charged on the SOL the close returns to the
+ * wallet.
  *
  * The fee is a plain SystemProgram.transfer from the user's wallet to the
  * fee address below. It is appended AFTER the closeAccount instructions in

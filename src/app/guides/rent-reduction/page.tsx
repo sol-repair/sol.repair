@@ -219,8 +219,9 @@ export default function RentReductionGuide() {
                 accounts for that instruction.
               </li>
               <li>
-                On closes, the fee is 1 percent of the recovered rent, only
-                when the recovery succeeds, and every fee ever collected is
+                On closes, the fee is 1 percent of the SOL the close returns to
+                your wallet, only when the recovery succeeds, and every fee
+                ever collected is
                 on the public{" "}
                 <Link
                   href="/fees"
