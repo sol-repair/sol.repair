@@ -41,8 +41,10 @@ export const DEV_FEE_WALLET = new PublicKey(
  * has seen its first deposit: the network allows a transfer into an address
  * that has never existed, but it rejects an account ENDING below the
  * rent-exempt minimum, and the 1% fee is far below that minimum, so a
- * fee-sized first transfer would fail on chain. feeAccountReady checks for
- * the deposit at repair time and the fee is skipped until it lands.
+ * fee-sized first transfer would fail on chain. feeAccountReady is checked
+ * when the wallet connects AND again when a repair is requested (audit L2:
+ * the decision must not silently age), and the fee is skipped until the
+ * account exists.
  */
 export const MAINNET_FEE_WALLET = new PublicKey(
   "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K"

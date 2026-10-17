@@ -122,8 +122,11 @@ function renderHomeWithScanResult() {
   return utils;
 }
 
-function openConfirmation() {
+async function openConfirmation() {
   fireEvent.click(screen.getByRole("button", { name: "Repair Wallet" }));
+  // The confirmation opens after the fresh fee-existence read (audit L2),
+  // so the harness waits for it instead of assuming the same tick.
+  await screen.findByText(/Inspect exactly what you/);
 }
 
 describe("repair ceiling on the review and done screens", () => {
@@ -151,9 +154,11 @@ describe("repair ceiling on the review and done screens", () => {
     });
 
     renderHomeWithScanResult();
-    openConfirmation();
+    await openConfirmation();
 
-    await screen.findByText(/Service fee \(1% of recovered\)/);
+    expect(
+      screen.getByText(/Service fee \(1% of recovered\)/)
+    );
 
     // The capped-run copy: five approvals closing the first 100 of 250,
     // with the "run again" instruction right up front.
@@ -192,9 +197,9 @@ describe("repair ceiling on the review and done screens", () => {
       mocks.scan.result = smallScan;
       utils.rerender(<Home />);
     });
-    openConfirmation();
+    await openConfirmation();
 
-    await screen.findByText(/Service fee: none on this repair/);
+    expect(screen.getByText(/Service fee: none on this repair/));
     expect(screen.getByText(/closing 2 empty token accounts/)).toBeTruthy();
     const closedRow = screen.getByText(/Accounts being closed:/).closest("p");
     expect(closedRow?.textContent).toContain("2");
@@ -225,7 +230,7 @@ describe("repair ceiling on the review and done screens", () => {
     });
 
     renderHomeWithScanResult();
-    openConfirmation();
+    await openConfirmation();
 
     // Drive the full capped repair (five mocked batches) to completion
     // inside act, so the done screen reflects the finished run.

@@ -14,10 +14,15 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  SystemProgram,
+} from "@solana/web3.js";
 
 import {
   buildFeeTransfer,
+  feeAccountReady,
   feeAmountLamports,
   getFeeRecipient,
 } from "../src/lib/solana/fees";
@@ -102,5 +107,30 @@ describe("buildFeeTransfer guards and shape", () => {
     expect(data.length).toBe(12);
     expect(data.readUInt32LE(0)).toBe(2);
     expect(data.readBigUInt64LE(4)).toBe(20_392n);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The fee-existence check contract (audit L2, 2026-10)                */
+/* ------------------------------------------------------------------ */
+
+describe("feeAccountReady", () => {
+  it("never rejects and fails toward fee-off", async () => {
+    const rejecting = {
+      getAccountInfo: async () => {
+        throw new Error("rpc down");
+      },
+    } as unknown as Connection;
+    await expect(feeAccountReady(rejecting)).resolves.toBe(false);
+
+    const missing = {
+      getAccountInfo: async () => null,
+    } as unknown as Connection;
+    await expect(feeAccountReady(missing)).resolves.toBe(false);
+
+    const present = {
+      getAccountInfo: async () => ({ lamports: 1 }),
+    } as unknown as Connection;
+    await expect(feeAccountReady(present)).resolves.toBe(true);
   });
 });
