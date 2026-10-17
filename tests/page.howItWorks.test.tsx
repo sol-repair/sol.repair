@@ -84,6 +84,19 @@ describe("homepage how-it-works strip guides a first-timer", () => {
     ).toBeTruthy();
   });
 
+  it("states what connecting exposes right at the connect button", () => {
+    render(<Home />);
+
+    // The one plain statement of what connecting gives the site away
+    // with. It sits in the connect flow (under the button), not buried
+    // in the steps, and must survive any rewording of the steps.
+    expect(
+      screen.getByText(
+        /Connecting only lets the site read your wallet address and its token accounts/
+      )
+    ).toBeTruthy();
+  });
+
   it("keeps the owner's writing rules on the strip", () => {
     render(<Home />);
 

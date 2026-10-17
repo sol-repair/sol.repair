@@ -497,10 +497,16 @@ export default function Home() {
           )}
         </div>
         {!publicKey && (
-          <p className="mb-8 text-xs leading-relaxed text-zinc-400">
-            On your phone, open this page inside the Phantom app (the globe
-            icon at the bottom).
-          </p>
+          <div className="mb-8 text-xs leading-relaxed text-zinc-400">
+            <p>
+              Connecting only lets the site read your wallet address and its
+              token accounts.
+            </p>
+            <p className="mt-1">
+              On your phone, open this page inside the Phantom app (the
+              globe icon at the bottom).
+            </p>
+          </div>
         )}
         {publicKey && <div className="mb-8" />}
 
