@@ -188,7 +188,10 @@ export function ExcessSection({
         .then((read: ExcessRead) => {
           setGatePreview((prev) => {
             if (prev.state !== "reading" || !publicKey) return prev;
-            const verdict = evaluateExcessGate(read);
+            const verdict = evaluateExcessGate(
+              read,
+              publicKey.toBase58()
+            );
             if (verdict.kind === "pass") {
               return {
                 state: "pass",

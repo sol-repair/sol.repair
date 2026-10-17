@@ -13,6 +13,7 @@ import {
   collectToken2022Keys,
   detectExcessCandidates,
   evaluateExcessGate,
+  readExcessState,
   WITHDRAW_EXCESS_LAMPORTS_TAG,
 } from "../src/lib/solana/excessLamports";
 import type {
@@ -226,7 +227,14 @@ describe("detectExcessCandidates", () => {
 describe("evaluateExcessGate", () => {
   it("passes with the current excess and lamports", () => {
     const verdict = evaluateExcessGate(
-      { kind: "read", lamports: 2000000, dataLen: 165, excess: 511560 }
+      {
+        kind: "read",
+        lamports: 2000000,
+        dataLen: 165,
+        excess: 511560,
+        program: TOKENZ.toBase58(),
+        accountOwner: OWNER.publicKey.toBase58(),
+      }
     );
     expect(verdict.kind).toBe("pass");
     if (verdict.kind === "pass") {
@@ -237,14 +245,21 @@ describe("evaluateExcessGate", () => {
 
   it("passes with drifted figures (Case B: drain what exists at land time)", () => {
     const verdict = evaluateExcessGate(
-      { kind: "read", lamports: 2100000, dataLen: 165, excess: 611560 }
+      {
+        kind: "read",
+        lamports: 2100000,
+        dataLen: 165,
+        excess: 611560,
+        program: TOKENZ.toBase58(),
+        accountOwner: OWNER.publicKey.toBase58(),
+      }
     );
     expect(verdict.kind).toBe("pass");
   });
 
   it("reports already-withdrawn when the excess is gone", () => {
     const verdict = evaluateExcessGate(
-      { kind: "read", lamports: 1488440, dataLen: 165, excess: 0 }
+      { kind: "read", lamports: 1488440, dataLen: 165, excess: 0, program: TOKENZ.toBase58(), accountOwner: OWNER.publicKey.toBase58() }
     );
     expect(verdict.kind).toBe("already-withdrawn");
   });
@@ -312,5 +327,205 @@ describe("collectToken2022Keys keeps close-blocked skips excess-detectable", () 
       ])
     );
     expect(keys).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The gate identity re-check and the commitment pin (audit M3 + L6)   */
+/* ------------------------------------------------------------------ */
+
+const T22_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+/** Raw account whose data carries the given owner pubkey at bytes
+ *  32..64 (the fixed base-account layout). */
+function ownedRaw(
+  owner: PublicKey,
+  lamports = 2000000,
+  dataLen = 165
+): { owner: PublicKey; lamports: number; data: Uint8Array } {
+  const data = new Uint8Array(dataLen);
+  if (dataLen >= 64) {
+    data.set(owner.toBytes(), 32);
+  }
+  return { owner: new PublicKey(T22_PROGRAM), lamports, data };
+}
+
+describe("readExcessState", () => {
+  it("returns identity evidence and pins confirmed on both reads", async () => {
+    const foreigner = Keypair.generate().publicKey;
+    const calls: Array<unknown> = [];
+    const rentCalls: Array<unknown> = [];
+    const connection = {
+      getMultipleAccountsInfo: vi.fn(async (_keys: PublicKey[], config?: unknown) => {
+        calls.push(config);
+        return [ownedRaw(foreigner)];
+      }),
+      getMinimumBalanceForRentExemption: vi.fn(async (_dataLen: number, commitment?: unknown) => {
+        rentCalls.push(commitment);
+        return RESERVE;
+      }),
+    };
+    const read = await readExcessState(connection, Keypair.generate().publicKey.toBase58());
+    expect(read.kind).toBe("read");
+    if (read.kind === "read") {
+      expect(read.program).toBe(T22_PROGRAM);
+      expect(read.accountOwner).toBe(foreigner.toBase58());
+      expect(read.lamports).toBe(2000000);
+      expect(read.excess).toBe(2000000 - RESERVE);
+    }
+    // L6: the action read is pinned to confirmed, matching the confirm
+    // path and the sibling flows.
+    expect(calls).toEqual([{ commitment: "confirmed" }]);
+    expect(rentCalls).toEqual(["confirmed"]);
+  });
+
+  it("reports a null accountOwner when the data is too short to hold one", async () => {
+    const connection = {
+      getMultipleAccountsInfo: vi.fn(async () => [ownedRaw(OWNER.publicKey, 2000000, 40)]),
+      getMinimumBalanceForRentExemption: vi.fn(async () => RESERVE),
+    };
+    const read = await readExcessState(connection, Keypair.generate().publicKey.toBase58());
+    expect(read.kind).toBe("read");
+    if (read.kind === "read") expect(read.accountOwner).toBeNull();
+  });
+
+  it("reports a missing account", async () => {
+    const connection = {
+      getMultipleAccountsInfo: vi.fn(async () => [null]),
+      getMinimumBalanceForRentExemption: vi.fn(async () => RESERVE),
+    };
+    expect(
+      (await readExcessState(connection, Keypair.generate().publicKey.toBase58())).kind
+    ).toBe("missing");
+  });
+});
+
+describe("evaluateExcessGate identity checks", () => {
+  const connectedOwner = OWNER.publicKey.toBase58();
+
+  it("aborts with the approved sentence on a wrong owning program", () => {
+    const verdict = evaluateExcessGate(
+      {
+        kind: "read",
+        lamports: 2000000,
+        dataLen: 165,
+        excess: 511560,
+        program: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").toBase58(),
+        accountOwner: connectedOwner,
+      },
+      connectedOwner
+    );
+    expect(verdict).toEqual({
+      kind: "abort",
+      sentence:
+        "This address no longer holds a Token-2022 token account. Nothing was signed.",
+    });
+  });
+
+  it("aborts with the approved sentence on a foreign account owner", () => {
+    const foreigner = Keypair.generate().publicKey.toBase58();
+    const verdict = evaluateExcessGate(
+      {
+        kind: "read",
+        lamports: 2000000,
+        dataLen: 165,
+        excess: 511560,
+        program: T22_PROGRAM,
+        accountOwner: foreigner,
+      },
+      connectedOwner
+    );
+    expect(verdict).toEqual({
+      kind: "abort",
+      sentence:
+        "This account is no longer owned by the connected wallet. Nothing was signed.",
+    });
+  });
+
+  it("aborts on a null accountOwner with the not-a-token-account sentence (owner-ordered gate-level pin)", () => {
+    const verdict = evaluateExcessGate(
+      {
+        kind: "read",
+        lamports: 2000000,
+        dataLen: 40,
+        excess: 2000000 - RESERVE,
+        program: T22_PROGRAM,
+        accountOwner: null,
+      },
+      connectedOwner
+    );
+    expect(verdict).toEqual({
+      kind: "abort",
+      sentence:
+        "This address no longer holds a Token-2022 token account. Nothing was signed.",
+    });
+  });
+
+  it("puts identity ahead of already-withdrawn (a foreign recreation is not 'already withdrawn')", () => {
+    const foreigner = Keypair.generate().publicKey.toBase58();
+    const verdict = evaluateExcessGate(
+      {
+        kind: "read",
+        lamports: RESERVE,
+        dataLen: 165,
+        excess: 0,
+        program: T22_PROGRAM,
+        accountOwner: foreigner,
+      },
+      connectedOwner
+    );
+    expect(verdict).toEqual({
+      kind: "abort",
+      sentence:
+        "This account is no longer owned by the connected wallet. Nothing was signed.",
+    });
+  });
+
+  it("passes with figures unchanged when identity matches, including drift", () => {
+    const verdict = evaluateExcessGate(
+      {
+        kind: "read",
+        lamports: 2100000,
+        dataLen: 165,
+        excess: 611560,
+        program: T22_PROGRAM,
+        accountOwner: connectedOwner,
+      },
+      connectedOwner
+    );
+    expect(verdict.kind).toBe("pass");
+    if (verdict.kind === "pass") {
+      expect(verdict.excessBeforeAction).toBe(611560);
+      expect(verdict.lamportsBeforeAction).toBe(2100000);
+    }
+  });
+
+  it("skips identity when no connected owner is supplied (back-compat)", () => {
+    const verdict = evaluateExcessGate({
+      kind: "read",
+      lamports: 2000000,
+      dataLen: 165,
+      excess: 511560,
+      program: T22_PROGRAM,
+      accountOwner: null,
+    });
+    expect(verdict.kind).toBe("pass");
+  });
+});
+
+describe("detectExcessCandidates commitment scope (Option A)", () => {
+  it("leaves detection at the node-default commitment (the scan's finalized view)", async () => {
+    const configs: Array<unknown> = [];
+    const connection = {
+      getMultipleAccountsInfo: vi.fn(async (_keys: PublicKey[], config?: unknown) => {
+        configs.push(config);
+        return [];
+      }),
+      getMinimumBalanceForRentExemption: vi.fn(async () => RESERVE),
+    };
+    await detectExcessCandidates(connection, [
+      { pubkey: Keypair.generate().publicKey.toBase58() },
+    ]);
+    expect(configs).toEqual([undefined]);
   });
 });

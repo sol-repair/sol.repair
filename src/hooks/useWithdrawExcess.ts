@@ -224,7 +224,10 @@ export function useWithdrawExcess() {
           });
           return;
         }
-        const verdict = evaluateExcessGate(gateRead);
+        const verdict = evaluateExcessGate(
+          gateRead,
+          actionOwner.toBase58()
+        );
         if (verdict.kind === "abort") {
           setRunState({
             status: "error",
