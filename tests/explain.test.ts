@@ -141,6 +141,34 @@ describe("explainInstruction", () => {
     expect(result.text).toContain("Token-2022");
   });
 
+  it("explains the app's own Token-2022 excess withdrawal (tag 38)", () => {
+    // The app's WithdrawExcessLamports receipt: tag byte alone, source,
+    // destination, owner authority. It must explain cleanly instead of
+    // rendering as an instruction this tool does not recognize.
+    const result = explainInstruction({
+      programId: TOKEN_2022_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT, DESTINATION, OWNER],
+      data: new Uint8Array([38]),
+    });
+    expect(result.limitation).toBeNull();
+    expect(result.text).toContain("above its rent reserve");
+    expect(result.text).toContain(TOKEN_ACCOUNT);
+    expect(result.text).toContain(DESTINATION);
+    expect(result.text).toContain("The account stays open");
+  });
+
+  it("stays an honest unknown for tag 38 from the classic token program", () => {
+    // WithdrawExcessLamports exists only in Token-2022; the same tag from
+    // the classic program is not decodable as a withdrawal.
+    const result = explainInstruction({
+      programId: SPL_TOKEN_PROGRAM,
+      accountPubkeys: [TOKEN_ACCOUNT, DESTINATION, OWNER],
+      data: new Uint8Array([38]),
+    });
+    expect(result.limitation).toBe("unknown-instruction");
+    expect(result.text).toContain("does not recognize");
+  });
+
   it("says honestly when it cannot describe a program", () => {
     const result = explainInstruction({
       programId: LIGHTHOUSE,

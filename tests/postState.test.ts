@@ -98,6 +98,36 @@ describe("analyzeLeftBehind verdicts and headlines", () => {
     expect(analysis.verdict).toBe("normal");
     expect(analysis.effects).toEqual([]);
   });
+
+  it("treats the app's own Token-2022 excess withdrawal as a balance move with nothing left behind", () => {
+    // The app's WithdrawExcessLamports receipt (tag 38, Token-2022 only):
+    // it moves the SOL above the rent reserve to the destination now and
+    // leaves the account, its tokens, and every permission as they were.
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        tokenIx(TOKEN_2022_PROGRAM, 38, ["source", "destination", "owner"]),
+      ],
+      failed: false,
+    });
+    expect(analysis.verdict).toBe("normal");
+    expect(analysis.effects).toEqual([]);
+    expect(analysis.headline).toBe(
+      "This transaction left nothing behind. It only moved balances and paid fees."
+    );
+  });
+
+  it("keeps tag 38 from the classic token program an honest unknown", () => {
+    // The classic program has no tag 38: the same bytes there must stay a
+    // warning, never ride the Token-2022 withdrawal's clean verdict.
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        tokenIx(SPL_TOKEN_PROGRAM, 38, ["source", "destination", "owner"]),
+      ],
+      failed: false,
+    });
+    expect(analysis.verdict).toBe("warning");
+    expect(analysis.effects[0].text).toContain("does not fully analyze");
+  });
 });
 
 describe("analyzeLeftBehind token capabilities", () => {
