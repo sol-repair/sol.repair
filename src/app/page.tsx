@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { VersionedTransaction } from "@solana/web3.js";
-import { NetworkBadge } from "@/components/NetworkBadge";
+import { SiteHeader } from "@/components/SiteHeader";
 import { WalletButton } from "@/components/WalletButton";
 import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { DelegationSection } from "@/components/DelegationSection";
 import { NativeAccountsSection } from "@/components/NativeAccountsSection";
 import { BurnDustSection } from "@/components/BurnDustSection";
 import { ExcessSection } from "@/components/ExcessSection";
+import { ToolLinksSection } from "@/components/ToolLinksSection";
 import { useWalletScan } from "@/hooks/useWalletScan";
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import {
@@ -36,7 +37,6 @@ import {
 } from "@/lib/solana/transactions";
 import Link from "next/link";
 import GuidesSection from "@/components/GuidesSection";
-import UnderstandSection from "@/components/UnderstandSection";
 
 /** One entry in the raw transaction inspector. Close, revoke, and fee
  *  entries share the program/instruction fields and differ in the rest. */
@@ -451,29 +451,7 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://github.com/sol-repair/sol.repair"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Source code on GitHub"
-              aria-label="Source code on GitHub"
-              className="text-zinc-400 transition-colors hover:text-zinc-200"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className="h-5 w-5"
-                aria-hidden="true"
-              >
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-              </svg>
-            </a>
-            <NetworkBadge />
-          </div>
-        </div>
+        <SiteHeader />
 
         <h1 className="mb-3 text-3xl font-semibold tracking-tight text-zinc-50">
           Reclaim SOL from empty token accounts.
@@ -482,7 +460,7 @@ export default function Home() {
           Close empty SPL and Token-2022 accounts and recover the SOL held in
           them.
         </p>
-        <p className="mb-8 text-zinc-300">
+        <p className="mb-4 text-zinc-300">
           100% open source. 1% success fee, only when SOL is successfully
           recovered.{" "}
           <a
@@ -495,60 +473,99 @@ export default function Home() {
           </a>
           .
         </p>
-        <p className="mb-8 font-mono text-xs leading-relaxed text-zinc-400">
+        <p className="mb-6 font-mono text-xs leading-relaxed text-zinc-400">
           Most empty token accounts hold about 0.00149 to 0.00208 SOL,
           depending on when they were created.
           <br />
           Recovered SOL is returned to the wallet that owns the account.
         </p>
 
-        {!publicKey && (
-          <div className="mb-8 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-            <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+        {/* The connect action sits directly under the headline: on a phone
+            it is on the first screen, not a full scroll down. */}
+        <div className="mb-3 flex items-stretch gap-3">
+          <div className="flex-1">
+            <WalletButton />
+          </div>
+          {!publicKey && (
+            <a
+              href="#how-it-works"
+              className="flex items-center justify-center rounded-lg border border-zinc-700 px-4 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-900"
+            >
               How it works
+            </a>
+          )}
+        </div>
+        {!publicKey && (
+          <div className="mb-8 text-xs leading-relaxed text-zinc-400">
+            <p>
+              Connecting only lets the site read your wallet address and its
+              token accounts.
             </p>
-            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-zinc-300">
-              <li>
-                Have a wallet handy: Phantom, Solflare, or Backpack. On a
-                computer it&rsquo;s a browser extension. On your phone, open
-                this page inside the Phantom app (the globe icon at the
-                bottom).
-              </li>
-              <li>
-                Connect to scan. No transaction is signed. Connecting only
-                lets the site read your wallet address and its token
-                accounts.
-              </li>
-              <li>
-                Review your scan. The page lists your empty token accounts
-                and how much SOL each one has locked in it.
-              </li>
-              <li>
-                Claim only if you want to. Pick the accounts, review the
-                fees, and approve each transaction yourself.
-              </li>
-            </ol>
+            <p className="mt-1">
+              On your phone, open this page inside the Phantom app (the
+              globe icon at the bottom).
+            </p>
           </div>
         )}
-
-        <div className="mb-8">
-          <WalletButton />
-          <Link
-            href="/fees"
-            className="mt-3 flex w-full items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-800 hover:text-white"
-          >
-            View the fee ledger →
-          </Link>
-        </div>
+        {publicKey && <div className="mb-8" />}
 
         {!publicKey && (
-          <div
-            className="mb-8 rounded-lg border border-zinc-800 bg-zinc-950 p-4"
-            aria-hidden="true"
-          >
-            <p className="text-[11px] uppercase tracking-wider text-zinc-400">
-              Example scan. Your accounts appear here
-            </p>
+          <section id="how-it-works" className="mb-10 scroll-mt-6">
+            <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
+              <span className="text-zinc-600">01</span>{" "}
+              <span className="text-emerald-400">How it works</span>
+            </h2>
+            <ol className="mt-3 space-y-2 text-sm leading-relaxed text-zinc-300">
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  1
+                </span>
+                <span>Connect to scan. No transaction is signed.</span>
+              </li>
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  2
+                </span>
+                <span>
+                  Review your scan: each empty account and the SOL locked in
+                  it.
+                </span>
+              </li>
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  3
+                </span>
+                <span>Pick the accounts and check the fee.</span>
+              </li>
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  4
+                </span>
+                <span>Approve each transaction yourself.</span>
+              </li>
+            </ol>
+          </section>
+        )}
+
+        {!publicKey && (
+          <section className="mb-10" aria-hidden="true">
+            <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
+              <span className="text-zinc-600">02</span>{" "}
+              <span className="text-emerald-400">Example scan</span>
+            </h2>
+            <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
             <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
               <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
                 <span className="flex items-start gap-2">
@@ -586,26 +603,48 @@ export default function Home() {
             <p className="mt-2 text-emerald-400">
               0.005601 SOL recoverable · 1 transaction
             </p>
-          </div>
+            </div>
+          </section>
         )}
 
         {!publicKey && (
-          <div className="mb-8 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-            <p className="text-[11px] uppercase tracking-wider text-zinc-400">
-              What SOL.repair cannot do
-            </p>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-xs leading-relaxed text-zinc-400">
-              <li>It cannot access your private key or seed phrase.</li>
-              <li>
-                It cannot move your funds without a transaction you approve
-                in your wallet.
+          <section className="mb-10">
+            <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
+              <span className="text-zinc-600">03</span>{" "}
+              <span className="text-emerald-400">
+                What SOL.repair cannot do
+              </span>
+            </h2>
+            <ul className="mt-3 space-y-2 text-sm leading-relaxed text-zinc-300">
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  1
+                </span>
+                <span>Access your private key or seed phrase.</span>
               </li>
-              <li>
-                It cannot close an account unless the required on-chain
-                authority allows it.
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  2
+                </span>
+                <span>Move your funds without a transaction you approve.</span>
+              </li>
+              <li className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                >
+                  3
+                </span>
+                <span>Close an account the on-chain authority does not allow.</span>
               </li>
             </ul>
-          </div>
+          </section>
         )}
 
         {publicKey && (
@@ -1162,9 +1201,9 @@ export default function Home() {
           </div>
         )}
 
-        <UnderstandSection />
+        <ToolLinksSection />
 
-        <GuidesSection />
+        <GuidesSection step="05" />
 
         <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-400">
           <p>

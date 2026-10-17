@@ -3,6 +3,8 @@ import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { guideSchema } from "@/lib/guideSchema";
 import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
+import { SiteHeader } from "@/components/SiteHeader";
+import { GuideToc } from "@/components/GuideToc";
 
 export const metadata: Metadata = pageMetadata({
   title: "How to check and revoke Solana token approvals",
@@ -23,18 +25,27 @@ export default function TokenApprovalsGuide() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <GuideBreadcrumb title="How to check and revoke Solana token approvals" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           How to check and revoke Solana token approvals
         </h1>
+
+        <GuideToc
+          items={[
+            { href: "#what-an-approval-actually-is", label: "What an approval actually is" },
+            { href: "#what-a-delegate-can-do", label: "What a delegate can do" },
+            { href: "#what-a-delegate-cannot-do", label: "What a delegate cannot do" },
+            { href: "#why-a-stale-approval-matters", label: "Why a stale approval matters" },
+            { href: "#connected-apps-are-not-token-approvals", label: "Connected apps are not token approvals" },
+            { href: "#how-to-see-yours", label: "How to see yours" },
+            { href: "#how-to-revoke-one", label: "How to revoke one" },
+            { href: "#what-this-site-does-and-does-not-handle", label: "What this site does and does not handle" },
+            { href: "#checking-what-you-signed", label: "Checking what you signed" },
+          ]}
+        />
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
@@ -51,9 +62,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What an approval actually is
-            </h2>
+            <h2 id="what-an-approval-actually-is" className="mb-2 text-lg font-semibold text-zinc-50">What an approval actually is</h2>
             <p>
               On Solana, every token you hold sits in its own token account,
               a small on-chain record that ties one mint to your wallet. The
@@ -70,9 +79,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What a delegate can do
-            </h2>
+            <h2 id="what-a-delegate-can-do" className="mb-2 text-lg font-semibold text-zinc-50">What a delegate can do</h2>
             <p>
               A delegate can transfer or burn tokens from that one account,
               up to the delegated amount, without asking you again. That is
@@ -82,9 +89,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What a delegate cannot do
-            </h2>
+            <h2 id="what-a-delegate-cannot-do" className="mb-2 text-lg font-semibold text-zinc-50">What a delegate cannot do</h2>
             <ul className="list-disc space-y-2 pl-5">
               <li>It cannot move SOL or any token from your other token
                 accounts. Each approval lives on exactly one account.</li>
@@ -96,9 +101,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Why a stale approval matters
-            </h2>
+            <h2 id="why-a-stale-approval-matters" className="mb-2 text-lg font-semibold text-zinc-50">Why a stale approval matters</h2>
             <p>
               An approval you granted months ago is still on the account
               today. Nothing expires it. If the protocol you approved is ever
@@ -112,9 +115,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Connected apps are not token approvals
-            </h2>
+            <h2 id="connected-apps-are-not-token-approvals" className="mb-2 text-lg font-semibold text-zinc-50">Connected apps are not token approvals</h2>
             <p>
               Phantom and other wallets keep a list of connected apps in
               their settings. That list is a session between your wallet and
@@ -129,7 +130,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">How to see yours</h2>
+            <h2 id="how-to-see-yours" className="mb-2 text-lg font-semibold text-zinc-50">How to see yours</h2>
             <p>
               Three honest ways. Some wallets show a delegate on a token
                 account&apos;s detail screen, so open the token and look for a
@@ -149,9 +150,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              How to revoke one
-            </h2>
+            <h2 id="how-to-revoke-one" className="mb-2 text-lg font-semibold text-zinc-50">How to revoke one</h2>
             <p>
               With a dedicated tool. If the account still holds tokens and
               you want to keep it, an approval-revoking tool is the right
@@ -191,9 +190,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What this site does and does not handle
-            </h2>
+            <h2 id="what-this-site-does-and-does-not-handle" className="mb-2 text-lg font-semibold text-zinc-50">What this site does and does not handle</h2>
             <ul className="list-disc space-y-2 pl-5">
               <li>
                 Funded accounts with an active delegate: a per-account revoke
@@ -218,9 +215,7 @@ export default function TokenApprovalsGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Checking what you signed
-            </h2>
+            <h2 id="checking-what-you-signed" className="mb-2 text-lg font-semibold text-zinc-50">Checking what you signed</h2>
             <p>
               If you are unsure whether a past transaction granted a
               permission, you can read it. Paste any transaction signature

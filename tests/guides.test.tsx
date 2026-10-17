@@ -120,7 +120,9 @@ describe("guide pages render with their content", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: /what is solana rent/i })
     ).toBeTruthy();
-    expect(screen.getByText(/deposit, not a fee/i)).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: /deposit, not a fee/i })
+    ).toBeTruthy();
     expect(screen.getByLabelText(/empty token accounts/i)).toBeTruthy();
     expect(screen.getByText(/0.0203928 SOL/)).toBeTruthy();
     expect(screen.getByText(/0.0148844/)).toBeTruthy();
@@ -139,7 +141,9 @@ describe("guide pages render with their content", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: /close empty token/i })
     ).toBeTruthy();
-    expect(screen.getByText(/Three ways to do it/)).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: /Three ways to do it/i })
+    ).toBeTruthy();
     expect(
       screen.getByText(/spl-token gc --close-empty-associated-accounts/)
     ).toBeTruthy();

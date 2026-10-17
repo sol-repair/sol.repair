@@ -3,6 +3,8 @@ import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { guideSchema } from "@/lib/guideSchema";
 import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
+import { SiteHeader } from "@/components/SiteHeader";
+import { GuideToc } from "@/components/GuideToc";
 
 export const metadata: Metadata = pageMetadata({
   title: "What did I just sign?",
@@ -23,18 +25,23 @@ export default function WhatDidIJustSignGuide() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <GuideBreadcrumb title="What did I just sign?" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           What did I just sign?
         </h1>
+
+        <GuideToc
+          items={[
+            { href: "#instructions-are-just-steps", label: "Instructions are just steps" },
+            { href: "#the-part-people-miss-lasting-permissions", label: "The part people miss: lasting permissions" },
+            { href: "#wallets-add-their-own-instructions", label: "Wallets add their own instructions" },
+            { href: "#reading-one-yourself", label: "Reading one yourself" },
+            { href: "#the-rules-that-tool-follows", label: "The rules that tool follows" },
+          ]}
+        />
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
@@ -48,9 +55,7 @@ export default function WhatDidIJustSignGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Instructions are just steps
-            </h2>
+            <h2 id="instructions-are-just-steps" className="mb-2 text-lg font-semibold text-zinc-50">Instructions are just steps</h2>
             <p>
               Every transaction is a short list of steps: send SOL, move a
               token, create an account, close an account, change a setting.
@@ -61,9 +66,7 @@ export default function WhatDidIJustSignGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              The part people miss: lasting permissions
-            </h2>
+            <h2 id="the-part-people-miss-lasting-permissions" className="mb-2 text-lg font-semibold text-zinc-50">The part people miss: lasting permissions</h2>
             <p>
               Some instructions move nothing at all. They hand out
               permission. Approving a token lets another address spend from
@@ -90,9 +93,7 @@ export default function WhatDidIJustSignGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Wallets add their own instructions
-            </h2>
+            <h2 id="wallets-add-their-own-instructions" className="mb-2 text-lg font-semibold text-zinc-50">Wallets add their own instructions</h2>
             <p>
               Wallets add their own instructions when you sign, for example
               fee settings, and in Phantom&rsquo;s case safety checks that
@@ -104,9 +105,7 @@ export default function WhatDidIJustSignGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Reading one yourself
-            </h2>
+            <h2 id="reading-one-yourself" className="mb-2 text-lg font-semibold text-zinc-50">Reading one yourself</h2>
             <p>
               Paste any transaction signature into the explainer on this
               site, or connect a wallet read-only to list its recent
@@ -127,9 +126,7 @@ export default function WhatDidIJustSignGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              The rules that tool follows
-            </h2>
+            <h2 id="the-rules-that-tool-follows" className="mb-2 text-lg font-semibold text-zinc-50">The rules that tool follows</h2>
             <p>
               It describes, it does not accuse. There is exactly one case
               marked red: a transaction that hands ownership of a token

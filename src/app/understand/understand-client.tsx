@@ -16,8 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { NetworkBadge } from "@/components/NetworkBadge";
+import { SiteHeader } from "@/components/SiteHeader";
 import { WalletRecentTransactions } from "@/components/WalletRecentTransactions";
 import { IS_MAINNET } from "@/lib/solana/connection";
 import {
@@ -144,15 +143,7 @@ export default function UnderstandPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-2xl">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-y-2">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <div className="flex flex-wrap items-center gap-4">
-            <NetworkBadge />
-            <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-              ← Back
-            </Link>
-          </div>
-        </div>
+        <SiteHeader active="understand" />
 
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
           Understand a transaction

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SiteHeader } from "@/components/SiteHeader";
 import { GUIDES } from "@/lib/guides";
 import { pageMetadata } from "@/lib/pageMetadata";
 
@@ -14,12 +15,7 @@ export default function GuidesIndexPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           Guides
@@ -36,7 +32,7 @@ export default function GuidesIndexPage() {
               href={guide.href}
               className="block py-4 transition-colors hover:bg-zinc-900/40"
             >
-              <h2 className="text-sm font-medium text-zinc-100">
+              <h2 className="text-lg font-semibold text-zinc-50">
                 {guide.title}
               </h2>
               <p className="mt-1 text-sm leading-relaxed text-zinc-400">

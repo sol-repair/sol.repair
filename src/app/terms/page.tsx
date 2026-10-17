@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { SiteHeader } from "@/components/SiteHeader";
 import { pageMetadata } from "@/lib/pageMetadata";
 
 export const metadata: Metadata = pageMetadata({
@@ -13,12 +13,7 @@ export default function TermsPage() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader />
 
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
           Terms of Service
@@ -27,7 +22,7 @@ export default function TermsPage() {
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               1. What this service is
             </h2>
             <p>
@@ -41,7 +36,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               2. Non-custodial; we never touch your keys
             </h2>
             <p>
@@ -55,7 +50,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               3. You are responsible for what you approve
             </h2>
             <p>
@@ -69,7 +64,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               4. Fees
             </h2>
             <p>
@@ -100,7 +95,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               5. No financial advice
             </h2>
             <p>
@@ -112,7 +107,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               6. Software provided &ldquo;as is&rdquo;
             </h2>
             <p>
@@ -127,7 +122,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               7. Limitation of liability
             </h2>
             <p>
@@ -142,7 +137,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               8. Intellectual property
             </h2>
             <p>
@@ -155,7 +150,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               9. No affiliation
             </h2>
             <p>
@@ -168,7 +163,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">
               10. Changes to these terms
             </h2>
             <p>
@@ -180,7 +175,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">Contact</h2>
+            <h2 className="mb-2 text-lg font-semibold text-zinc-50">Contact</h2>
             <p>
               Questions about these terms:{" "}
               <a

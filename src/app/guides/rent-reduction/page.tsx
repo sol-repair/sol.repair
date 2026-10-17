@@ -3,6 +3,8 @@ import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { guideSchema } from "@/lib/guideSchema";
 import { GuideBreadcrumb, JsonLd } from "@/components/GuideBreadcrumb";
+import { SiteHeader } from "@/components/SiteHeader";
+import { GuideToc } from "@/components/GuideToc";
 
 export const metadata: Metadata = pageMetadata({
   title: "Solana rent cuts: how to reclaim your excess SOL",
@@ -23,18 +25,24 @@ export default function RentReductionGuide() {
   return (
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       <div className="w-full max-w-xl">
-        <div className="mb-8 flex items-center justify-between">
-          <span className="font-mono text-sm text-zinc-400">SOL.repair</span>
-          <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-300">
-            ← Back
-          </Link>
-        </div>
+        <SiteHeader active="guides" />
 
         <GuideBreadcrumb title="Solana's rent cuts and the SOL above the new minimum" />
 
         <h1 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-50">
           Solana&apos;s rent cuts and the SOL above the new minimum
         </h1>
+
+        <GuideToc
+          items={[
+            { href: "#what-changed-in-2026", label: "What changed in 2026" },
+            { href: "#why-older-accounts-now-hold-excess-sol", label: "Why older accounts now hold excess SOL" },
+            { href: "#two-ways-to-get-it-back", label: "Two ways to get it back" },
+            { href: "#what-this-site-supports-today", label: "What this site supports today" },
+            { href: "#the-scan-finds-both-paths", label: "The scan finds both paths" },
+            { href: "#watch-for-claim-sites", label: "Watch for claim sites" },
+          ]}
+        />
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
@@ -56,9 +64,7 @@ export default function RentReductionGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What changed in 2026
-            </h2>
+            <h2 id="what-changed-in-2026" className="mb-2 text-lg font-semibold text-zinc-50">What changed in 2026</h2>
             <p>
               Solana is cutting the rent rate in five steps. The change is
               proposal SIMD-0437, Incrementally Reduce lamports_per_byte to
@@ -148,9 +154,7 @@ export default function RentReductionGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Why older accounts now hold excess SOL
-            </h2>
+            <h2 id="why-older-accounts-now-hold-excess-sol" className="mb-2 text-lg font-semibold text-zinc-50">Why older accounts now hold excess SOL</h2>
             <p>
               Your deposit was set when the account was created, at that
               moment&apos;s rate. The rate has since fallen, but the
@@ -165,9 +169,7 @@ export default function RentReductionGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Two ways to get it back
-            </h2>
+            <h2 id="two-ways-to-get-it-back" className="mb-2 text-lg font-semibold text-zinc-50">Two ways to get it back</h2>
             <p>
               Close the account. If the account is empty, closing returns
               the entire balance, deposit and excess together, in the same
@@ -200,9 +202,7 @@ export default function RentReductionGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              What this site supports today
-            </h2>
+            <h2 id="what-this-site-supports-today" className="mb-2 text-lg font-semibold text-zinc-50">What this site supports today</h2>
             <ul className="list-disc space-y-2 pl-5">
               <li>
                 Closing empty accounts on both token programs, with the
@@ -234,9 +234,7 @@ export default function RentReductionGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              The scan finds both paths
-            </h2>
+            <h2 id="the-scan-finds-both-paths" className="mb-2 text-lg font-semibold text-zinc-50">The scan finds both paths</h2>
             <p>
               Connect your wallet and the scan lists closable empty
               accounts and Token-2022 accounts holding excess, each with
@@ -253,9 +251,7 @@ export default function RentReductionGuide() {
           </section>
 
           <section>
-            <h2 className="mb-2 font-medium text-zinc-100">
-              Watch for claim sites
-            </h2>
+            <h2 id="watch-for-claim-sites" className="mb-2 text-lg font-semibold text-zinc-50">Watch for claim sites</h2>
             <p>
               Anything advertising a rent payout you can claim should be
               read slowly. There is no airdrop here: the only SOL involved

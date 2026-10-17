@@ -235,13 +235,18 @@ describe("report page scan states", () => {
         )
       ).toBe(false);
     }
-    // The only outbound links are the header Back link and the pointer
-    // to the home page where the actions live.
+    // The outbound links are the site header's three read-only tools and
+    // the pointer to the home page where the actions live. No link from
+    // this page reaches a signing surface; the word "sign" appears only
+    // in the read-only chip's promise that there is nothing to sign.
     const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
       a.getAttribute("href")
     );
     expect(hrefs).toContain("/");
-    expect(hrefs).not.toContain("/understand");
+    const allowed = new Set(["/", "/understand", "/guides", "/fees"]);
+    for (const href of hrefs) {
+      expect(allowed.has(href ?? ""), `unexpected link ${href}`).toBe(true);
+    }
     expect(screen.getByRole("link", { name: /open the repair tool/i })).toBeTruthy();
   });
 });
@@ -268,9 +273,12 @@ describe("report page writing rules", () => {
 });
 
 describe("homepage surfaces the report", () => {
-  it("links the health report from the footer with the right target", () => {
+  it("links the health report from the tools section and the footer with the right target", () => {
     render(<Home />);
-    const link = screen.getByRole("link", { name: /health report/i });
-    expect(link.getAttribute("href")).toBe("/report");
+    const links = screen.getAllByRole("link", { name: /health report/i });
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    for (const link of links) {
+      expect(link.getAttribute("href")).toBe("/report");
+    }
   });
 });
