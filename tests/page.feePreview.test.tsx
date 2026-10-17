@@ -221,6 +221,87 @@ describe("repair confirmation fee preview parity", () => {
     expect(transfers[0].note).toBe("1% success fee");
   });
 
+  it("re-checks the fee account when the repair is requested, so a mid-session change wins", async () => {
+    // L2: the connect-time decision is a session constant no more. The
+    // fee account exists when the wallet connects, and the confirmation
+    // must reflect a FRESH read at the moment the repair is requested.
+    mocks.conn.getAccountInfo.mockResolvedValue({
+      lamports: 1,
+      owner: TOKEN_PROGRAM_ID,
+      executable: false,
+      data: Buffer.alloc(0),
+      rentEpoch: 0,
+    });
+    renderHomeWithScanResult();
+
+    // The wallet (or the owner) made the fee account vanish after the
+    // connect-time check landed but before the repair was requested.
+    mocks.conn.getAccountInfo.mockResolvedValue(null);
+    openConfirmation();
+
+    await screen.findByText(/Service fee: none on this repair/);
+    const preview = parsePreview();
+    expect(preview.every((e) => e.instruction === "closeAccount")).toBe(true);
+  });
+
+  it("re-checks upward too: a fee account that appears after connect is charged", async () => {
+    mocks.conn.getAccountInfo.mockResolvedValueOnce(null);
+    renderHomeWithScanResult();
+    // Wait for the connect-time check to land (fee currently off).
+    await act(async () => {});
+
+    mocks.conn.getAccountInfo.mockResolvedValue({
+      lamports: 1,
+      owner: TOKEN_PROGRAM_ID,
+      executable: false,
+      data: Buffer.alloc(0),
+      rentEpoch: 0,
+    });
+    openConfirmation();
+
+    await screen.findByText(/Service fee \(1% of recovered\)/);
+    const preview = parsePreview();
+    const transfers = preview.filter((e) => e.instruction === "transfer");
+    expect(transfers.length).toBe(1);
+    expect(transfers[0].lamports).toBe(feeAmountLamports(ELIGIBLE).toString());
+  });
+
+  it("keeps the button disabled while the fresh fee read runs, and opens the confirmation when it lands", async () => {
+    let release!: (value: unknown) => void;
+    mocks.conn.getAccountInfo.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    renderHomeWithScanResult();
+
+    const button = screen.getByRole("button", {
+      name: "Repair Wallet",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    openConfirmation();
+
+    // The read is in flight: the button is disabled and the confirmation
+    // has not opened.
+    expect(button.disabled).toBe(true);
+    expect(
+      screen.queryByText(/Inspect exactly what you/)
+    ).toBeNull();
+
+    await act(async () => {
+      release({
+        lamports: 1,
+        owner: TOKEN_PROGRAM_ID,
+        executable: false,
+        data: Buffer.alloc(0),
+        rentEpoch: 0,
+      });
+    });
+
+    await screen.findByText(/Service fee \(1% of recovered\)/);
+  });
+
   it("quantifies the wallet's priority fee as an observed number in the network fee line", async () => {
     // The site adds no priority fee itself - only the 5,000-lamport
     // base. The WALLET adds the priority fee at signing, and Phantom's

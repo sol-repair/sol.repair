@@ -245,8 +245,11 @@ export default function Home() {
   // itself all consume this value, so they can never disagree. Resets to
   // false (fee skipped) whenever the wallet changes, and stays false until
   // the chain answers - a stale false only ever under-collects, it never
-  // promises a fee that will not be charged.
+  // promises a fee that will not be charged. Refreshed when a repair is
+  // requested (audit L2): the connect-time answer alone is a session-old
+  // view, and the fee decision must not silently age.
   const [feeReady, setFeeReady] = useState(false);
+  const [checkingFee, setCheckingFee] = useState(false);
   const [feeOwner, setFeeOwner] = useState<string | null>(null);
   const feeOwnerKey = publicKey ? publicKey.toBase58() : null;
   if (feeOwnerKey !== feeOwner) {
@@ -269,6 +272,24 @@ export default function Home() {
       cancelled = true;
     };
   }, [connection, publicKey]);
+
+  // The confirmation opens only after a FRESH fee-existence read (audit
+  // L2): the connect-time answer can be hours old on a parked tab, and
+  // the repair must not build a fee transfer from a stale decision. The
+  // check is one read at a moment the user is already waiting; while it
+  // runs the button is disabled. feeAccountReady never rejects (its own
+  // contract, pinned in fees.test.ts: errors resolve to false), so a
+  // failing read fails toward fee-off - the repair proceeds without it.
+  const beginConfirmation = useCallback(async () => {
+    if (checkingFee) return;
+    setCheckingFee(true);
+    try {
+      setFeeReady(await feeAccountReady(connection));
+    } finally {
+      setCheckingFee(false);
+      setConfirming(true);
+    }
+  }, [checkingFee, connection]);
 
   const hasEligible = result && result.eligibleAccounts.length > 0;
 
@@ -832,8 +853,11 @@ export default function Home() {
             {hasEligible && !confirming && status === "idle" && (
               <>
                 <button
-                  onClick={() => setConfirming(true)}
+                  onClick={() => {
+                    void beginConfirmation();
+                  }}
                   disabled={
+                    checkingFee ||
                     selectedCount === 0 ||
                     revokeInFlight ||
                     unwrapInFlight ||
