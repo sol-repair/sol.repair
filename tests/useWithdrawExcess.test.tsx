@@ -61,11 +61,19 @@ const CANDIDATE = {
 
 const RESERVE = 1488440;
 
-function accountRaw(lamports: number, dataLen = 165) {
+function accountRaw(
+  lamports: number,
+  dataLen = 165,
+  accountOwner: PublicKey = OWNER.publicKey
+) {
+  const data = new Uint8Array(dataLen);
+  if (dataLen >= 64) {
+    data.set(accountOwner.toBytes(), 32);
+  }
   return {
     lamports,
     owner: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
-    data: new Uint8Array(dataLen),
+    data,
     executable: false,
     rentEpoch: null,
   };
@@ -683,5 +691,100 @@ describe("the §8.5 evidence standard, sign-stage budget, and remaining terminal
       result.current.reset();
     });
     expect(heldAction()).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The gate identity re-check (audit M3, 2026-10)                      */
+/* ------------------------------------------------------------------ */
+
+describe("useWithdrawExcess gate identity checks", () => {
+  it("aborts in-lock on a foreign-owner recreation with the approved sentence, nothing signed, no extra RPC", async () => {
+    mocks.conn.getMultipleAccountsInfo.mockResolvedValue([
+      accountRaw(2000000, 165, SWITCHED.publicKey),
+    ]);
+    mocks.conn.getMinimumBalanceForRentExemption.mockResolvedValue(RESERVE);
+    const signCalls = vi.fn();
+    mocks.wallet.signTransaction = vi.fn(async (tx) => {
+      signCalls();
+      void tx;
+      return fakeSigned();
+    });
+
+    const { result } = renderHook(() => useWithdrawExcess());
+    await act(async () => {
+      await result.current.withdraw(CANDIDATE);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toBe(
+      "This account is no longer owned by the connected wallet. Nothing was signed."
+    );
+    expect(signCalls).not.toHaveBeenCalled();
+    // Identity rides the same read the gate already made: one call total.
+    expect(mocks.conn.getMultipleAccountsInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts in-lock when the address no longer holds a Token-2022 token account", async () => {
+    // Recreated under the classic token program.
+    mocks.conn.getMultipleAccountsInfo.mockResolvedValue([
+      {
+        lamports: 2000000,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        data: new Uint8Array(165),
+        executable: false,
+        rentEpoch: null,
+      },
+    ]);
+    mocks.conn.getMinimumBalanceForRentExemption.mockResolvedValue(RESERVE);
+
+    const { result } = renderHook(() => useWithdrawExcess());
+    await act(async () => {
+      await result.current.withdraw(CANDIDATE);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe(
+      "This address no longer holds a Token-2022 token account. Nothing was signed."
+    );
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("aborts on a recreated too-short account with the not-a-token-account sentence", async () => {
+    // Owner-ordered echo at hook level: null accountOwner (data too
+    // short) lands on the same sentence, pinned at the gate.
+    mocks.conn.getMultipleAccountsInfo.mockResolvedValue([
+      accountRaw(2000000, 40),
+    ]);
+    mocks.conn.getMinimumBalanceForRentExemption.mockResolvedValue(RESERVE);
+
+    const { result } = renderHook(() => useWithdrawExcess());
+    await act(async () => {
+      await result.current.withdraw(CANDIDATE);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe(
+      "This address no longer holds a Token-2022 token account. Nothing was signed."
+    );
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("still verifies end to end when the identity matches", async () => {
+    mocks.conn.getMultipleAccountsInfo
+      .mockResolvedValueOnce([accountRaw(2000000)])
+      .mockResolvedValueOnce([accountRaw(RESERVE)]);
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+
+    const { result } = renderHook(() => useWithdrawExcess());
+    await act(async () => {
+      await result.current.withdraw(CANDIDATE);
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.outcome).toBe("withdraw-verified");
+    // Gate read plus one verification read: identity added no calls.
+    expect(mocks.conn.getMultipleAccountsInfo).toHaveBeenCalledTimes(2);
   });
 });

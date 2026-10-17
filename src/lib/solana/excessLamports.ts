@@ -139,21 +139,40 @@ export type ExcessRead =
       dataLen: number;
       /** lamports minus the current rent-exempt reserve for dataLen. */
       excess: number;
+      /** The program that owns the account on-chain, base58. Identity
+       *  evidence for the gate (audit M3): a close-and-recreate under
+       *  another program must not pass for the reviewed account. */
+      program: string;
+      /** The wallet owner recorded in the account's base data (bytes
+       *  32..64, fixed layout), base58. Null when the data is too
+       *  short to hold one. */
+      accountOwner: string | null;
     };
+
+/** The read this module makes is an ACTION read: the in-lock gate and
+ *  the post-confirm verification both depend on it landing in the same
+ *  view the confirmation path uses, so it is pinned to "confirmed"
+ *  exactly like the revoke, unwrap, and burn gates (audit L6).
+ *  Detection above deliberately stays at the node default: it derives
+ *  from the scan's finalized view, and the gate re-reads in-lock. */
+const ACTION_READ_COMMITMENT: Commitment = "confirmed";
 
 /**
  * Read ONE Token-2022 account raw (space is not in the parsed shape)
  * and derive its excess against the CURRENT rent-exempt minimum for
  * its data length — the same figure the on-chain instruction computes
- * from the rent sysvar. Throws on RPC failure; the caller decides how
- * to report it.
+ * from the rent sysvar. Also carries identity evidence (owning
+ * program, base-data owner). Throws on RPC failure; the caller decides
+ * how to report it.
  */
 export async function readExcessState(
   connection: {
     getMultipleAccountsInfo: (
       keys: PublicKey[],
       config?: Commitment | GetMultipleAccountsConfig
-    ) => Promise<Array<{ lamports: number; data: { length: number } } | null>>;
+    ) => Promise<
+      Array<{ owner: PublicKey; lamports: number; data: Uint8Array } | null>
+    >;
     getMinimumBalanceForRentExemption: (
       dataLen: number,
       commitment?: Commitment
@@ -161,18 +180,27 @@ export async function readExcessState(
   },
   pubkey: string
 ): Promise<ExcessRead> {
-  const accounts = await connection.getMultipleAccountsInfo([
-    new PublicKey(pubkey),
-  ]);
+  const accounts = await connection.getMultipleAccountsInfo(
+    [new PublicKey(pubkey)],
+    { commitment: ACTION_READ_COMMITMENT }
+  );
   const account = accounts[0];
   if (!account) return { kind: "missing" };
   const dataLen = account.data.length;
-  const reserve = await connection.getMinimumBalanceForRentExemption(dataLen);
+  const reserve = await connection.getMinimumBalanceForRentExemption(
+    dataLen,
+    ACTION_READ_COMMITMENT
+  );
   return {
     kind: "read",
     lamports: account.lamports,
     dataLen,
     excess: account.lamports - reserve,
+    program: account.owner.toBase58(),
+    accountOwner:
+      dataLen >= 64
+        ? new PublicKey(account.data.slice(32, 64)).toBase58()
+        : null,
   };
 }
 
@@ -254,6 +282,14 @@ export type ExcessGateVerdict =
   | { kind: "already-gone" }
   | { kind: "abort"; sentence: string };
 
+/** User-facing sentences for the identity aborts (audit M3, owner-
+ *  approved wording). The gate and the review card render the same
+ *  verdict, so the same sentence object keeps them in agreement. */
+export const EXCESS_WRONG_PROGRAM_COPY =
+  "This address no longer holds a Token-2022 token account. Nothing was signed.";
+export const EXCESS_FOREIGN_OWNER_COPY =
+  "This account is no longer owned by the connected wallet. Nothing was signed.";
+
 /**
  * Compare one on-chain read against the reviewed candidate. A changed
  * excess figure is NOT an abort (the Case B policy shared across the
@@ -261,8 +297,19 @@ export type ExcessGateVerdict =
  * instruction drains whatever excess exists at land time. The one
  * abort shape is an RPC-side failure, which the hook reports before
  * anything is signed.
+ *
+ * The identity checks (audit M3) run when the connected owner is
+ * supplied, and they come first among the account-state verdicts: a
+ * close-and-recreate means the read is not the reviewed account at
+ * all, so reporting "already withdrawn" about it would be a claim
+ * about someone else's account. They ride the read the gate already
+ * makes — no additional RPC. Omitting the connected owner skips them
+ * (back-compat for callers without a wallet in scope).
  */
-export function evaluateExcessGate(read: ExcessRead): ExcessGateVerdict {
+export function evaluateExcessGate(
+  read: ExcessRead,
+  connectedOwner?: string
+): ExcessGateVerdict {
   if (read.kind === "missing") return { kind: "already-gone" };
   if (read.kind === "rpc-failed") {
     return {
@@ -270,6 +317,19 @@ export function evaluateExcessGate(read: ExcessRead): ExcessGateVerdict {
       sentence:
         "The current account state could not be read. Nothing was signed.",
     };
+  }
+  if (connectedOwner !== undefined) {
+    if (read.program !== TOKEN_2022_PROGRAM_ID.toBase58()) {
+      return { kind: "abort", sentence: EXCESS_WRONG_PROGRAM_COPY };
+    }
+    if (read.accountOwner === null) {
+      // Data too short to hold a base-account owner field: whatever
+      // sits at this address now, it is not the reviewed token account.
+      return { kind: "abort", sentence: EXCESS_WRONG_PROGRAM_COPY };
+    }
+    if (read.accountOwner !== connectedOwner) {
+      return { kind: "abort", sentence: EXCESS_FOREIGN_OWNER_COPY };
+    }
   }
   if (read.excess <= 0) return { kind: "already-withdrawn" };
   return {
