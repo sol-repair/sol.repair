@@ -233,7 +233,7 @@ describe("BurnDustSection consent card", () => {
   it("shows the 1% fee line when the fee account is ready and none when it is not", async () => {
     renderWithEntry(true);
     fireEvent.click(screen.getByRole("button", { name: "Burn and close" }));
-    expect(await screen.findByText(/Service fee: ~0\.000020 SOL, 1% of the rent this close recovers\./)).toBeTruthy();
+    expect(await screen.findByText(/Service fee: ~0\.000020 SOL, 1% of the SOL this close returns\./)).toBeTruthy();
     cleanup();
 
     renderWithEntry(false);

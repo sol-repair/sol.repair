@@ -382,7 +382,7 @@ export function BurnDustSection({
             program: reviewing.program,
           },
         ]).toString(),
-        note: "1% of the rent this close recovers",
+        note: "1% of the SOL this close returns",
       });
     }
     return entries;
@@ -608,7 +608,7 @@ export function BurnDustSection({
                           program: reviewing.program,
                         },
                       ])
-                    )} SOL, 1% of the rent this close recovers.`
+                    )} SOL, 1% of the SOL this close returns.`
                   : " Service fee: none on this action (the fee account is not ready yet)."}{" "}
                 Your wallet may add its own priority fee.
               </p>

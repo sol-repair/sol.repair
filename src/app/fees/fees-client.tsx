@@ -96,8 +96,8 @@ export default function FeesPage() {
           SOL.repair&rdquo;. A row here is the exact shape our repair
           produces: token-account closes with a transfer to the published
           fee address. Every row is checked against the fee rule: when the
-          transferred amount is not exactly 1% of the rent its closes
-          freed, the row is marked, not hidden. The signature is the
+          transferred amount is not exactly 1% of the SOL its closes
+          returned, the row is marked, not hidden. The signature is the
           receipt; judge for yourself.
         </p>
 
@@ -237,7 +237,7 @@ export default function FeesPage() {
                     )}
                     {row.onePercentMatch === false && (
                       <span
-                        title="The amount transferred to the fee wallet does not equal 1% of the rent this transaction's closes freed"
+                        title="The amount transferred to the fee wallet does not equal 1% of the SOL this transaction's closes returned"
                         className="shrink-0 rounded border border-amber-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-500/80"
                       >
                         not a 1% fee
