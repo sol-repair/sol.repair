@@ -227,7 +227,6 @@ export default function Home() {
     "building",
     "awaiting-signature",
     "sending",
-    "verifying",
     "checking",
   ] as const;
   const repairInFlight = REPAIR_IN_FLIGHT_STATUSES.some((s) => s === status);
@@ -979,11 +978,13 @@ export default function Home() {
               </div>
             )}
 
-            {/* Transaction in progress */}
+            {/* Transaction in progress. No "verifying" branch: the repair
+                hook never sets that status (it goes to "checking" instead,
+                since a refused or failed submission never proved "sent"),
+                so a branch here would be dead display code. */}
             {(status === "building" ||
               status === "awaiting-signature" ||
               status === "sending" ||
-              status === "verifying" ||
               status === "checking") && (
               <div
                 role="status"
@@ -1002,16 +1003,14 @@ export default function Home() {
                         : "Check your wallet. Phantom is asking you to approve.")}
                     {status === "sending" &&
                       "Approved. Sending to the network..."}
-                    {status === "verifying" &&
-                      "Sent. Waiting for the network to confirm it..."}
                     {status === "checking" &&
                       "Checking the chain for what actually landed..."}
                   </p>
-                  {(status === "sending" ||
-                    status === "verifying" ||
-                    status === "checking") && <ElapsedSeconds />}
+                  {(status === "sending" || status === "checking") && (
+                    <ElapsedSeconds />
+                  )}
                 </div>
-                {(status === "sending" || status === "verifying") && (
+                {status === "sending" && (
                   <div className="mt-2 space-y-1 text-xs leading-relaxed text-zinc-400">
                     {progress && progress.total > 1 && (
                       <p>
