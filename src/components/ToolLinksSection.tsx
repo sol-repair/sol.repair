@@ -26,6 +26,11 @@ const TOOLS = [
     title: "View the fee ledger",
     description: "Every fee recorded on-chain, straight from chain data.",
   },
+  {
+    href: "/changelog",
+    title: "Product changelog",
+    description: "What shipped and when, in plain language. Newest first.",
+  },
 ];
 
 export function ToolLinksSection() {
