@@ -17,12 +17,13 @@
  *  2. The imitation detector (spec 3.2): the observed lock authorities
  *     begin with long runs of the base58 character "1" - the system
  *     program's address is exactly 32 of them - while not being the
- *     system program. Vanity generation makes such addresses cheap to
- *     create and effectively impossible to receive by chance (58^-12
- *     for twelve leading ones). Twelve or more leading ones on a
- *     non-system address is labeled an imitation. An imitation address
- *     is a REAL pubkey someone may control: the label never claims it
- *     cannot sign.
+ *     system program. Leading base58 ones encode leading zero bytes, so
+ *     a key from ordinary keypair generation does not start with a run
+ *     of them; addresses with a run of leading ones like this are
+ *     deliberately generated (vanity). Twelve or more leading ones on a
+ *     non-system address is labeled a lookalike. A lookalike address is
+ *     a REAL pubkey someone may control: the label never claims it
+ *     cannot sign, and it states no intent.
  *  3. The Token-2022 mint name/symbol decode (spec 3.4): the metadata
  *     extension stores a self-declared name and symbol on the mint
  *     itself, so reading it is a plain RPC read, not a registry lookup.
@@ -76,11 +77,16 @@ const KNOWN_CLOSE_AUTHORITIES: Readonly<Record<string, string>> = {
     "the system program. It cannot sign a token-account close.",
 };
 
-/** The imitation label (spec 3.2, verbatim). */
+/** The lookalike label (spec 3.2, verbatim). It states what the address
+ *  proves on its face and nothing else: no intent, and no claim that
+ *  the address cannot sign. */
 const IMITATION_LABEL =
-  "imitates the system program. It is not the system program.";
+  "has a long System Program-like address prefix. It is not the system program.";
 
-/** Boundary pinned by tests: 11 leading ones label nothing, 12 label. */
+/** Boundary pinned by tests: 11 leading ones label nothing, 12 label.
+ *  Twelve leading base58 ones encode twelve leading zero bytes, which
+ *  ordinary keypair generation does not produce, so only deliberate
+ *  System Program lookalikes cross this line. */
 const IMITATION_MIN_LEADING_ONES = 12;
 
 /**

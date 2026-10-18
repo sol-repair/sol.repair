@@ -18,6 +18,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-18",
+    title: "Wording tightened on undecodable transactions and lookalike authorities",
+    body:
+      "The Understand page no longer tells visitors that a transaction it " +
+      "could not decode changed nothing. It now says the transaction could " +
+      "not be explained, that the page only reads transactions and never " +
+      "submits one, and that the transaction's effects cannot be determined " +
+      "from this data. The health report's label for a lookalike close " +
+      "authority now states what the address shows: a long System " +
+      "Program-like prefix, and that it is not the system program. No " +
+      "verdict about intent is made.",
+  },
+  {
     date: "2026-10-17",
     title: "The report says what each close authority is",
     body:

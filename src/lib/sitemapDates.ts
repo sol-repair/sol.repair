@@ -23,7 +23,7 @@
 export const LAST_MODIFIED: Record<string, string> = {
   "/": "2026-10-18",
   "/fees": "2026-10-17",
-  "/understand": "2026-10-17",
+  "/understand": "2026-10-18",
   "/report": "2026-10-17",
   "/changelog": "2026-10-18",
   "/guides/random-tokens": "2026-10-17",

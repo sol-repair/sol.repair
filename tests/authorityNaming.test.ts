@@ -28,7 +28,7 @@ import {
 const SYSTEM_PROGRAM_LABEL =
   "the system program. It cannot sign a token-account close.";
 const IMITATION_LABEL =
-  "imitates the system program. It is not the system program.";
+  "has a long System Program-like address prefix. It is not the system program.";
 
 /** An address-shaped string with exactly `n` leading "1" characters.
  *  The tail is ordinary base58 so the string stays a plausible address;
@@ -69,6 +69,20 @@ describe("the imitation detector", () => {
 
   it("keeps the label an observation: it never claims the address cannot sign", () => {
     expect(IMITATION_LABEL).not.toMatch(/cannot sign|never sign|unable to sign/);
+  });
+
+  it("states the lookalike fact without intent language", () => {
+    // "Imitates" implies deliberate deception, which string logic cannot
+    // establish. The label states what is provable from the address
+    // alone: a long System Program-like prefix, and that the address is
+    // not the system program. It adds no verdict about the holder.
+    expect(IMITATION_LABEL).toBe(
+      "has a long System Program-like address prefix. It is not the system program."
+    );
+    expect(IMITATION_LABEL).not.toMatch(
+      /imitat|fake|scam|spoof|phish|malicious|vanity/i
+    );
+    expect(IMITATION_LABEL).toContain("It is not the system program.");
   });
 });
 
