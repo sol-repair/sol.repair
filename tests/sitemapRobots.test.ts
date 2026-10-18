@@ -116,11 +116,9 @@ const CONTENT_PATHS: Record<string, string[]> = {
 };
 
 /** Last commit date (YYYY-MM-DD) that touched a content path, or null
- *  when git answers nothing: gate checkouts may be depth-1 clones where
- *  most paths have no reachable history. A route git cannot read here
- *  is skipped, not failed — this checkout just cannot see the evidence;
- *  full local and coordinator checkouts, where the dates were derived,
- *  are where the floor is actually enforced. */
+ *  when git answers nothing for it. The empty answer is the
+ *  second-layer guard behind the shallow check above: a path git
+ *  cannot read in this checkout is skipped, not failed. */
 function lastContentCommitDate(contentPath: string): string | null {
   try {
     const out = execSync(`git log -1 --format=%cs -- "${contentPath}"`, {
@@ -133,8 +131,33 @@ function lastContentCommitDate(contentPath: string): string | null {
   }
 }
 
+/** True when this checkout's history is not full. */
+function checkoutIsShallow(): boolean {
+  try {
+    return (
+      execSync("git rev-parse --is-shallow-repository", {
+        cwd: path.resolve(__dirname, ".."),
+        encoding: "utf8",
+      }).trim() === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
 describe("sitemap dates never understate the content's git history", () => {
   it("states no lastmod older than any content path's last commit", () => {
+    // On a shallow checkout this pin's evidence is untrustworthy in
+    // both directions: history past the tip is missing, and - the real
+    // trap - the grafted root commit marks every existing file as
+    // added at the tip, so `git log -- <path>` matches the tip and
+    // returns the tip's date for every path, never empty. A shallow
+    // checkout anywhere skips the floor for the whole run; the
+    // empty-output guard below stays as a second layer.
+    if (checkoutIsShallow()) {
+      console.warn("shallow checkout: skipping the sitemap git-floor pin");
+      return;
+    }
     const understated: string[] = [];
     for (const [route, contentPaths] of Object.entries(CONTENT_PATHS)) {
       const dates = contentPaths
