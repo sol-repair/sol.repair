@@ -13,6 +13,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 
 import sitemap from "@/app/sitemap";
@@ -79,6 +80,76 @@ describe("sitemap stays in sync with the app's routes", () => {
 
   it("has a static date record entry for every sitemap URL and vice versa", () => {
     expect(Object.keys(LAST_MODIFIED).sort()).toEqual(sitemapPaths());
+  });
+});
+
+/**
+ * The git-history floor for sitemap dates, re-derived at test time.
+ *
+ * A page's content lives in every file under its route directory (the
+ * fees page's wording is in fees-client.tsx, not its page.tsx), so the
+ * mapping below points at directories, not page files alone; "/" uses
+ * src/app/page.tsx by itself because src/app/ also holds the layout,
+ * sitemap, and icon files that are not homepage content. /changelog
+ * additionally considers its data file, which drives the page.
+ *
+ * The assertion is one-directional on purpose: record >= git. A date
+ * overstated by a little only costs a crawler a re-visit; a date
+ * understated tells crawlers a changed page is unchanged, which is the
+ * trust-killer the static record exists to prevent.
+ */
+const CONTENT_PATHS: Record<string, string[]> = {
+  "/": ["src/app/page.tsx"],
+  "/fees": ["src/app/fees"],
+  "/understand": ["src/app/understand"],
+  "/report": ["src/app/report"],
+  "/changelog": ["src/app/changelog", "src/lib/changelog.ts"],
+  "/guides/random-tokens": ["src/app/guides/random-tokens"],
+  "/guides/rent-reduction": ["src/app/guides/rent-reduction"],
+  "/guides/solana-rent": ["src/app/guides/solana-rent"],
+  "/guides/token-approvals": ["src/app/guides/token-approvals"],
+  "/guides/close-token-accounts": ["src/app/guides/close-token-accounts"],
+  "/guides/what-did-i-just-sign": ["src/app/guides/what-did-i-just-sign"],
+  "/guides": ["src/app/guides"],
+  "/terms": ["src/app/terms"],
+  "/privacy": ["src/app/privacy"],
+};
+
+/** Last commit date (YYYY-MM-DD) that touched a content path, or null
+ *  when git answers nothing: gate checkouts may be depth-1 clones where
+ *  most paths have no reachable history. A route git cannot read here
+ *  is skipped, not failed — this checkout just cannot see the evidence;
+ *  full local and coordinator checkouts, where the dates were derived,
+ *  are where the floor is actually enforced. */
+function lastContentCommitDate(contentPath: string): string | null {
+  try {
+    const out = execSync(`git log -1 --format=%cs -- "${contentPath}"`, {
+      cwd: path.resolve(__dirname, ".."),
+      encoding: "utf8",
+    }).trim();
+    return out === "" ? null : out;
+  } catch {
+    return null;
+  }
+}
+
+describe("sitemap dates never understate the content's git history", () => {
+  it("states no lastmod older than any content path's last commit", () => {
+    const understated: string[] = [];
+    for (const [route, contentPaths] of Object.entries(CONTENT_PATHS)) {
+      const dates = contentPaths
+        .map(lastContentCommitDate)
+        .filter((date): date is string => date !== null);
+      if (dates.length === 0) continue;
+      const truth = dates.reduce((a, b) => (a > b ? a : b));
+      const record = LAST_MODIFIED[route];
+      if (record === undefined || record < truth) {
+        understated.push(
+          `${route}: record ${record ?? "missing"} < git ${truth}`
+        );
+      }
+    }
+    expect(understated).toEqual([]);
   });
 });
 
