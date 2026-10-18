@@ -1263,6 +1263,13 @@ export default function Home() {
             </Link>
             {" · "}
             <Link
+              href="/changelog"
+              className="underline underline-offset-2 hover:text-zinc-400"
+            >
+              Changelog
+            </Link>
+            {" · "}
+            <Link
               href="/terms"
               className="underline underline-offset-2 hover:text-zinc-400"
             >
