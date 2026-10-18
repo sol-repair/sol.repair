@@ -37,7 +37,7 @@ export function ToolLinksSection() {
   return (
     <section className="mt-10">
       <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-        <span className="text-zinc-600">04</span>{" "}
+        <span aria-hidden="true" className="text-zinc-400">04</span>{" "}
         <span className="text-emerald-400">Tools</span>
       </h2>
       <div className="mt-3 space-y-4">

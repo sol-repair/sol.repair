@@ -11,7 +11,9 @@ export default function GuidesSection({ step }: { step?: string }) {
   return (
     <section className="mt-10">
       <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-        {step && <span className="text-zinc-600">{step}</span>}{" "}
+        {step && (
+          <span aria-hidden="true" className="text-zinc-400">{step}</span>
+        )}{" "}
         <span className="text-emerald-400">Guides</span>
       </h2>
       <div className="mt-3 space-y-4">
