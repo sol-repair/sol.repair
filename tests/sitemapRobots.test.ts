@@ -16,6 +16,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import sitemap from "@/app/sitemap";
+import { LAST_MODIFIED } from "@/lib/sitemapDates";
 
 const APP_DIR = path.resolve(__dirname, "../src/app");
 
@@ -62,6 +63,22 @@ describe("sitemap stays in sync with the app's routes", () => {
       expect(entry.url.startsWith("https://sol.repair")).toBe(true);
       expect(entry.lastModified).toBeInstanceOf(Date);
     }
+  });
+
+  it("returns deep-equal lastModified values across calls (no deploy-time churn)", async () => {
+    const first = sitemap();
+    // Under the old new Date() behavior the second call's stamps always
+    // differ from the first's; the pause makes that red deterministic
+    // instead of same-millisecond flaky.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = sitemap();
+    expect(second.map((entry) => entry.lastModified)).toEqual(
+      first.map((entry) => entry.lastModified)
+    );
+  });
+
+  it("has a static date record entry for every sitemap URL and vice versa", () => {
+    expect(Object.keys(LAST_MODIFIED).sort()).toEqual(sitemapPaths());
   });
 });
 
