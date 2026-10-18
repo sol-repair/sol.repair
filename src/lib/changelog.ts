@@ -18,6 +18,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-17",
+    title: "The report says what each close authority is",
+    body:
+      "The report now says what each named close authority is, as far as " +
+      "the chain can tell. The system program carries its own label, and " +
+      "the fact that it cannot sign a token-account close. An address that " +
+      "merely looks like the system program is called out as an imitation. " +
+      "Token-2022 accounts show the token's name and symbol where the mint " +
+      "carries them, and the summary separates rent you can still recover " +
+      "from rent you cannot.",
+  },
+  {
     date: "2026-10-16",
     title: "Close authority addresses named in the health report",
     body:
