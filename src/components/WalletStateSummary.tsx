@@ -7,6 +7,7 @@
  */
 
 import type { FindingKind, WalletInspectionSummary } from "@/lib/solana/walletInspection";
+import { authorityLabel } from "@/lib/solana/authorityNaming";
 import { SOLANA_NETWORK } from "@/lib/solana/connection";
 import {
   lamportsToSol,
@@ -62,34 +63,61 @@ function AccountLink({ address }: { address: string }) {
 }
 
 /** One row of a grouped authority list: the authority address (undefined
- *  when entries carried no address) and how many accounts it covers. */
+ *  when entries carried no address), how many accounts it covers, and
+ *  the distinct mints behind those accounts that carried self-declared
+ *  Token-2022 metadata. */
 interface AuthorityGroup {
   address?: string;
   count: number;
+  mints?: Array<{ mint: string; name?: string; symbol?: string }>;
 }
 
-/** Group a finding kind's entries by the close-authority address each
- *  entry recorded, one row per authority. Entries without an address
- *  (reachable only from hand-built or stale summaries; the scan records
- *  it at every skip site) bucket under undefined. Rows sort by count
- *  descending, then address ascending, so the display is deterministic;
- *  the ordering is a stable display choice, not a ranking. */
+/**
+ * CAUTION on everything rendered from these groups: an authority label
+ * is an observation about a string, and a mint's name and symbol are
+ * SELF-DECLARED metadata read from the mint itself. Neither is verified
+ * identity; both render as-is, with no trust or endorsement language.
+ */
 function groupByCloseAuthority(
   entries: ReadonlyArray<ClosableAccount | SkippedAccount>
 ): AuthorityGroup[] {
   const counts = new Map<string, number>();
+  // Per authority: the distinct mints behind its accounts that carried
+  // self-declared Token-2022 metadata, one row per mint.
+  const mintMeta = new Map<string, Map<string, { name?: string; symbol?: string }>>();
   let unrecorded = 0;
   for (const entry of entries) {
     // Only a SkippedAccount carries a cause, so the union narrows there.
     const authority = "cause" in entry ? entry.closeAuthority : undefined;
     if (authority === undefined) {
       unrecorded += 1;
-    } else {
-      counts.set(authority, (counts.get(authority) ?? 0) + 1);
+      continue;
+    }
+    counts.set(authority, (counts.get(authority) ?? 0) + 1);
+    if ("cause" in entry && (entry.mintName || entry.mintSymbol)) {
+      const perAuthority = mintMeta.get(authority) ?? new Map();
+      perAuthority.set(entry.mint, {
+        ...(entry.mintName ? { name: entry.mintName } : {}),
+        ...(entry.mintSymbol ? { symbol: entry.mintSymbol } : {}),
+      });
+      mintMeta.set(authority, perAuthority);
     }
   }
   const groups: AuthorityGroup[] = [...counts.entries()].map(
-    ([address, count]) => ({ address, count })
+    ([address, count]) => {
+      const perAuthority = mintMeta.get(address);
+      return {
+        address,
+        count,
+        ...(perAuthority
+          ? {
+              mints: [...perAuthority.entries()]
+                .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+                .map(([mint, meta]) => ({ mint, ...meta })),
+            }
+          : {}),
+      };
+    }
   );
   groups.sort((a, b) => {
     if (a.count !== b.count) return b.count - a.count;
@@ -99,6 +127,48 @@ function groupByCloseAuthority(
   });
   if (unrecorded > 0) groups.push({ address: undefined, count: unrecorded });
   return groups;
+}
+
+/** The label for one authority row: registry lookup, then the imitation
+ *  detector. An observation, never a verdict; undefined when nothing is
+ *  known about the address. */
+function labelFor(address: string): string | undefined {
+  return authorityLabel(address) ?? undefined;
+}
+
+/** The self-declared mint lines under one authority row: name and
+ *  symbol as plain text after the mint link, exactly as the mint
+ *  declares them. See the CAUTION above the grouping function. */
+function MintLines({ group }: { group: AuthorityGroup }) {
+  if (!group.mints || group.mints.length === 0) return null;
+  return (
+    <>
+      {group.mints.map((entry) => (
+        <div key={entry.mint} className="break-all">
+          mint <AccountLink address={entry.mint} />{" "}
+          {[entry.name, entry.symbol].filter(Boolean).join(" ")}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** The one honest answer to "what can be done about these" (spec
+ *  verbatim), shared by both authority lists. */
+function AuthorityGuidance() {
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+        What can be done about these accounts
+      </summary>
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+        Only the close authority can sign a close. If it is not a wallet
+        you control, the rent in these accounts cannot be recovered by
+        you, and no tool can change that. Beware any service claiming to
+        unlock these accounts.
+      </p>
+    </details>
+  );
 }
 
 export function WalletStateSummary({
@@ -205,11 +275,16 @@ export function WalletStateSummary({
                       <div key={group.address} className="break-all">
                         <AccountLink address={group.address} /> can close{" "}
                         {group.count} of these accounts.
+                        {labelFor(group.address) && (
+                          <span> {labelFor(group.address)}</span>
+                        )}
+                        <MintLines group={group} />
                       </div>
                     )
                 )}
               </div>
             </details>
+            <AuthorityGuidance />
           </li>
         )}
         {count("funded-foreign-close-authority") > 0 && (
@@ -247,11 +322,16 @@ export function WalletStateSummary({
                       <AccountLink address={group.address} /> is the close
                       authority on {group.count} funded{" "}
                       {plural(group.count, "account", "accounts")}.
+                      {labelFor(group.address) && (
+                        <span> {labelFor(group.address)}</span>
+                      )}
+                      <MintLines group={group} />
                     </div>
                   )
                 )}
               </div>
             </details>
+            <AuthorityGuidance />
           </li>
         )}
         {count("wrapped-sol") > 0 && (
