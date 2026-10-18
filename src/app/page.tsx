@@ -533,14 +533,14 @@ export default function Home() {
         {!publicKey && (
           <section id="how-it-works" className="mb-10 scroll-mt-6">
             <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-              <span className="text-zinc-600">01</span>{" "}
+              <span aria-hidden="true" className="text-zinc-400">01</span>{" "}
               <span className="text-emerald-400">How it works</span>
             </h2>
             <ol className="mt-3 space-y-2 text-sm leading-relaxed text-zinc-300">
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   1
                 </span>
@@ -549,7 +549,7 @@ export default function Home() {
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   2
                 </span>
@@ -561,7 +561,7 @@ export default function Home() {
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   3
                 </span>
@@ -570,7 +570,7 @@ export default function Home() {
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   4
                 </span>
@@ -583,7 +583,7 @@ export default function Home() {
         {!publicKey && (
           <section className="mb-10" aria-hidden="true">
             <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-              <span className="text-zinc-600">02</span>{" "}
+              <span aria-hidden="true" className="text-zinc-400">02</span>{" "}
               <span className="text-emerald-400">Example scan</span>
             </h2>
             <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
@@ -631,7 +631,7 @@ export default function Home() {
         {!publicKey && (
           <section className="mb-10">
             <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-              <span className="text-zinc-600">03</span>{" "}
+              <span aria-hidden="true" className="text-zinc-400">03</span>{" "}
               <span className="text-emerald-400">
                 What SOL.repair cannot do
               </span>
@@ -640,7 +640,7 @@ export default function Home() {
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   1
                 </span>
@@ -649,7 +649,7 @@ export default function Home() {
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   2
                 </span>
@@ -658,7 +658,7 @@ export default function Home() {
               <li className="flex gap-3">
                 <span
                   aria-hidden="true"
-                  className="shrink-0 font-mono text-xs leading-6 text-zinc-600"
+                  className="shrink-0 font-mono text-xs leading-6 text-zinc-400"
                 >
                   3
                 </span>
