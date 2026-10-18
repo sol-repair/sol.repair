@@ -253,8 +253,10 @@ export default function UnderstandPage() {
 
         {state.kind === "unreadable" && (
           <p className="mb-6 text-sm text-zinc-300">
-            The transaction was found but its data could not be read.
-            Nothing was sent and nothing changed.
+            The transaction exists but could not be decoded well enough to
+            explain it. This page only reads transactions and never submits
+            one. Whether the original transaction had effects cannot be
+            determined from this data.
           </p>
         )}
 

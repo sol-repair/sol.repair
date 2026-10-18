@@ -34,7 +34,7 @@ const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const SYSTEM_PROGRAM_LABEL =
   "the system program. It cannot sign a token-account close.";
 const IMITATION_LABEL =
-  "imitates the system program. It is not the system program.";
+  "has a long System Program-like address prefix. It is not the system program.";
 const IMITATION_ADDRESS =
   "111111111111AbCdEfGhIjKlMnOpQrStUvWxYz23456789";
 const ORDINARY_AUTHORITY = Keypair.generate().publicKey.toBase58();

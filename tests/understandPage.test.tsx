@@ -272,8 +272,16 @@ describe("understand page outcomes", () => {
     render(<UnderstandPage />);
     submitSignature(VALID_SIGNATURE);
     expect(
-      await screen.findByText(/could not be read/i)
+      await screen.findByText(/could not be decoded well enough to explain/i)
     ).toBeTruthy();
+    // The page-reassurance stays: the page itself sent nothing.
+    expect(
+      await screen.findByText(/this page only reads transactions and never submits one/i)
+    ).toBeTruthy();
+    // A decoding failure cannot establish what the historical
+    // transaction did, so the message must not claim it.
+    expect(screen.queryByText(/nothing changed/i)).toBeNull();
+    expect(screen.queryByText(/nothing was sent/i)).toBeNull();
   });
 
   it("shows an honest read failure, naming both possible causes, with the raw detail behind a disclosure", async () => {
