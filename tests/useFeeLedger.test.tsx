@@ -267,3 +267,137 @@ describe("useFeeLedger loadMore duplicate signatures", () => {
     expect(result.current.error).toBeNull();
   });
 });
+
+describe("useFeeLedger unreadable accounting (audit F2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("counts unreadable transactions across pages without double-counting a re-served signature", async () => {
+    // Page 1 is two pruned signatures; the next page re-serves the
+    // boundary (still pruned) plus one real fee. The notice count must
+    // cover both unreadable signatures exactly once.
+    const jsonResponse = (result: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result }),
+    });
+    const txFor: Record<string, unknown> = {
+      "m-3": feeRawTx(MAINNET_WALLET, 20_740),
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+          params: unknown[];
+        };
+        if (body.method === "getSignaturesForAddress") {
+          const before = (body.params[1] as { before?: string } | undefined)
+            ?.before;
+          if (before === "m-2") {
+            return jsonResponse([
+              { signature: "m-2", blockTime: 1_755_577_000 },
+              { signature: "m-3", blockTime: 1_755_576_900 },
+            ]);
+          }
+          return jsonResponse([
+            { signature: "m-1", blockTime: 1_755_577_001 },
+            { signature: "m-2", blockTime: 1_755_577_000 },
+          ]);
+        }
+        const sig = body.params[0] as string;
+        // Unlisted signatures stay pruned (null): m-1 and m-2 are the
+        // unreadable ones; m-3 carries a real fee.
+        return jsonResponse(txFor[sig] ?? null);
+      })
+    );
+
+    const { result } = renderHook(() => useFeeLedger());
+
+    await act(async () => {
+      result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.rows).toEqual([]);
+    expect(result.current.unreadableCount).toBe(2);
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(result.current.rows.map((r) => r.signature)).toEqual(["m-3"]);
+    // The re-served boundary (m-2, still pruned) must not be counted twice.
+    expect(result.current.unreadableCount).toBe(2);
+  });
+
+  it("persists unreadable signatures in the v4 cache and rehydrates the count", async () => {
+    const jsonResponse = (result: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result }),
+    });
+    const txFor: Record<string, unknown> = {
+      "m-1": feeRawTx(MAINNET_WALLET, 20_392),
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+          params: unknown[];
+        };
+        if (body.method === "getSignaturesForAddress") {
+          const wallet = body.params[0] as string;
+          if (wallet === MAINNET_WALLET) {
+            return jsonResponse([
+              { signature: "m-1", blockTime: 1_755_577_001 },
+              { signature: "m-2", blockTime: 1_755_577_000 },
+            ]);
+          }
+          return jsonResponse([]);
+        }
+        const sig = body.params[0] as string;
+        return jsonResponse(txFor[sig] ?? null);
+      })
+    );
+
+    const first = renderHook(() => useFeeLedger());
+    await act(async () => {
+      first.result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(first.result.current.rows.map((r) => r.signature)).toEqual([
+        "m-1",
+      ]);
+    });
+    expect(first.result.current.unreadableCount).toBe(1);
+    first.unmount();
+
+    const cached = JSON.parse(
+      localStorage.getItem("solrepair:fee-ledger:v4:mainnet-beta") ?? "{}"
+    );
+    expect(cached.unreadableSignatures).toEqual(["m-2"]);
+
+    const second = renderHook(() => useFeeLedger());
+    await act(async () => {
+      second.result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(second.result.current.rows.map((r) => r.signature)).toEqual([
+        "m-1",
+      ]);
+    });
+    expect(second.result.current.unreadableCount).toBe(1);
+    second.unmount();
+  });
+});

@@ -30,14 +30,16 @@ type CacheEntry = {
   fetchedAt: number;
   lastSignature: string | null;
   hasMore: boolean;
+  unreadableSignatures: string[];
 };
 
 function cacheKey(cluster: FeeLedgerCluster): string {
-  // v3: rows now carry onePercentMatch; v2-cached rows lack the field and
-  // would render untagged for the cache's TTL, so they are invalidated
-  // rather than trusted. (v2 had moved pagination metadata from fee-row-
-  // based to raw-signature-based for the same reason.)
-  return `solrepair:fee-ledger:v3:${cluster}`;
+  // v4: entries carry unreadableSignatures; a v3-cached entry lacks the
+  // field and would hide the incomplete-history notice for the cache's
+  // TTL, so those entries are invalidated rather than trusted. (v3 moved
+  // rows to onePercentMatch for the same reason; v2 moved pagination
+  // metadata from fee-row-based to raw-signature-based.)
+  return `solrepair:fee-ledger:v4:${cluster}`;
 }
 
 function readCache(cluster: FeeLedgerCluster): CacheEntry | null {
@@ -45,7 +47,11 @@ function readCache(cluster: FeeLedgerCluster): CacheEntry | null {
     const raw = localStorage.getItem(cacheKey(cluster));
     if (!raw) return null;
     const entry = JSON.parse(raw) as CacheEntry;
-    if (typeof entry.fetchedAt !== "number" || !Array.isArray(entry.rows)) {
+    if (
+      typeof entry.fetchedAt !== "number" ||
+      !Array.isArray(entry.rows) ||
+      !Array.isArray(entry.unreadableSignatures)
+    ) {
       return null;
     }
     if (Date.now() - entry.fetchedAt > CACHE_TTL_MS) return null;
@@ -86,6 +92,12 @@ export function useFeeLedger() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [lastSignature, setLastSignature] = useState<string | null>(null);
+  // How many loaded signatures could not be read (pruned or undecodable),
+  // deduped across pages by signature: the count behind the page's
+  // incomplete-history notice. A re-served boundary signature must never
+  // be counted twice.
+  const [unreadableCount, setUnreadableCount] = useState(0);
+  const unreadableSeen = useRef<Set<string>>(new Set());
   // Bumped by reload(); the effect treats it as a fresh fetch that
   // bypasses the cache (a retry must not re-show the failed view).
   const [reloadTick, setReloadTick] = useState(0);
@@ -148,6 +160,8 @@ export function useFeeLedger() {
       setFetchedAt(cached.fetchedAt);
       setHasMore(cached.hasMore);
       setLastSignature(cached.lastSignature);
+      unreadableSeen.current = new Set(cached.unreadableSignatures);
+      setUnreadableCount(cached.unreadableSignatures.length);
       setError(null);
       setLoading(false);
     } else {
@@ -155,6 +169,8 @@ export function useFeeLedger() {
       setFetchedAt(null);
       setHasMore(false);
       setLastSignature(null);
+      unreadableSeen.current = new Set();
+      setUnreadableCount(0);
       setError(null);
       setLoading(true);
     }
@@ -169,9 +185,13 @@ export function useFeeLedger() {
         // that meaning the wallet history is exhausted.
         const nextHasMore = page.rawSignatureCount === FEE_LEDGER_PAGE_SIZE;
         const nextLast = page.lastRawSignature;
+        for (const signature of page.unreadableSignatures) {
+          unreadableSeen.current.add(signature);
+        }
         setRows(page.rows);
         setLastSignature(nextLast);
         setHasMore(nextHasMore);
+        setUnreadableCount(unreadableSeen.current.size);
         setFetchedAt(fetchedAt);
         setError(null);
         setLoading(false);
@@ -180,6 +200,7 @@ export function useFeeLedger() {
           fetchedAt,
           lastSignature: nextLast,
           hasMore: nextHasMore,
+          unreadableSignatures: [...unreadableSeen.current],
         });
       } catch (e) {
         if (generation.current !== gen) return;
@@ -245,12 +266,17 @@ export function useFeeLedger() {
       setRows(next);
       setLastSignature(nextLast);
       setHasMore(nextHasMore);
+      for (const signature of page.unreadableSignatures) {
+        unreadableSeen.current.add(signature);
+      }
+      setUnreadableCount(unreadableSeen.current.size);
       setFetchedAt(Date.now());
       writeCache(cluster, {
         rows: next,
         fetchedAt: Date.now(),
         lastSignature: nextLast,
         hasMore: nextHasMore,
+        unreadableSignatures: [...unreadableSeen.current],
       });
     } catch (e) {
       setError(errorMessage(e));
@@ -275,5 +301,6 @@ export function useFeeLedger() {
     now,
     feeWallet,
     totalLamports,
+    unreadableCount,
   };
 }

@@ -745,6 +745,13 @@ export type FeeLedgerPage = {
    *  cursor the next page must continue from. Null when the RPC returned
    *  no signatures at all (wallet history exhausted). */
   lastRawSignature: string | null;
+  /** Signatures this page could not read: the RPC returned null (pruned,
+   *  or outside what this endpoint serves) or bytes that decode to
+   *  nothing. A readable-but-failed transaction is positively identified
+   *  by its err field and is NOT a completeness gap, so it is not
+   *  counted. The page reports the count so the ledger can say its list
+   *  can be incomplete instead of dropping rows silently. */
+  unreadableSignatures: string[];
 };
 
 /**
@@ -787,5 +794,8 @@ export async function fetchFeeLedgerPage(
       signatures.length > 0
         ? signatures[signatures.length - 1].signature
         : null,
+    unreadableSignatures: entries
+      .filter(({ raw }) => raw === null || decodeRawTransaction(raw) === null)
+      .map(({ signature }) => signature),
   };
 }
