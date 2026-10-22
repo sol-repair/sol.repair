@@ -19,6 +19,17 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-22",
+    title: "The fee ledger says when history could not be read",
+    body:
+      "When the RPC returns no data for a transaction in the fee " +
+      "wallet's history, the ledger now says so instead of leaving it " +
+      "out silently. A note above the list counts what could not be " +
+      "read and says the list can be incomplete. No fee row changed, " +
+      "and today's mainnet history reads complete, so nothing changes " +
+      "for you yet.",
+  },
+  {
+    date: "2026-10-22",
     title: "The page now loads before the wallet code does",
     body:
       "The wallet-connect code no longer loads with the page. You now get " +

@@ -34,7 +34,7 @@ function row(overrides: Partial<FeeLedgerRow>): FeeLedgerRow {
   };
 }
 
-function mockHook(rows: FeeLedgerRow[]) {
+function mockHook(rows: FeeLedgerRow[], unreadableCount = 0) {
   vi.mocked(useFeeLedger).mockReturnValue({
     cluster: "mainnet-beta",
     setCluster: vi.fn(),
@@ -49,6 +49,7 @@ function mockHook(rows: FeeLedgerRow[]) {
     now: 1755577001_000,
     feeWallet: FEE_WALLET,
     totalLamports: rows.reduce((sum, r) => sum + r.lamports, 0),
+    unreadableCount,
   });
 }
 
@@ -167,5 +168,62 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
     render(<FeesPage />);
 
     expect(screen.getByText(/not exactly 1% of the SOL/i)).toBeTruthy();
+  });
+});
+
+describe("fees page: the incomplete-history notice (audit F2)", () => {
+  const SINGULAR =
+    "1 transaction in this history could not be read from the RPC. " +
+    "It is left out of the list, so the list can be incomplete.";
+  const PLURAL =
+    "3 transactions in this history could not be read from the RPC. " +
+    "They are left out of the list, so the list can be incomplete.";
+
+  it("names the unreadable count beside the rows when the RPC returned nulls", () => {
+    mockHook(
+      [
+        row({
+          signature: "surviving-11111111111111111111111111111111111",
+          lamports: 20_392,
+          onePercentMatch: true,
+        }),
+      ],
+      3
+    );
+    render(<FeesPage />);
+
+    expect(screen.getByText(PLURAL)).toBeTruthy();
+    expect(screen.getByText(/surviv…1111/)).toBeTruthy();
+  });
+
+  it("uses the singular sentence for one unreadable transaction, even beside the empty state", () => {
+    mockHook([], 1);
+    render(<FeesPage />);
+
+    expect(screen.getByText(SINGULAR)).toBeTruthy();
+    // The honest empty state still renders; the notice corrects it.
+    expect(screen.getByText("No fees collected yet.")).toBeTruthy();
+  });
+
+  it("stays silent when every transaction read", () => {
+    mockHook(
+      [
+        row({
+          signature: "clean-111111111111111111111111111111111111111",
+        }),
+      ],
+      0
+    );
+    render(<FeesPage />);
+
+    expect(screen.queryByText(/could not be read from the RPC/)).toBeNull();
+  });
+
+  it("keeps the owner's writing rules on the notice copy", () => {
+    for (const text of [SINGULAR, PLURAL]) {
+      expect(text.includes("—") || text.includes("–")).toBe(false);
+      expect(text.includes("!")).toBe(false);
+      expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    }
   });
 });

@@ -29,12 +29,36 @@
 import { Connection } from "@solana/web3.js";
 
 /** Transport-shaped failures that justify rotating to the next
- *  endpoint. Anchored wordings only, never a bare status digit: base58
- *  signatures can contain any run of characters. */
-const TRANSIENT_RPC_ERROR = /429|too many requests|rate limit|fetch failed|failed to fetch|networkerror|network error|econnrefused|socket hang up|timed out|timeout|internal server error|bad gateway|service unavailable/i;
+ *  endpoint. Identification is structural, never a bare digit that
+ *  could sit inside a base58 identifier or a slot number: a status
+ *  code read from the error object where the SDK exposes one, a
+ *  status code LEADING the message exactly as web3.js formats HTTP
+ *  failures ("429 Too Many Requests: ...", including the empty-body
+ *  "429 : " shape), or multi-word wordings. */
+const TRANSIENT_HTTP_STATUSES: ReadonlySet<number> = new Set([
+  408, 429, 500, 502, 503, 504,
+]);
+
+const TRANSIENT_RPC_ERROR = /too many requests|rate limit|fetch failed|failed to fetch|networkerror|network error|econnrefused|socket hang up|timed out|timeout|internal server error|bad gateway|service unavailable/i;
 
 function isTransientRpcError(error: unknown): boolean {
+  // JSON-RPC channel: web3.js attaches the numeric error code to
+  // SolanaJSONRPCError. -32005 is the node-unhealthy/rate-limited class.
+  if (typeof error === "object" && error !== null && "code" in error) {
+    if ((error as { code?: unknown }).code === -32005) return true;
+  }
   const message = error instanceof Error ? error.message : String(error);
+  // HTTP channel: web3.js throws a plain Error for a non-OK response,
+  // its message starting with the numeric status followed by a space
+  // or colon. Anchored at the start, so a signature or address carrying
+  // the same digits can never match.
+  const leadingStatus = /^(\d{3})[\s:]/.exec(message);
+  if (
+    leadingStatus !== null &&
+    TRANSIENT_HTTP_STATUSES.has(Number(leadingStatus[1]))
+  ) {
+    return true;
+  }
   return TRANSIENT_RPC_ERROR.test(message);
 }
 

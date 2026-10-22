@@ -522,6 +522,68 @@ describe("fetchFeeLedgerPage pagination (stubbed RPC)", () => {
   });
 });
 
+describe("fetchFeeLedgerPage unreadable accounting", () => {
+  // The incomplete-history notice (audit F2): a page must be able to say
+  // which signatures it could not read - the RPC returned null (pruned,
+  // or outside what this endpoint serves) or bytes that decode to
+  // nothing. A readable-but-failed transaction is positively identified
+  // by its err field, so it is NOT unreadable and NOT a completeness
+  // gap; it is excluded from rows by definition, unchanged.
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const feeTx = (lamports: number): RawTransaction =>
+    buildLegacyRaw([closeIx(), systemTransfer(new PublicKey(FEE_WALLET), lamports)]).raw;
+
+  function stubTxs(
+    signatures: string[],
+    txs: Record<string, RawTransaction>
+  ) {
+    const fetchMock = vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      let result: unknown;
+      if (body.method === "getSignaturesForAddress") {
+        result = signatures.map((s) => ({ signature: s, blockTime: BLOCK_TIME }));
+      } else {
+        result = txs[body.params[0] as string] ?? null;
+      }
+      return { ok: true, status: 200, json: async () => ({ result }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
+  it("counts null responses and undecodable bytes as unreadable, not failed transactions", async () => {
+    // 0xff starts neither the v1 envelope nor a valid compact-u16 plus
+    // message, so the decoder's null-on-garbage contract fires.
+    const undecodable: RawTransaction = {
+      transaction: [Buffer.from([0xff]).toString("base64"), "base64"],
+    };
+    const failed = feeTx(20_392);
+    failed.meta = { ...failed.meta, err: { InstructionError: [0, "custom"] } };
+    stubTxs(["pruned-1", "undecodable-1", "failed-1", "ok-fee"], {
+      "undecodable-1": undecodable,
+      "failed-1": failed,
+      "ok-fee": feeTx(20_740),
+    });
+
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+
+    expect(page.unreadableSignatures).toEqual(["pruned-1", "undecodable-1"]);
+    expect(page.rows.map((r) => r.signature)).toEqual(["ok-fee"]);
+    expect(page.rawSignatureCount).toBe(4);
+    expect(page.lastRawSignature).toBe("ok-fee");
+  });
+
+  it("reports an empty unreadable list when every transaction reads", async () => {
+    stubTxs(["a", "b"], { a: feeTx(20_392), b: feeTx(20_740) });
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    expect(page.unreadableSignatures).toEqual([]);
+    expect(page.rows).toHaveLength(2);
+  });
+});
+
 describe("decodeRawTransaction malformed v0 envelope data", () => {
   // Both fixtures start from a REAL serialized v0 transaction and
   // corrupt only the side envelope (meta.loadedAddresses) the network
