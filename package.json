@@ -15,7 +15,7 @@
     "@solana/web3.js": "^1.99.0",
     "@vercel/analytics": "^2.0.1",
     "bs58": "^6.0.0",
-    "next": "16.3.8",
+    "next": "16.4.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
@@ -33,7 +33,7 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "8.2.4",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "image-size": "^2.0.3",
