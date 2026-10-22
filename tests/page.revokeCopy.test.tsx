@@ -18,7 +18,6 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
 } from "@testing-library/react";
 import {
@@ -32,6 +31,8 @@ import type {
   ClosableAccount,
   ScanResult,
 } from "../src/lib/solana/tokenAccounts";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -61,6 +62,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -130,8 +139,8 @@ function openConfirmation() {
  * render, then the result arrives on a later render. The page auto-selects
  * all eligible accounts when a new scan result arrives.
  */
-function renderHomeWithScanResult() {
-  const utils = render(<Home />);
+async function renderHomeWithScanResult() {
+  const utils = await renderHome();
   act(() => {
     mocks.scan.result = SCAN_RESULT;
     utils.rerender(<Home />);
@@ -157,7 +166,7 @@ describe("revoke copy on the scan and confirmation screens", () => {
     // Fee account unavailable: the review copy takes the no-fee path.
     mocks.conn.getAccountInfo.mockResolvedValue(null);
 
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
 
     // Exactly one scan row is tagged: the delegated one.
     expect(screen.getAllByText(/revoke \+ close/)).toHaveLength(1);
@@ -173,7 +182,7 @@ describe("revoke copy on the scan and confirmation screens", () => {
   it("shows the revoke instruction before its own close in the raw preview", async () => {
     mocks.conn.getAccountInfo.mockResolvedValue(null);
 
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     openConfirmation();
     await screen.findByText(/Service fee: none on this repair/);
 
@@ -199,7 +208,7 @@ describe("revoke copy on the scan and confirmation screens", () => {
   it("names the revoke instruction in the inspector copy", async () => {
     mocks.conn.getAccountInfo.mockResolvedValue(null);
 
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     openConfirmation();
     await screen.findByText(/Service fee: none on this repair/);
 

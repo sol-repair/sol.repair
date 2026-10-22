@@ -55,6 +55,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({

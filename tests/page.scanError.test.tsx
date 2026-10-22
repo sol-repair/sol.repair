@@ -15,14 +15,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import {
   Keypair,
   PublicKey,
   type Connection,
 } from "@solana/web3.js";
 
-import Home from "../src/app/page";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -52,6 +53,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -80,10 +89,10 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("scan error box", () => {
-  it("shows plain words and keeps the raw reply when the RPC rate limits the scan", () => {
+  it("shows plain words and keeps the raw reply when the RPC rate limits the scan", async () => {
     mocks.scan.error =
       '{"code":429,"message":"Connection rate limits exceeded"}';
-    render(<Home />);
+    await renderHome();
 
     expect(screen.getByText("Scan failed")).toBeTruthy();
     expect(screen.getByText(FRIENDLY)).toBeTruthy();
@@ -93,27 +102,27 @@ describe("scan error box", () => {
     ).toBeTruthy();
   });
 
-  it("recognizes the Too many requests wording the public endpoint uses", () => {
+  it("recognizes the Too many requests wording the public endpoint uses", async () => {
     mocks.scan.error = "Too many requests from your IP";
-    render(<Home />);
+    await renderHome();
 
     expect(screen.getByText(FRIENDLY)).toBeTruthy();
   });
 
-  it("recognizes web3.js's responded with 429 give-up wording", () => {
+  it("recognizes web3.js's responded with 429 give-up wording", async () => {
     mocks.scan.error = "Server responded with 429. Retrying after 500ms delay";
-    render(<Home />);
+    await renderHome();
 
     expect(screen.getByText(FRIENDLY)).toBeTruthy();
   });
 
-  it("does not treat a bare 429 inside error text as a rate limit", () => {
+  it("does not treat a bare 429 inside error text as a rate limit", async () => {
     // Base58 signatures can contain the digit run 429, so the matcher is
     // anchored to whole phrases. A signature inside an unrelated failure
     // must keep today's raw rendering, not the friendly copy.
     mocks.scan.error =
       "error looking up account 5Kd4pTb429xVfJ8mWfPqZcRk2YuLgN7: account not found";
-    render(<Home />);
+    await renderHome();
 
     expect(screen.getByText("Scan failed")).toBeTruthy();
     expect(screen.queryByText(FRIENDLY)).toBeNull();
@@ -124,9 +133,9 @@ describe("scan error box", () => {
     ).toBeTruthy();
   });
 
-  it("keeps today's raw rendering for any other error", () => {
+  it("keeps today's raw rendering for any other error", async () => {
     mocks.scan.error = "Connection refused";
-    render(<Home />);
+    await renderHome();
 
     expect(screen.queryByText(FRIENDLY)).toBeNull();
     expect(screen.getByText(/Connection refused/)).toBeTruthy();
@@ -134,27 +143,27 @@ describe("scan error box", () => {
 });
 
 describe("scan failure recovery", () => {
-  it("offers a scan-again control and re-runs the scan through the hook's rescan", () => {
+  it("offers a scan-again control and re-runs the scan through the hook's rescan", async () => {
     mocks.scan.error = "Too many requests from your IP";
-    render(<Home />);
+    await renderHome();
 
     const retry = screen.getByRole("button", { name: /scan again/i });
     fireEvent.click(retry);
     expect(mocks.scan.rescan).toHaveBeenCalledTimes(1);
   });
 
-  it("offers the same retry on a non-rate-limit failure", () => {
+  it("offers the same retry on a non-rate-limit failure", async () => {
     mocks.scan.error = "Connection refused";
-    render(<Home />);
+    await renderHome();
 
     fireEvent.click(screen.getByRole("button", { name: /scan again/i }));
     expect(mocks.scan.rescan).toHaveBeenCalledTimes(1);
   });
 
-  it("offers no retry control while the scan is healthy or loading", () => {
+  it("offers no retry control while the scan is healthy or loading", async () => {
     mocks.scan.error = null;
     mocks.scan.loading = false;
-    render(<Home />);
+    await renderHome();
 
     expect(screen.queryByRole("button", { name: /scan again/i })).toBeNull();
   });

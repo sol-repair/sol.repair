@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import {
   Keypair,
   PublicKey,
@@ -25,6 +25,8 @@ import type {
   ClosableAccount,
   ScanResult,
 } from "../src/lib/solana/tokenAccounts";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const stub = vi.hoisted(() => ({
   revokeInFlight: false,
@@ -57,6 +59,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -120,8 +130,8 @@ const SCAN_RESULT: ScanResult = {
   skippedAccounts: [],
 };
 
-function renderHomeWithScanResult() {
-  const utils = render(<Home />);
+async function renderHomeWithScanResult() {
+  const utils = await renderHome();
   act(() => {
     mocks.scan.result = SCAN_RESULT;
     utils.rerender(<Home />);
@@ -145,17 +155,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("the native-accounts section mount and the three-way affordance", () => {
-  it("mounts the native-accounts section inside the scan-results block", () => {
-    renderHomeWithScanResult();
+  it("mounts the native-accounts section inside the scan-results block", async () => {
+    await renderHomeWithScanResult();
     expect(
       screen.getByTestId("native-accounts-section-stub")
     ).toBeTruthy();
     expect(screen.getByTestId("delegation-section-stub")).toBeTruthy();
   });
 
-  it("passes the scan, the rescan callback, and both in-flight booleans as props", () => {
+  it("passes the scan, the rescan callback, and both in-flight booleans as props", async () => {
     stub.revokeInFlight = true;
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     expect(stub.nativeProps).toBeTruthy();
     expect(stub.nativeProps!.scan).toBe(SCAN_RESULT);
     expect(stub.nativeProps!.repairInFlight).toBe(false);
@@ -164,9 +174,9 @@ describe("the native-accounts section mount and the three-way affordance", () =>
     expect(typeof stub.nativeProps!.onActionInFlightChange).toBe("function");
   });
 
-  it("disables the repair button while an unwrap is in flight", () => {
+  it("disables the repair button while an unwrap is in flight", async () => {
     stub.unwrapInFlight = true;
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", {
       name: "Repair Wallet",
     }) as HTMLButtonElement;
@@ -178,8 +188,8 @@ describe("the native-accounts section mount and the three-way affordance", () =>
     ).toBeTruthy();
   });
 
-  it("re-enables the repair button once no action is in flight", () => {
-    renderHomeWithScanResult();
+  it("re-enables the repair button once no action is in flight", async () => {
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", {
       name: "Repair Wallet",
     }) as HTMLButtonElement;
@@ -191,24 +201,24 @@ describe("the native-accounts section mount and the three-way affordance", () =>
     ).toBeNull();
   });
 
-  it("keeps the repair button disabled when BOTH other actions are in flight", () => {
+  it("keeps the repair button disabled when BOTH other actions are in flight", async () => {
     stub.revokeInFlight = true;
     stub.unwrapInFlight = true;
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", {
       name: "Repair Wallet",
     }) as HTMLButtonElement;
     expect(repair.disabled).toBe(true);
   });
 
-  it("renders the repair controls before both secondary action sections", () => {
+  it("renders the repair controls before both secondary action sections", async () => {
     // Audit F6: with delegations and wrapped-SOL accounts present, the
     // primary action must not sit below the two secondary sections -
     // on a phone that put "Repair Wallet" one to two viewports below
     // the account selection it belongs to. The full repair flow
     // (button, review, in-flight, results) renders first; the
     // per-item sections follow.
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", { name: "Repair Wallet" });
     const delegation = screen.getByTestId("delegation-section-stub");
     const native = screen.getByTestId("native-accounts-section-stub");

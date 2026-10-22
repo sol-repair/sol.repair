@@ -16,7 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import {
   Keypair,
   type Connection,
@@ -24,7 +24,8 @@ import {
 } from "@solana/web3.js";
 import type { ScanResult } from "@/lib/solana/tokenAccounts";
 
-import Home from "../src/app/page";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -66,6 +67,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -125,22 +134,22 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("honest repair failure reporting", () => {
-  it("states only the provable fact in the generic failure copy", () => {
+  it("states only the provable fact in the generic failure copy", async () => {
     mocks.repair.status = "error";
     mocks.repair.error = GENERIC;
-    render(<Home />);
+    await renderHome();
 
     expect(screen.getByText(/No accounts were closed when we checked the chain/)).toBeTruthy();
     expect(screen.queryByText(/Nothing was closed\. Run/)).toBeNull();
   });
 
-  it("renders the receipt signature the hook preserved", () => {
+  it("renders the receipt signature the hook preserved", async () => {
     mocks.repair.status = "error";
     mocks.repair.error = GENERIC;
     mocks.repair.signatures = [
       "2V4dcrHEApzHDS9PqxWo1KeeK8a3HvVLyPsxVfq3yEktjdqH8NX77nzGZVT4QXTaVy8sWvszA8xDx8N2UrYGfrcw",
     ];
-    render(<Home />);
+    await renderHome();
 
     const link = screen.getByText("View on Solscan") as HTMLAnchorElement;
     expect(link).toBeTruthy();
@@ -148,17 +157,17 @@ describe("honest repair failure reporting", () => {
     expect(link.href).toContain("2V4dcrHE");
   });
 
-  it("shows no signature link when nothing was sent", () => {
+  it("shows no signature link when nothing was sent", async () => {
     mocks.repair.status = "error";
     mocks.repair.error = "Transaction cancelled. Nothing was sent.";
-    render(<Home />);
+    await renderHome();
 
     expect(screen.queryByText("View on Solscan")).toBeNull();
   });
 
-  it("checks the chain without claiming the transaction was sent", () => {
+  it("checks the chain without claiming the transaction was sent", async () => {
     mocks.repair.status = "checking";
-    render(<Home />);
+    await renderHome();
 
     const box = screen.getByRole("status");
     expect(box.textContent).toContain(
@@ -168,10 +177,10 @@ describe("honest repair failure reporting", () => {
     expect(box.querySelector("svg.animate-spin")).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the failure copy", () => {
+  it("keeps the owner's writing rules on the failure copy", async () => {
     mocks.repair.status = "error";
     mocks.repair.error = GENERIC;
-    render(<Home />);
+    await renderHome();
 
     const text = screen.getByText(/No accounts were closed/).textContent ?? "";
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);

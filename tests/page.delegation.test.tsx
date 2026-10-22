@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import {
   Keypair,
   PublicKey,
@@ -24,6 +24,8 @@ import type {
   ClosableAccount,
   ScanResult,
 } from "../src/lib/solana/tokenAccounts";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const stub = vi.hoisted(() => ({ inFlight: true }));
 
@@ -52,6 +54,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -96,8 +106,8 @@ const SCAN_RESULT: ScanResult = {
   skippedAccounts: [],
 };
 
-function renderHomeWithScanResult() {
-  const utils = render(<Home />);
+async function renderHomeWithScanResult() {
+  const utils = await renderHome();
   act(() => {
     mocks.scan.result = SCAN_RESULT;
     utils.rerender(<Home />);
@@ -119,15 +129,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("the delegation section mount and the cross-action affordance", () => {
-  it("mounts the delegation section inside the scan-results block", () => {
-    renderHomeWithScanResult();
+  it("mounts the delegation section inside the scan-results block", async () => {
+    await renderHomeWithScanResult();
     expect(
       screen.getByTestId("delegation-section-stub")
     ).toBeTruthy();
   });
 
-  it("disables the repair button while a revoke is in flight", () => {
-    renderHomeWithScanResult();
+  it("disables the repair button while a revoke is in flight", async () => {
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", {
       name: "Repair Wallet",
     }) as HTMLButtonElement;
@@ -137,9 +147,9 @@ describe("the delegation section mount and the cross-action affordance", () => {
     ).toBeTruthy();
   });
 
-  it("re-enables the repair button once no revoke is in flight", () => {
+  it("re-enables the repair button once no revoke is in flight", async () => {
     stub.inFlight = false;
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", {
       name: "Repair Wallet",
     }) as HTMLButtonElement;

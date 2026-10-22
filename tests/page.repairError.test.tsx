@@ -15,18 +15,19 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import {
   Keypair,
   PublicKey,
   type Connection,
 } from "@solana/web3.js";
 
-import Home from "../src/app/page";
 import type {
   ClosableAccount,
   ScanResult,
 } from "../src/lib/solana/tokenAccounts";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -69,6 +70,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -126,11 +135,11 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("repair failed box", () => {
-  it("shows the generic line with the raw error collapsed under Technical details", () => {
+  it("shows the generic line with the raw error collapsed under Technical details", async () => {
     mocks.repair.error = GENERIC;
     mocks.repair.errorDetail = RAW;
 
-    render(<Home />);
+    await renderHome();
 
     expect(screen.getByText("Repair failed")).toBeTruthy();
     expect(screen.getByText(GENERIC)).toBeTruthy();
@@ -144,12 +153,12 @@ describe("repair failed box", () => {
     expect(details?.textContent).toMatch(/getLogs/);
   });
 
-  it("renders no raw-detail section for failures the copy already explains", () => {
+  it("renders no raw-detail section for failures the copy already explains", async () => {
     mocks.repair.error =
       "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly.";
     mocks.repair.errorDetail = null;
 
-    render(<Home />);
+    await renderHome();
 
     expect(
       screen.getByText(/expired while waiting for approval/)

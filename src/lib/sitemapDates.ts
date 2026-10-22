@@ -21,11 +21,11 @@
  * directories and fails any date that understates it.
  */
 export const LAST_MODIFIED: Record<string, string> = {
-  "/": "2026-10-18",
+  "/": "2026-10-22",
   "/fees": "2026-10-17",
-  "/understand": "2026-10-18",
-  "/report": "2026-10-17",
-  "/changelog": "2026-10-18",
+  "/understand": "2026-10-22",
+  "/report": "2026-10-22",
+  "/changelog": "2026-10-22",
   "/guides/random-tokens": "2026-10-17",
   "/guides/rent-reduction": "2026-10-17",
   "/guides/solana-rent": "2026-10-17",
