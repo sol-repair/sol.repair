@@ -7,7 +7,10 @@ const nextConfig: NextConfig = {
     return [
       {
         // Baseline browser security headers for a wallet tool. HSTS is
-        // already added by Vercel at the edge. The CSP is the moderate,
+        // already added by Vercel's edge (max-age=63072000 without
+        // includeSubDomains); the pin below adds the subdomain flag, and
+        // browsers process duplicate STS headers to the strongest union.
+        // The CSP is the moderate,
         // static-preserving policy (see src/lib/security/csp.ts); it must
         // survive the real-wallet devnet poke (Phantom, Solflare, Brave)
         // before it ever ships to main.
@@ -32,6 +35,11 @@ const nextConfig: NextConfig = {
           {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=()",
+          },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains",
           },
         ],
       },
