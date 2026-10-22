@@ -22,6 +22,8 @@ import {
 import type { ScanResult } from "@/lib/solana/tokenAccounts";
 
 import Home from "../src/app/page";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -63,6 +65,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -125,8 +135,14 @@ afterEach(() => {
 
 describe("in-flight repair progress panel", () => {
   it("shows motion and a ticking counter while the transaction is in flight", async () => {
-    vi.useFakeTimers();
     mocks.repair.status = "sending";
+    // First mount loads the lazy boundary under real timers (the
+    // boundary await cannot run on fake timers). The resolved lazy
+    // module then mounts synchronously, so the remount below runs with
+    // fake timers and the ticker's interval is the fake one.
+    await renderHome();
+    cleanup();
+    vi.useFakeTimers();
     render(<Home />);
 
     const box = screen.getByRole("status");
@@ -150,7 +166,7 @@ describe("in-flight repair progress panel", () => {
     // absence: even with the hook force-fed the dead status, no copy may
     // claim the network is confirming.
     mocks.repair.status = "verifying";
-    render(<Home />);
+    await renderHome();
 
     expect(screen.queryByText(/Sent\. Waiting for the network/)).toBeNull();
     expect(
@@ -158,9 +174,9 @@ describe("in-flight repair progress panel", () => {
     ).toBeNull();
   });
 
-  it("marks the sending stage as approved and in flight", () => {
+  it("marks the sending stage as approved and in flight", async () => {
     mocks.repair.status = "sending";
-    render(<Home />);
+    await renderHome();
 
     const box = screen.getByRole("status");
     expect(box.textContent).toContain("Approved. Sending to the network...");
@@ -168,18 +184,18 @@ describe("in-flight repair progress panel", () => {
     expect(screen.getByText("0s")).toBeTruthy();
   });
 
-  it("shows the real batch position for multi-transaction repairs", () => {
+  it("shows the real batch position for multi-transaction repairs", async () => {
     mocks.repair.status = "sending";
     mocks.repair.progress = { current: 2, total: 5 };
-    render(<Home />);
+    await renderHome();
 
     const box = screen.getByRole("status");
     expect(box.textContent).toContain("Transaction 2 of 5");
   });
 
-  it("keeps the wallet prompt while waiting for the signature", () => {
+  it("keeps the wallet prompt while waiting for the signature", async () => {
     mocks.repair.status = "awaiting-signature";
-    render(<Home />);
+    await renderHome();
 
     const box = screen.getByRole("status");
     expect(box.textContent).toContain(
@@ -188,11 +204,11 @@ describe("in-flight repair progress panel", () => {
     expect(box.querySelector("svg.animate-spin")).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the in-flight copy", () => {
+  it("keeps the owner's writing rules on the in-flight copy", async () => {
     const panels: string[] = [];
     for (const status of ["sending", "checking"] as const) {
       mocks.repair.status = status;
-      const { unmount } = render(<Home />);
+      const { unmount } = await renderHome();
       panels.push(screen.getByRole("status").textContent ?? "");
       unmount();
     }

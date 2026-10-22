@@ -24,7 +24,6 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
 } from "@testing-library/react";
 import {
@@ -41,6 +40,8 @@ import {
   type ClosableAccount,
   type ScanResult,
 } from "../src/lib/solana/tokenAccounts";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const mocks = vi.hoisted(() => ({
   wallet: {
@@ -70,6 +71,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -133,8 +142,8 @@ function openConfirmation() {
  * all eligible accounts when a new scan result arrives, so the Repair
  * Wallet button is enabled only after this second render.
  */
-function renderHomeWithScanResult() {
-  const utils = render(<Home />);
+async function renderHomeWithScanResult() {
+  const utils = await renderHome();
   act(() => {
     mocks.scan.result = SCAN_RESULT;
     utils.rerender(<Home />);
@@ -163,7 +172,7 @@ describe("repair confirmation fee preview parity", () => {
     // the fee, so the confirmation screen must not promise one.
     mocks.conn.getAccountInfo.mockResolvedValue(null);
 
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     openConfirmation();
 
     // The copy that only appears when the fee will NOT be charged.
@@ -196,7 +205,7 @@ describe("repair confirmation fee preview parity", () => {
       rentEpoch: 0,
     });
 
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     openConfirmation();
 
     await screen.findByText(/Service fee \(1% of recovered\)/);
@@ -232,7 +241,7 @@ describe("repair confirmation fee preview parity", () => {
       data: Buffer.alloc(0),
       rentEpoch: 0,
     });
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
 
     // The wallet (or the owner) made the fee account vanish after the
     // connect-time check landed but before the repair was requested.
@@ -246,7 +255,7 @@ describe("repair confirmation fee preview parity", () => {
 
   it("re-checks upward too: a fee account that appears after connect is charged", async () => {
     mocks.conn.getAccountInfo.mockResolvedValueOnce(null);
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     // Wait for the connect-time check to land (fee currently off).
     await act(async () => {});
 
@@ -274,7 +283,7 @@ describe("repair confirmation fee preview parity", () => {
           release = resolve;
         })
     );
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
 
     const button = screen.getByRole("button", {
       name: "Repair Wallet",
@@ -317,7 +326,7 @@ describe("repair confirmation fee preview parity", () => {
       rentEpoch: 0,
     });
 
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     openConfirmation();
 
     await screen.findByText(/Service fee \(1% of recovered\)/);

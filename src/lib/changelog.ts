@@ -18,6 +18,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-22",
+    title: "The page now loads before the wallet code does",
+    body:
+      "The wallet-connect code no longer loads with the page. You now get " +
+      "the headline, the walkthrough, and the whole pre-connect page " +
+      "first, and the connect controls arrive a moment later. On a phone " +
+      "this makes the first view noticeably lighter. Nothing about the " +
+      "connect, scan, or repair flow changed.",
+  },
+  {
     date: "2026-10-18",
     title: "Wording tightened on undecodable transactions and lookalike authorities",
     body:

@@ -19,6 +19,7 @@ import {
   createApproveInstruction,
   createSetAuthorityInstruction,
 } from "@solana/spl-token";
+import type { ReactNode } from "react";
 
 const mocks = vi.hoisted(() => ({
   wallet: {} as Record<string, unknown>,
@@ -26,6 +27,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
+  // The route's server wrapper mounts the real Solana provider above
+  // the page; these passthroughs let it render with the mocked wallet
+  // context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/lib/solana/feeLedger", async (importOriginal) => {

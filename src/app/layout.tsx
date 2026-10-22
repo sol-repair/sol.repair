@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
-import { SolanaProvider } from "@/components/SolanaProvider";
 import { IS_MAINNET } from "@/lib/solana/connection";
 
 const geistSans = Geist({
@@ -73,7 +72,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
       <body className="min-h-full flex flex-col bg-black text-zinc-100">
-        <SolanaProvider>{children}</SolanaProvider>
+        {/* The Solana provider is NOT mounted here: it would put the
+            wallet-adapter chunk on every route. The pages that need it
+            mount it at their own roots (the homepage behind its lazy
+            connect boundary, /report and /understand directly). */}
+        {children}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}

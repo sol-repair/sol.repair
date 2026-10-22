@@ -7,11 +7,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
 
 import Home from "../src/app/page";
 import type { ScanResult } from "../src/lib/solana/tokenAccounts";
+import type { ReactNode } from "react";
+import { renderHome } from "./renderHome";
 
 const stub = vi.hoisted(() => ({
   excessInFlight: false,
@@ -43,6 +45,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
   useConnection: () => ({ connection: mocks.conn as unknown as Connection }),
+  // The homepage mounts its Solana provider behind the lazy connect
+  // boundary (and /report, /understand at their roots); these
+  // passthroughs let the real provider component render with the
+  // mocked wallet context underneath.
+  ConnectionProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
+  WalletProvider: ({ children }: { children?: ReactNode }) =>
+    children as ReactNode,
 }));
 
 vi.mock("@/hooks/useWalletScan", () => ({
@@ -136,8 +146,8 @@ const SCAN_RESULT: ScanResult = {
   skippedAccounts: [],
 };
 
-function renderHomeWithScanResult() {
-  const utils = render(<Home />);
+async function renderHomeWithScanResult() {
+  const utils = await renderHome();
   act(() => {
     mocks.scan.result = SCAN_RESULT;
     utils.rerender(<Home />);
@@ -160,8 +170,8 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("excess section page wiring", () => {
-  it("mounts the section with all three sibling signals", () => {
-    renderHomeWithScanResult();
+  it("mounts the section with all three sibling signals", async () => {
+    await renderHomeWithScanResult();
     expect(screen.getByTestId("excess-section-stub")).toBeTruthy();
     expect(stub.excessProps?.repairInFlight).toBe(false);
     expect(stub.excessProps?.revokeInFlight).toBe(false);
@@ -169,8 +179,8 @@ describe("excess section page wiring", () => {
     expect(stub.excessProps?.burnInFlight).toBe(false);
   });
 
-  it("renders the section after the repair controls (the F6 order rule)", () => {
-    renderHomeWithScanResult();
+  it("renders the section after the repair controls (the F6 order rule)", async () => {
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", { name: "Repair Wallet" });
     const excess = screen.getByTestId("excess-section-stub");
     expect(
@@ -181,9 +191,9 @@ describe("excess section page wiring", () => {
     ).toBe(true);
   });
 
-  it("disables the repair button while the excess action is in flight", () => {
+  it("disables the repair button while the excess action is in flight", async () => {
     stub.excessInFlight = true;
-    renderHomeWithScanResult();
+    await renderHomeWithScanResult();
     const repair = screen.getByRole("button", {
       name: "Repair Wallet",
     }) as HTMLButtonElement;
