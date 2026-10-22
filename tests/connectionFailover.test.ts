@@ -155,3 +155,127 @@ describe("wrapWithFailover", () => {
     expect(secondary.calls.getBalance).toBe(1);
   });
 });
+
+/** Audit-F1 pins: the transient classifier identifies transport
+ *  failures by structure — a status code from the error object, a
+ *  status code LEADING the message exactly as web3.js formats HTTP
+ *  failures, or multi-word wordings — and never by a bare digit that
+ *  can sit inside a base58 signature, an address, or a slot number.
+ *  Class map for the PR: explicit 429 rotates (pinned by the M9 test
+ *  "rotates to the next endpoint on a 429" above); network rotates
+ *  (pinned by "rotates through two failing endpoints"); all-transient
+ *  propagates the last error (pinned by "when every endpoint fails");
+ *  wrapWithFailover's single-endpoint behavior is pinned by its
+ *  "returns the primary untouched" test above; the tests below cover
+ *  the identifier-safety and structural-coverage classes. */
+const makeSigStartingWith429 = () =>
+  new Error(
+    "Transaction signature 429XwneFfbVbUv3hLo9g8eBsjPZgqbhs4dML8B2uqJmQqRsTuVwxyZAbCdEfGhJkMnPr was not found"
+  );
+const makeSlotWith429 = () =>
+  new Error("Block not available for slot 429588211");
+const makeProgramError0x1ad = () =>
+  new Error(
+    "Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1ad"
+  );
+const makeBareStatus = (status: number, statusText: string) =>
+  new Error(`${status} ${statusText}: `);
+
+describe("transient classification is structural (audit F1)", () => {
+  it("a base58 signature carrying 429 does not rotate merely for those characters", async () => {
+    const primary = fakeConnection({ getBalance: [makeSigStartingWith429()] });
+    const secondary = fakeConnection({ getBalance: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    await expect(
+      (conn as never as { getBalance: () => unknown }).getBalance()
+    ).rejects.toThrow("was not found");
+    expect(secondary.calls.getBalance).toBe(0);
+  });
+
+  it("a slot number carrying 429 does not rotate", async () => {
+    const primary = fakeConnection({ getEpochInfo: [makeSlotWith429()] });
+    const secondary = fakeConnection({ getEpochInfo: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    await expect(
+      (conn as never as { getEpochInfo: () => unknown }).getEpochInfo()
+    ).rejects.toThrow("429588211");
+    expect(secondary.calls.getEpochInfo).toBe(0);
+  });
+
+  it("a program error whose hex code encodes 429 (0x1ad) does not rotate", async () => {
+    const primary = fakeConnection({
+      simulateTransaction: [makeProgramError0x1ad()],
+    });
+    const secondary = fakeConnection({ simulateTransaction: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    await expect(
+      (conn as never as { simulateTransaction: () => unknown }).simulateTransaction()
+    ).rejects.toThrow("custom program error");
+    expect(secondary.calls.simulateTransaction).toBe(0);
+  });
+
+  it("a 429 with empty statusText and body still rotates (leading status)", async () => {
+    const primary = fakeConnection({ getBalance: [makeBareStatus(429, "")] });
+    const secondary = fakeConnection({ getBalance: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    const res = (await (conn as never as { getBalance: () => { status: number } }).getBalance()) as { status: number };
+    expect(res.status).toBe(200);
+    expect(secondary.calls.getBalance).toBe(1);
+  });
+
+  it("other leading transient statuses rotate (503)", async () => {
+    const primary = fakeConnection({
+      getBalance: [makeBareStatus(503, "")],
+    });
+    const secondary = fakeConnection({ getBalance: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    const res = (await (conn as never as { getBalance: () => { status: number } }).getBalance()) as { status: number };
+    expect(res.status).toBe(200);
+    expect(secondary.calls.getBalance).toBe(1);
+  });
+
+  it("a timeout-worded transport failure rotates", async () => {
+    const primary = fakeConnection({
+      getEpochInfo: [new Error("getEpochInfo request timed out")],
+    });
+    const secondary = fakeConnection({ getEpochInfo: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    const res = (await (conn as never as { getEpochInfo: () => { status: number } }).getEpochInfo()) as { status: number };
+    expect(res.status).toBe(200);
+    expect(secondary.calls.getEpochInfo).toBe(1);
+  });
+
+  it("a JSON-RPC -32005 (node unhealthy or rate-limited) rotates", async () => {
+    const primary = fakeConnection({
+      getBalance: [Object.assign(new Error("node is behind"), { code: -32005 })],
+    });
+    const secondary = fakeConnection({ getBalance: [200] });
+    const conn = createFailoverConnection(ENDPOINTS, (endpoint) =>
+      (endpoint === ENDPOINTS[0] ? primary : secondary).connection as never
+    );
+    const res = (await (conn as never as { getBalance: () => { status: number } }).getBalance()) as { status: number };
+    expect(res.status).toBe(200);
+    expect(secondary.calls.getBalance).toBe(1);
+  });
+
+  it("a single-endpoint list makes exactly one attempt and rethrows (no rotation)", async () => {
+    const only = fakeConnection({ getBalance: [make429()] });
+    const conn = createFailoverConnection([ENDPOINTS[0]], () => only.connection as never);
+    await expect(
+      (conn as never as { getBalance: () => unknown }).getBalance()
+    ).rejects.toThrow("Too many requests");
+    expect(only.calls.getBalance).toBe(1);
+  });
+});
