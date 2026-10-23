@@ -123,6 +123,7 @@ Beyond the repair tool itself, the site ships:
   what lasting permissions it left behind.
 - /report: a read-only wallet health report. Foreign close-authority
   addresses are named there, not only counted.
+- /changelog: the product changelog. What shipped and when, newest first.
 - /privacy and /terms: the policies. Vercel Analytics records aggregate
   page visits; see the privacy page for what that means.
 
@@ -179,7 +180,8 @@ isolated under src/lib/solana/, so moving to v2 later won't mean a rewrite.
 
 ```
 src/app/          Next.js App Router pages and layout (repair tool, fee
-                  ledger, guides, understand, report, privacy, terms)
+                  ledger, guides, understand, report, changelog,
+                  privacy, terms)
 src/components/   UI components: wallet button, network badge, per-action
                   sections, guides, explainer and report views
 src/hooks/        React hooks for the scan, the repair, the per-item
