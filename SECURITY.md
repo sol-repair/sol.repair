@@ -46,8 +46,8 @@ Reviewed 2026-10-23 (previous review 2026-10-16).
   Cross-Origin-Opener-Policy same-origin and
   Strict-Transport-Security with includeSubDomains headers now ship
   on the site (PR #31).
-- `eslint-config-next` aligned to 16.4.1 to match the `next` bump
-  (PR #34). Dev-only.
+- `eslint-config-next` was aligned to 16.4.1 on 2026-10-23 to match
+  the `next` bump (PR #34). Dev-only.
 
 ### Patched on 2026-10-16
 
