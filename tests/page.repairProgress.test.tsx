@@ -22,6 +22,10 @@ import {
 import type { ScanResult } from "@/lib/solana/tokenAccounts";
 
 import Home from "../src/app/page";
+import {
+  AWAITING_HINT_DELAY_MS,
+  AWAITING_SIGNATURE_HINT,
+} from "../src/components/AwaitingSignatureHint";
 import type { ReactNode } from "react";
 import { renderHome } from "./renderHome";
 
@@ -213,6 +217,101 @@ describe("in-flight repair progress panel", () => {
       unmount();
     }
     const text = panels.join(" ");
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    expect(text.includes("!")).toBe(false);
+  });
+});
+
+describe("the awaiting-signature hint", () => {
+  // The hint is the Sep 27 missed-popup fix: one honest sentence inside
+  // the waiting card after a long silent wait, gone the moment the
+  // state moves. The timer lives in the component; these tests pin the
+  // behavior the user can observe, never the statuses.
+  async function mountAwaiting() {
+    mocks.repair.status = "awaiting-signature";
+    // First mount resolves the lazy boundary under real timers; the
+    // resolved module then mounts synchronously, so the remount below
+    // runs entirely on fake timers (the ticking-counter pattern).
+    await renderHome();
+    cleanup();
+    vi.useFakeTimers();
+    return render(<Home />);
+  }
+
+  it("adds the hint inside the status card after 15 seconds of waiting", async () => {
+    await mountAwaiting();
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    const card = screen.getByRole("status");
+    expect(card.textContent).toContain(AWAITING_SIGNATURE_HINT);
+    // The hint rides inside the live region card, beside the existing
+    // prompt, so its appearance is announced politely with the card.
+    expect(card.textContent).toContain(
+      "Check your wallet. Phantom is asking you to approve."
+    );
+  });
+
+  it("does not render the hint before 15 seconds", async () => {
+    await mountAwaiting();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS - 1);
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+  });
+
+  it("never renders the hint in the other in-flight states", async () => {
+    for (const status of ["building", "sending", "checking"] as const) {
+      mocks.repair.status = status;
+      const { unmount } = await renderHome();
+      vi.useFakeTimers();
+      render(<Home />);
+      await act(async () => {
+        vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS * 2);
+      });
+      expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+      unmount();
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes the hint the moment the state moves on", async () => {
+    const view = await mountAwaiting();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeTruthy();
+    mocks.repair.status = "sending";
+    await act(async () => {
+      view.rerender(<Home />);
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(
+      "Approved. Sending to the network..."
+    );
+  });
+
+  it("clears the hint timer on unmount", async () => {
+    const view = await mountAwaiting();
+    const withHint = vi.getTimerCount();
+    expect(withHint).toBeGreaterThan(0);
+    view.unmount();
+    // Exactly one timer goes with the tree: the hint's. The page keeps
+    // one unrelated timer of its own, so the pin is the removal, not an
+    // empty world; the component's own cleanup is pinned to zero in the
+    // section suites, which mount it in isolation.
+    expect(vi.getTimerCount()).toBe(withHint - 1);
+  });
+
+  it("keeps the owner's writing rules on the hint", async () => {
+    await mountAwaiting();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    const text = screen.getByText(AWAITING_SIGNATURE_HINT).textContent ?? "";
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     expect(text.includes("!")).toBe(false);
