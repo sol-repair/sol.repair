@@ -18,7 +18,7 @@
  * chosen wallet's name.
  */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair } from "@solana/web3.js";
 
@@ -30,7 +30,11 @@ vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => mocks.wallet,
 }));
 
-import { WalletButton } from "@/components/WalletButton";
+import {
+  BRAVE_IOS_CONNECT_MESSAGE,
+  CONNECT_FAILED_MESSAGE,
+  WalletButton,
+} from "@/components/WalletButton";
 
 const ICON = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
 
@@ -158,5 +162,88 @@ describe("wallet picker keyboard behavior", () => {
       name: /click to disconnect/i,
     });
     expect(connected.querySelector("img")).toBeTruthy();
+  });
+});
+
+describe("connect failure copy on Brave on iOS (row 17)", () => {
+  // Brave on iOS cannot complete a wallet connect in the browser layer
+  // (failure-mode matrix row 17), so the honest error names the way out
+  // instead of suggesting a retry. The detection is a heuristic: only a
+  // Brave marker AND an iOS user agent may switch the copy, and any
+  // doubt keeps the existing generic message byte for byte.
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, "brave");
+    Reflect.deleteProperty(window.navigator, "userAgent");
+  });
+
+  function setBraveIos(brave: boolean, ios: boolean) {
+    if (ios) {
+      Object.defineProperty(window.navigator, "userAgent", {
+        value:
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) " +
+          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 " +
+          "Mobile/15E148 Safari/604.1",
+        configurable: true,
+      });
+    }
+    if (brave) {
+      Object.defineProperty(window.navigator, "brave", {
+        value: { isBrave: async () => true },
+        configurable: true,
+      });
+    }
+  }
+
+  async function connectFails() {
+    mocks.wallet = {
+      ...twoWalletPickerContext(),
+      wallet: { adapter: { name: "Phantom", icon: ICON } },
+      connect: vi.fn().mockRejectedValue(new Error("connect failed")),
+    };
+    render(<WalletButton />);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /connect phantom to scan accounts/i,
+      })
+    );
+    await act(async () => {});
+  }
+
+  it("keeps the existing generic message when the browser is not Brave on iOS", async () => {
+    await connectFails();
+    expect(screen.getByRole("alert").textContent).toBe(
+      CONNECT_FAILED_MESSAGE
+    );
+  });
+
+  it("shows the Brave-on-iOS message when Brave reports itself on an iOS user agent", async () => {
+    setBraveIos(true, true);
+    await connectFails();
+    expect(screen.getByRole("alert").textContent).toBe(
+      BRAVE_IOS_CONNECT_MESSAGE
+    );
+  });
+
+  it("keeps the generic message for Brave outside iOS", async () => {
+    setBraveIos(true, false);
+    await connectFails();
+    expect(screen.getByRole("alert").textContent).toBe(
+      CONNECT_FAILED_MESSAGE
+    );
+  });
+
+  it("keeps the generic message on iOS when the Brave marker is absent", async () => {
+    setBraveIos(false, true);
+    await connectFails();
+    expect(screen.getByRole("alert").textContent).toBe(
+      CONNECT_FAILED_MESSAGE
+    );
+  });
+
+  it("keeps the owner's writing rules on the Brave copy", () => {
+    const text = BRAVE_IOS_CONNECT_MESSAGE;
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    expect(text.includes("!")).toBe(false);
   });
 });
