@@ -44,6 +44,37 @@ export const CONNECT_FAILED_MESSAGE =
   "Couldn't connect to this wallet. If it keeps failing, open sol.repair inside your wallet's own browser and try again.";
 
 /**
+ * Brave on iPhone is its own dead end: the wallet picker can list a
+ * wallet there, but connect() cannot complete it in the browser layer
+ * (failure-mode matrix row 17), so a retry message would be a lie. The
+ * honest sentence names the browser and points to the wallet app's own
+ * built-in browser, the path that actually works on iOS.
+ */
+export const BRAVE_IOS_CONNECT_MESSAGE =
+  "Brave on iPhone cannot connect a wallet here. Open sol.repair inside the browser built into the Phantom or Solflare app instead.";
+
+/**
+ * Heuristic, fail-safe by construction: only a browser that reports
+ * itself as Brave (the navigator.brave marker) AND an iOS user agent
+ * counts as Brave on iOS. Any doubt, any missing API, any throw, any
+ * desktop or non-Brave browser returns false and the generic connect
+ * message stands unchanged.
+ */
+function isBraveOnIos(): boolean {
+  try {
+    if (typeof navigator === "undefined") return false;
+    const brave = (navigator as Navigator & { brave?: unknown }).brave;
+    const looksBrave =
+      !!brave &&
+      typeof (brave as { isBrave?: unknown }).isBrave === "function";
+    if (!looksBrave) return false;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent ?? "");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The wallet picker. Picking a wallet only selects it; the green
  * connect button does the connecting, so the user always taps a
  * button that says what the tap does. Exported so other read-only
@@ -210,7 +241,13 @@ export function WalletButton() {
         <button
           onClick={() => {
             setWalletError(null);
-            connect().catch(() => setWalletError(CONNECT_FAILED_MESSAGE));
+            connect().catch(() =>
+              setWalletError(
+                isBraveOnIos()
+                  ? BRAVE_IOS_CONNECT_MESSAGE
+                  : CONNECT_FAILED_MESSAGE
+              )
+            );
           }}
           disabled={connecting}
           className={`${base} bg-[#14F195] text-black hover:bg-[#0fd584]`}

@@ -29,6 +29,15 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       "as soon as the wallet answers.",
   },
   {
+    date: "2026-10-25",
+    title: "Brave on iPhone now gets a connect error that says why",
+    body:
+      "When connecting fails in Brave on iPhone, the error now says this " +
+      "browser cannot connect a wallet, and points to the browser built " +
+      "into the Phantom or Solflare app as the way to continue. Every " +
+      "other browser keeps the same message as before.",
+  },
+  {
     date: "2026-10-22",
     title: "The fee ledger says when history could not be read",
     body:
