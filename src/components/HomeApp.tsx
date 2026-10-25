@@ -25,6 +25,7 @@ import { WalletButton } from "@/components/WalletButton";
 import { WalletStateSummary } from "@/components/WalletStateSummary";
 import { SolanaProvider } from "@/components/SolanaProvider";
 import { PreConnectInfo } from "@/components/PreConnectInfo";
+import { AwaitingSignatureHint } from "@/components/AwaitingSignatureHint";
 import { DelegationSection } from "@/components/DelegationSection";
 import { NativeAccountsSection } from "@/components/NativeAccountsSection";
 import { BurnDustSection } from "@/components/BurnDustSection";
@@ -910,6 +911,7 @@ function HomeAppInner() {
                   <ElapsedSeconds />
                 )}
               </div>
+              {status === "awaiting-signature" && <AwaitingSignatureHint />}
               {status === "sending" && (
                 <div className="mt-2 space-y-1 text-xs leading-relaxed text-zinc-400">
                   {progress && progress.total > 1 && (

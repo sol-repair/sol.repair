@@ -12,11 +12,21 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { NATIVE_MINT } from "@solana/spl-token";
 
 import { NativeAccountsSection } from "../src/components/NativeAccountsSection";
+import {
+  AWAITING_HINT_DELAY_MS,
+  AWAITING_SIGNATURE_HINT,
+} from "../src/components/AwaitingSignatureHint";
 import type { UnwrapState } from "../src/hooks/useUnwrapNative";
 import {
   ALREADY_CLOSED_COPY,
@@ -772,5 +782,107 @@ describe("the forbidden-phrase sweep across the remaining states (§10.4.4, addi
     // Distinct from success and from the failure card's verdict.
     expect(screen.queryByText("Wrapped SOL returned.")).toBeNull();
     expectNoBannedPhrases();
+  });
+});
+
+describe("the awaiting-signature hint (unwrap card)", () => {
+  // The Sep 27 missed-popup finding, on this card: one honest sentence
+  // inside the waiting card after a long silent wait, gone the moment
+  // the state moves. Component-level only; the hook is untouched.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderAwaiting() {
+    setHook({ status: "awaiting-signature" }, true);
+    return render(
+      <NativeAccountsSection
+        scan={scanWith([emptyEntry])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+      />
+    );
+  }
+
+  it("adds the hint inside the status card after 15 seconds of waiting", async () => {
+    vi.useFakeTimers();
+    renderAwaiting();
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    const card = screen.getByRole("status");
+    expect(card.textContent).toContain(AWAITING_SIGNATURE_HINT);
+    expect(card.textContent).toContain(
+      "Check your wallet. Approve to unwrap and close."
+    );
+  });
+
+  it("never renders the hint in the other in-flight states", async () => {
+    vi.useFakeTimers();
+    for (const status of [
+      "checking-current-state",
+      "building",
+      "sending",
+      "confirming",
+      "verifying",
+    ] as const) {
+      setHook({ status }, true);
+      cleanup();
+      render(
+        <NativeAccountsSection
+          scan={scanWith([emptyEntry])}
+          rescan={() => {}}
+          repairInFlight={false}
+          revokeInFlight={false}
+        />
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS * 2);
+      });
+      expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+    }
+  });
+
+  it("removes the hint the moment the state moves on", async () => {
+    vi.useFakeTimers();
+    const view = renderAwaiting();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeTruthy();
+    setHook({ status: "sending" }, true);
+    await act(async () => {
+      view.rerender(
+        <NativeAccountsSection
+          scan={scanWith([emptyEntry])}
+          rescan={() => {}}
+          repairInFlight={false}
+          revokeInFlight={false}
+        />
+      );
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+  });
+
+  it("clears the hint timer on unmount", async () => {
+    vi.useFakeTimers();
+    const view = renderAwaiting();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps the owner's writing rules on the hint", async () => {
+    vi.useFakeTimers();
+    renderAwaiting();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    const text = screen.getByText(AWAITING_SIGNATURE_HINT).textContent ?? "";
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    expect(text.includes("!")).toBe(false);
   });
 });

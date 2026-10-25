@@ -18,6 +18,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-25",
+    title: "A waiting card now explains a missed wallet approval",
+    body:
+      "When an action has been waiting on a wallet approval for about 15 " +
+      "seconds, its card now adds one sentence: no approval has come " +
+      "through and the transaction has not been sent. If no approval " +
+      "window is open, the sentence says to reload the page and try " +
+      "again. The wait itself is unchanged, and the sentence disappears " +
+      "as soon as the wallet answers.",
+  },
+  {
     date: "2026-10-22",
     title: "The fee ledger says when history could not be read",
     body:

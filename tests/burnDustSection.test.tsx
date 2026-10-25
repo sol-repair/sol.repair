@@ -10,10 +10,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
 import { BurnDustSection } from "../src/components/BurnDustSection";
+import {
+  AWAITING_HINT_DELAY_MS,
+  AWAITING_SIGNATURE_HINT,
+} from "../src/components/AwaitingSignatureHint";
 import type { BurnState } from "../src/hooks/useBurnDust";
 import type { ScanResult, SkippedAccount } from "../src/lib/solana/tokenAccounts";
 
@@ -366,5 +376,113 @@ describe("BurnDustSection terminal cards", () => {
     expect(
       screen.getByRole("button", { name: /Rescan to check the current state/i })
     ).toBeTruthy();
+  });
+});
+
+describe("the awaiting-signature hint (burn card)", () => {
+  // The Sep 27 missed-popup finding, on this card: one honest sentence
+  // inside the waiting card after a long silent wait, gone the moment
+  // the state moves. Component-level only; the hook is untouched.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderBurn() {
+    setHook({ status: "awaiting-signature" }, true);
+    return render(
+      <BurnDustSection
+        scan={scanWith([dustEntry()])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={false}
+      />
+    );
+  }
+
+  it("adds the hint inside the status card after 15 seconds of waiting", async () => {
+    vi.useFakeTimers();
+    renderBurn();
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    const card = screen.getByRole("status");
+    expect(card.textContent).toContain(AWAITING_SIGNATURE_HINT);
+    expect(card.textContent).toContain(
+      "Check your wallet. Approve to burn and close."
+    );
+  });
+
+  it("never renders the hint in the other in-flight states", async () => {
+    vi.useFakeTimers();
+    for (const status of [
+      "checking-current-state",
+      "building",
+      "sending",
+      "confirming",
+      "verifying",
+    ] as const) {
+      setHook({ status }, true);
+      cleanup();
+      render(
+        <BurnDustSection
+          scan={scanWith([dustEntry()])}
+          rescan={() => {}}
+          repairInFlight={false}
+          revokeInFlight={false}
+          unwrapInFlight={false}
+          feeReady={false}
+        />
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS * 2);
+      });
+      expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+    }
+  });
+
+  it("removes the hint the moment the state moves on", async () => {
+    vi.useFakeTimers();
+    const view = renderBurn();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeTruthy();
+    setHook({ status: "sending" }, true);
+    await act(async () => {
+      view.rerender(
+        <BurnDustSection
+          scan={scanWith([dustEntry()])}
+          rescan={() => {}}
+          repairInFlight={false}
+          revokeInFlight={false}
+          unwrapInFlight={false}
+          feeReady={false}
+        />
+      );
+    });
+    expect(screen.queryByText(AWAITING_SIGNATURE_HINT)).toBeNull();
+  });
+
+  it("clears the hint timer on unmount", async () => {
+    vi.useFakeTimers();
+    const view = renderBurn();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps the owner's writing rules on the hint", async () => {
+    vi.useFakeTimers();
+    renderBurn();
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);
+    });
+    const text = screen.getByText(AWAITING_SIGNATURE_HINT).textContent ?? "";
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    expect(text.includes("!")).toBe(false);
   });
 });

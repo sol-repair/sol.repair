@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import { VersionedTransaction } from "@solana/web3.js";
+import { AwaitingSignatureHint } from "@/components/AwaitingSignatureHint";
 
 import { useWithdrawExcess } from "@/hooks/useWithdrawExcess";
 import {
@@ -538,6 +539,7 @@ export function ExcessSection({
                 status === "confirming" ||
                 status === "verifying") && <ElapsedSeconds />}
             </div>
+            {status === "awaiting-signature" && <AwaitingSignatureHint />}
             {note && (
               <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                 {note}
