@@ -17,6 +17,19 @@ import {
   isKnownTestFee,
   type FeeLedgerCluster,
 } from "@/lib/solana/feeLedger";
+import { RECOVERED_TOTALS } from "@/lib/recoveredTotals";
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December",
+];
+
+/** ISO date to "October 25, 2026". Plain string math on purpose: the
+ *  result must be identical on server and client (no ICU drift). */
+function longDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${MONTHS[m - 1]} ${d}, ${y}`;
+}
 
 const CLUSTERS: FeeLedgerCluster[] = ["mainnet-beta", "devnet"];
 
@@ -168,6 +181,13 @@ export default function FeesPage() {
             </button>
           ))}
         </div>
+
+        <p className="mb-2 font-mono text-xs leading-relaxed text-zinc-400">
+          As of {longDate(RECOVERED_TOTALS.asOf)}:{" "}
+          {RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs
+          and burn-closes for {RECOVERED_TOTALS.wallets} wallets across{" "}
+          {RECOVERED_TOTALS.closes} accounts. Updated weekly.
+        </p>
 
         <p className="mb-4 font-mono text-xs text-zinc-400">
           {rows.length} fee{rows.length === 1 ? "" : "s"} ·{" "}

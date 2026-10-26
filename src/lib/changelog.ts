@@ -19,6 +19,16 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-25",
+    title: "The homepage counts what the tool has recovered",
+    body:
+      "A weekly line now tracks the total rent returned to users through " +
+      "repairs and burn-closes since launch. It states its as-of date and " +
+      "the next scheduled update, and it is refreshed by hand every Sunday " +
+      "from the same chain data the fee ledger shows. Unwraps are not " +
+      "counted: they never charge a fee.",
+  },
+  {
+    date: "2026-10-25",
     title: "A waiting card now explains a missed wallet approval",
     body:
       "When an action has been waiting on a wallet approval for about 15 " +

@@ -22,6 +22,19 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { PreConnectInfo } from "@/components/PreConnectInfo";
 import { ToolLinksSection } from "@/components/ToolLinksSection";
 import GuidesSection from "@/components/GuidesSection";
+import { RECOVERED_TOTALS } from "@/lib/recoveredTotals";
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December",
+];
+
+/** ISO date to "October 25, 2026". Plain string math on purpose: the
+ *  result must be identical on server and client (no ICU drift). */
+function longDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${MONTHS[m - 1]} ${d}, ${y}`;
+}
 
 const HomeApp = dynamic(() => import("@/components/HomeApp"), {
   ssr: false,
@@ -80,6 +93,13 @@ export default function Home() {
           depending on when they were created.
           <br />
           Recovered SOL is returned to the wallet that owns the account.
+        </p>
+        <p className="mb-6 font-mono text-xs leading-relaxed text-zinc-400">
+          Total SOL recovered through repairs and burn-closes since launch:{" "}
+          {RECOVERED_TOTALS.lamportsFreedSol} SOL. As of{" "}
+          {longDate(RECOVERED_TOTALS.asOf)}. Next weekly update:{" "}
+          {longDate(RECOVERED_TOTALS.nextUpdate)}. The fee ledger has every
+          row.
         </p>
 
         <HomeApp />
