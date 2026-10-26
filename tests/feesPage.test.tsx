@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useFeeLedger } from "@/hooks/useFeeLedger";
 import type { FeeLedgerRow } from "@/lib/solana/feeLedger";
+import { RECOVERED_TOTALS } from "@/lib/recoveredTotals";
 import FeesPage from "@/app/fees/page";
 
 vi.mock("@/hooks/useFeeLedger", () => ({
@@ -102,8 +103,7 @@ describe("fees page 1% conformance marker", () => {
     render(<FeesPage />);
 
     expect(
-      screen.getByText(/not exactly 1% of the SOL/i)
-    ).toBeTruthy();
+      screen.getByText(/not exactly 1% of the SOL/i)    ).toBeTruthy();
   });
 });
 
@@ -225,5 +225,22 @@ describe("fees page: the incomplete-history notice (audit F2)", () => {
       expect(text.includes("!")).toBe(false);
       expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     }
+  });
+});
+
+describe("fees page recovered-to-date line", () => {
+  it("renders the weekly all-time line from the generated constant", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    // Values come from the generated constant, so the Sunday bump can
+    // never break this pin: the test reads the same module the page does.
+    expect(
+      screen.getByText(
+        new RegExp(
+          `As of .+: ${RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs and burn-closes for ${RECOVERED_TOTALS.wallets} wallets across ${RECOVERED_TOTALS.closes} accounts\. Updated weekly\.`
+        )
+      )
+    ).toBeTruthy();
   });
 });
