@@ -94,9 +94,9 @@ repository Security tab carries the same rationale:
    (CPU burn in the visitor's tab; no code execution, no data exposure).
    All of these are accepted until the upstream libraries ship
    compatible patches; the explicit revisit trigger for the
-   `stream-json` pair is the planned migration to web3.js 2.x
-   (`@solana/kit`), at which point this whole item is re-derived from
-   the new dependency tree.
+   `stream-json` pair is the planned migration to web3.js 3.x
+   (or `@solana/kit` directly), at which point this whole item is
+   re-derived from the new dependency tree.
 
 2. **Dev-only build chains** (react-native -> metro, pulled in
    transitively by the mobile wallet adapter package, and the lint
