@@ -170,11 +170,13 @@ chain, so it is safe to run anywhere.
 Next.js (App Router), TypeScript, Tailwind CSS, @solana/web3.js v1, and the
 @solana/wallet-adapter-react suite.
 
-Why web3.js v1 instead of v2: v2 is Anza's current recommendation, but the
-wallet adapter libraries haven't fully caught up to it yet (see the open
-compatibility issues). Wallet compatibility is part of the security of this
-app, so v1 is the lower-risk choice right now. The Solana-specific code is
-isolated under src/lib/solana/, so moving to v2 later won't mean a rewrite.
+Why web3.js v1 instead of v3: web3.js v3 is now the recommended version, and
+1.x is in maintenance mode receiving critical fixes only. We stay on v1
+deliberately while the wallet adapter libraries (v1-only) remain the signing
+path for the wallets our users hold; the migration to v3 is pre-agreed and
+tripwire-managed, not scheduled. Wallet compatibility is part of the security
+of this app. The Solana-specific code is isolated under src/lib/solana/, so
+moving later won't mean a rewrite.
 
 ## Layout
 
