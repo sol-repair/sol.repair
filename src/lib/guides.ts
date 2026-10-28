@@ -45,4 +45,10 @@ export const GUIDES: Guide[] = [
     summary:
       "How to read a transaction: the steps it runs, and the permissions it can leave behind.",
   },
+  {
+    href: "/guides/repair-transaction",
+    title: "The transaction the repair tool builds",
+    summary:
+      "Every instruction on the wire: shapes, order, batching, and the fee, written for developers running their own clients.",
+  },
 ];
