@@ -110,6 +110,7 @@ const CONTENT_PATHS: Record<string, string[]> = {
   "/guides/token-approvals": ["src/app/guides/token-approvals"],
   "/guides/close-token-accounts": ["src/app/guides/close-token-accounts"],
   "/guides/what-did-i-just-sign": ["src/app/guides/what-did-i-just-sign"],
+  "/guides/repair-transaction": ["src/app/guides/repair-transaction"],
   "/guides": ["src/app/guides"],
   "/terms": ["src/app/terms"],
   "/privacy": ["src/app/privacy"],

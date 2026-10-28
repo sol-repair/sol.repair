@@ -29,6 +29,7 @@ import CloseTokenAccountsGuide from "@/app/guides/close-token-accounts/page";
 import WhatDidIJustSignGuide from "@/app/guides/what-did-i-just-sign/page";
 import TokenApprovalsGuide from "@/app/guides/token-approvals/page";
 import RentReductionGuide from "@/app/guides/rent-reduction/page";
+import RepairTransactionGuide from "@/app/guides/repair-transaction/page";
 import GuidesIndexPage from "@/app/guides/page";
 import GuidesSection from "@/components/GuidesSection";
 import { GUIDES } from "@/lib/guides";
@@ -40,6 +41,7 @@ const PAGES = [
   { name: "what-did-i-just-sign", Component: WhatDidIJustSignGuide },
   { name: "token-approvals", Component: TokenApprovalsGuide },
   { name: "rent-reduction", Component: RentReductionGuide },
+  { name: "repair-transaction", Component: RepairTransactionGuide },
   { name: "guides index", Component: GuidesIndexPage },
   { name: "guides section", Component: GuidesSection },
 ];
@@ -255,13 +257,14 @@ describe("every guide carries a visible breadcrumb that matches its schema", () 
     "what-did-i-just-sign",
     "token-approvals",
     "rent-reduction",
+    "repair-transaction",
   ];
   const GUIDE_PAGES = PAGES.filter((p) =>
     GUIDE_PAGE_NAMES.includes(p.name)
   );
 
-  it("covers all six guides", () => {
-    expect(GUIDE_PAGES.length).toBe(6);
+  it("covers all seven guides", () => {
+    expect(GUIDE_PAGES.length).toBe(7);
   });
 
   for (const { name, Component } of GUIDE_PAGES) {
@@ -372,7 +375,7 @@ describe("owner writing rules hold mechanically", () => {
 });
 
 describe("the guide list is a single source", () => {
-  it("holds exactly the six published guides, flagship first", () => {
+  it("holds exactly the seven published guides, flagship first", () => {
     expect(GUIDES.map((g) => g.href)).toEqual([
       "/guides/close-token-accounts",
       "/guides/solana-rent",
@@ -380,6 +383,7 @@ describe("the guide list is a single source", () => {
       "/guides/token-approvals",
       "/guides/random-tokens",
       "/guides/what-did-i-just-sign",
+      "/guides/repair-transaction",
     ]);
     for (const guide of GUIDES) {
       expect(guide.title.length).toBeGreaterThan(0);

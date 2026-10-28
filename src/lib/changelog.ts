@@ -18,6 +18,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-28",
+    title: "A developer guide to the repair transaction",
+    body:
+      "A new guide documents the exact instructions the tool builds: the " +
+      "shape of each instruction, the order they go in, the batching cap, " +
+      "and how the fee is computed, plus the revoke, unwrap, burn, and " +
+      "excess-withdrawal actions. It is written for developers running " +
+      "their own repair clients. The numbers in it render from the same " +
+      "constants the tool ships with, and any future change to the format " +
+      "gets announced here first.",
+  },
+  {
     date: "2026-10-25",
     title: "The homepage counts what the tool has recovered",
     body:

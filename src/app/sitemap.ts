@@ -81,6 +81,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${base}/guides/repair-transaction`,
+      lastModified: new Date(LAST_MODIFIED["/guides/repair-transaction"]),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${base}/guides`,
       lastModified: new Date(LAST_MODIFIED["/guides"]),
       changeFrequency: "monthly",
