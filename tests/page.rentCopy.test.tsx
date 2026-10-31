@@ -100,9 +100,11 @@ describe("homepage rent copy matches the two-regime reality", () => {
   it("example scan card spans legacy and current regimes with the corrected total", () => {
     render(<Home />);
 
-    expect(screen.getAllByText("0.002039 SOL")).toHaveLength(1);
-    expect(screen.getAllByText("0.002074 SOL")).toHaveLength(1);
-    expect(screen.getAllByText("0.001488 SOL")).toHaveLength(1);
+    // The approved redesign renders each amount as "recovers X SOL"
+    // inside its card.
+    expect(screen.getAllByText(/recovers 0\.002039 SOL/).length).toBe(1);
+    expect(screen.getAllByText(/recovers 0\.002074 SOL/).length).toBe(1);
+    expect(screen.getAllByText(/recovers 0\.001488 SOL/).length).toBe(1);
     expect(
       screen.getByText(/0\.005601 SOL recoverable · 1 transaction/)
     ).toBeTruthy();
