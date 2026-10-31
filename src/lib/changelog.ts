@@ -18,6 +18,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-10-31",
+    title: "The report shows who can mint and who can freeze each token",
+    body:
+      "The scan now reads each token's mint account and shows whether " +
+      "the mint authority is active or revoked, and whether a freeze " +
+      "authority exists, on the mint lines under the authority lists. " +
+      "Frozen accounts state it plainly: only the token's freeze " +
+      "authority can unfreeze them, with the authority linked where the " +
+      "chain named one. These facts are read from the chain itself, the " +
+      "same way the rest of the scan reads, and nothing about which " +
+      "accounts can be closed changed.",
+  },
+  {
     date: "2026-10-28",
     title: "A developer guide to the repair transaction",
     body:

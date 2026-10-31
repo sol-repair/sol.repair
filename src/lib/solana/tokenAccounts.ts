@@ -13,7 +13,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 
 import { readCloseBlockers } from "./t22CloseBlockers";
-import { readMintNames } from "./authorityNaming";
+import { readMintFacts } from "./authorityNaming";
 
 /** The standard SPL Token Program. */
 export const TOKEN_PROGRAM_ID = new PublicKey(
@@ -170,7 +170,7 @@ export interface SkippedAccount {
   /** The mint's self-declared Token-2022 metadata name, when the mint
    *  carries the extension (authority-naming v2). Carried ONLY on the
    *  two foreign-close-authority skip kinds; classic mints never get a
-   *  read (no on-chain name exists on them, and a registry lookup would
+   *  name (no on-chain name exists on them, and a registry lookup would
    *  leak holdings - the spec's hard privacy line). Self-declared and
    *  displayed as-is: not verified identity. Evidence only; the skip
    *  decision is unchanged. */
@@ -178,6 +178,23 @@ export interface SkippedAccount {
   /** The mint's self-declared Token-2022 metadata symbol, carried with
    *  `mintName` under the same rules. */
   mintSymbol?: string;
+  /** True when the mint's mint authority is active (new supply can be
+   *  printed), false when it is revoked. Present only when the mint was
+   *  read and decoded through the widened mint read (the mint and
+   *  freeze authority display spec): an unreadable mint carries none of
+   *  these fields. Evidence only; the skip decision is unchanged. */
+  mintAuthorityActive?: boolean;
+  /** Base58 address of the active mint authority, carried with
+   *  `mintAuthorityActive`. */
+  mintAuthority?: string;
+  /** True when the mint's freeze authority is active, false when none
+   *  exists. Present only when the mint was read and decoded, under the
+   *  same rules as `mintAuthorityActive`. Evidence only; the skip
+   *  decision is unchanged. */
+  freezeAuthorityActive?: boolean;
+  /** Base58 address of the active freeze authority, carried with
+   *  `freezeAuthorityActive`. */
+  freezeAuthority?: string;
 }
 
 /** Result of scanning a wallet for closeable accounts. */
@@ -514,47 +531,53 @@ export async function getClosableAccounts(
     finalEligible = kept;
   }
 
-  // --- The foreign-close-authority mint-name read (authority-naming v2) ---
+  // --- The widened mint read (authority-naming v2 + the mint and
+  // --- freeze authority display spec) ---
   //
-  // A bare base58 address cannot answer "what locked me". The two
-  // foreign-close-authority skip kinds (empty close-authority skips, and
-  // funded skips carrying the foreignCloseAuthority evidence) gain their
-  // mint's self-declared Token-2022 name and symbol: ONE chunked read of
-  // the DISTINCT mints behind them (100 keys per call, the same cap
-  // discipline as the extension read above), deduped per mint, and zero
-  // reads on any scan with no foreign-close-authority accounts. Classic
-  // mints are never read: no on-chain name exists on them, and resolving
-  // them off-chain would leak holdings (the hard privacy line in
-  // authorityNaming.ts). Nothing here changes a decision: the entries
-  // and their causes are already final when this runs.
-  const foreignCAMints = [
+  // A bare base58 address cannot answer "what locked me" or "who can
+  // print this token". ONE chunked read of the DISTINCT mints behind
+  // the wallet's token accounts (both token programs, 100 keys per
+  // call, deduped per mint) serves both evidence families from the
+  // same response bytes: the self-declared Token-2022 name and symbol
+  // (the unchanged v2 decode, attached only to the two
+  // foreign-close-authority kinds, exactly as before), and the mint
+  // and freeze authority states (the display spec, attached to every
+  // skip whose mint decoded). Nothing here changes a decision: the
+  // entries and their causes are already final when this runs, and no
+  // decision site reads any of the attached fields.
+  const allMints = [
     ...new Set(
-      skippedAccounts
-        .filter(
-          (entry) =>
-            entry.program === "token-2022" &&
-            (entry.cause === "close-authority" ||
-              entry.foreignCloseAuthority === true)
-        )
+      [...eligibleAccounts, ...skippedAccounts]
         .map((entry) => entry.mint)
+        .filter((mint) => mint !== "unknown")
     ),
   ];
-  if (foreignCAMints.length > 0) {
-    const names = await readMintNames(connection, foreignCAMints);
+  if (allMints.length > 0) {
+    const facts = await readMintFacts(connection, allMints);
     for (const entry of skippedAccounts) {
-      if (
-        entry.program !== "token-2022" ||
-        !(
-          entry.cause === "close-authority" ||
-          entry.foreignCloseAuthority === true
-        )
-      ) {
+      const mintFacts = facts.get(entry.mint);
+      if (mintFacts === undefined) {
         continue;
       }
-      const name = names.get(entry.mint);
-      if (name !== undefined) {
-        entry.mintName = name.name;
-        entry.mintSymbol = name.symbol;
+      if (
+        entry.program === "token-2022" &&
+        (entry.cause === "close-authority" ||
+          entry.foreignCloseAuthority === true)
+      ) {
+        if (mintFacts.name !== undefined) {
+          entry.mintName = mintFacts.name;
+        }
+        if (mintFacts.symbol !== undefined) {
+          entry.mintSymbol = mintFacts.symbol;
+        }
+      }
+      entry.mintAuthorityActive = mintFacts.mintAuthorityActive;
+      if (mintFacts.mintAuthority !== undefined) {
+        entry.mintAuthority = mintFacts.mintAuthority;
+      }
+      entry.freezeAuthorityActive = mintFacts.freezeAuthorityActive;
+      if (mintFacts.freezeAuthority !== undefined) {
+        entry.freezeAuthority = mintFacts.freezeAuthority;
       }
     }
   }
