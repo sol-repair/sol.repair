@@ -15,14 +15,15 @@
 
 import { describe, expect, it } from "vitest";
 import { pack } from "@solana/spl-token-metadata";
-import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 
 import {
   SYSTEM_PROGRAM_ADDRESS,
   authorityLabel,
+  decodeMintAuthorities,
   decodeMintNameSymbol,
-  readMintNames,
+  readMintFacts,
 } from "../src/lib/solana/authorityNaming";
 
 const SYSTEM_PROGRAM_LABEL =
@@ -86,14 +87,38 @@ describe("the imitation detector", () => {
   });
 });
 
-/** A raw Token-2022 mint buffer carrying a TokenMetadata extension
- *  packed by the same SDK code the decode path uses. */
-function mintBuffer(name: string, symbol: string): Buffer {
+/** A raw Token-2022 mint buffer: 165-byte base with the requested
+ *  authorities set at the base layout's offsets, a one-byte account
+ *  type (1 = Mint), then an optional TokenMetadata TLV list packed by
+ *  the same SDK code the decode path uses. */
+function t22MintBuffer(
+  opts: {
+    mintAuthority?: string | null;
+    freezeAuthority?: string | null;
+    name?: string;
+    symbol?: string;
+  } = {}
+): Buffer {
+  const base = Buffer.alloc(165);
+  if (opts.mintAuthority) {
+    base.writeUInt32LE(1, 0);
+    new PublicKey(opts.mintAuthority).toBuffer().copy(base, 4);
+  }
+  if (opts.freezeAuthority) {
+    base.writeUInt32LE(1, 46);
+    new PublicKey(opts.freezeAuthority).toBuffer().copy(base, 50);
+  }
+  base[44] = 6;
+  base[45] = 1;
+  const hasMeta = opts.name !== undefined || opts.symbol !== undefined;
+  if (!hasMeta) {
+    return Buffer.concat([base, Buffer.from([1])]);
+  }
   const meta = pack({
     updateAuthority: PublicKey.default,
     mint: PublicKey.default,
-    name,
-    symbol,
+    name: opts.name ?? "",
+    symbol: opts.symbol ?? "",
     uri: "",
     additionalMetadata: [],
   });
@@ -101,15 +126,44 @@ function mintBuffer(name: string, symbol: string): Buffer {
   tlv.writeUInt16LE(19, 0); // ExtensionType.TokenMetadata
   tlv.writeUInt16LE(meta.length, 2);
   Buffer.from(meta).copy(tlv, 4);
-  // Layout per unpackMint (and the chain): 165-byte base area, a
-  // one-byte account type (1 = Mint), then the TLV list.
-  return Buffer.concat([Buffer.alloc(165), Buffer.from([1]), tlv]);
+  return Buffer.concat([base, Buffer.from([1]), tlv]);
+}
+
+/** The v2 mint buffer: name and symbol only, base area all zeros. */
+function mintBuffer(name: string, symbol: string): Buffer {
+  return t22MintBuffer({ name, symbol });
+}
+
+/** A classic SPL mint buffer: exactly the 82-byte mint layout, option
+ *  u32 little-endian then the key, at the documented offsets. */
+function classicMintBuffer(
+  opts: { mintAuthority?: string | null; freezeAuthority?: string | null } = {}
+): Buffer {
+  const data = Buffer.alloc(82);
+  if (opts.mintAuthority) {
+    data.writeUInt32LE(1, 0);
+    new PublicKey(opts.mintAuthority).toBuffer().copy(data, 4);
+  }
+  data[44] = 9;
+  data[45] = 1;
+  if (opts.freezeAuthority) {
+    data.writeUInt32LE(1, 46);
+    new PublicKey(opts.freezeAuthority).toBuffer().copy(data, 50);
+  }
+  return data;
 }
 
 /** A mint reader mock recording every chunked call. Maps a mint address
- *  to the raw account info the RPC would return (null = vanished); the
- *  owner is the Token-2022 program, as the chain returns for mints. */
-function mockMintReader(byMint: Record<string, Buffer | null> = {}) {
+ *  to the raw account info the RPC would return (null = vanished); a
+ *  bare Buffer means the Token-2022 program owns it, as the chain
+ *  returns for Token-2022 mints, and an explicit entry shape carries a
+ *  different owner for classic fixtures. */
+function mockMintReader(
+  byMint: Record<
+    string,
+    Buffer | { owner: PublicKey; data: Buffer } | null
+  > = {}
+) {
   const calls: string[][] = [];
   return {
     calls,
@@ -117,9 +171,12 @@ function mockMintReader(byMint: Record<string, Buffer | null> = {}) {
       async getMultipleAccountsInfo(keys: PublicKey[]) {
         calls.push(keys.map((key) => key.toBase58()));
         return keys.map((key) => {
-          const data = byMint[key.toBase58()];
-          if (data === null || data === undefined) return null;
-          return { owner: TOKEN_2022_PROGRAM_ID, data };
+          const value = byMint[key.toBase58()];
+          if (value === null || value === undefined) return null;
+          if (Buffer.isBuffer(value)) {
+            return { owner: TOKEN_2022_PROGRAM_ID, data: value };
+          }
+          return value;
         });
       },
     },
@@ -168,24 +225,33 @@ describe("the mint metadata decode", () => {
   });
 });
 
+const AUTHORITY_A = mintKey(60);
+const AUTHORITY_B = mintKey(61);
+
 describe("the chunked distinct-mint read", () => {
-  it("reads each distinct mint once and decodes the names", async () => {
+  it("reads each distinct mint once and decodes names plus authority facts", async () => {
     const mintB = mintKey(2);
     const { reader, calls } = mockMintReader({
       [MINT_A]: mintBuffer("Test Token", "TST"),
       [mintB]: mintBuffer("MomoCoin", "MOMO"),
     });
-    const names = await readMintNames(reader, [MINT_A, MINT_A, mintB]);
+    const facts = await readMintFacts(reader, [MINT_A, MINT_A, mintB]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual([MINT_A, mintB]);
-    expect(names.get(MINT_A)).toEqual({ name: "Test Token", symbol: "TST" });
-    expect(names.get(mintB)).toEqual({ name: "MomoCoin", symbol: "MOMO" });
+    expect(facts.get(MINT_A)?.name).toBe("Test Token");
+    expect(facts.get(MINT_A)?.symbol).toBe("TST");
+    expect(facts.get(mintB)?.name).toBe("MomoCoin");
+    expect(facts.get(mintB)?.symbol).toBe("MOMO");
+    // The zero base area of the fixture decodes to both authorities
+    // revoked, so the facts carry the states, not absence.
+    expect(facts.get(MINT_A)?.mintAuthorityActive).toBe(false);
+    expect(facts.get(MINT_A)?.freezeAuthorityActive).toBe(false);
   });
 
   it("chunks at 100 mints per call", async () => {
     const mints = Array.from({ length: 101 }, (_, i) => mintKey(i + 3));
     const { reader, calls } = mockMintReader({});
-    await readMintNames(reader, mints);
+    await readMintFacts(reader, mints);
     expect(calls).toHaveLength(2);
     expect(calls[0]).toHaveLength(100);
     expect(calls[1]).toHaveLength(1);
@@ -193,23 +259,195 @@ describe("the chunked distinct-mint read", () => {
 
   it("makes zero calls for zero mints", async () => {
     const { reader, calls } = mockMintReader({});
-    await readMintNames(reader, []);
+    await readMintFacts(reader, []);
     expect(calls).toHaveLength(0);
   });
 
-  it("treats a vanished mint as no label", async () => {
+  it("treats a vanished mint as no facts", async () => {
     const { reader } = mockMintReader({});
-    const names = await readMintNames(reader, [MINT_A]);
-    expect(names.get(MINT_A)).toBeUndefined();
+    const facts = await readMintFacts(reader, [MINT_A]);
+    expect(facts.get(MINT_A)).toBeUndefined();
   });
 
-  it("treats a failed chunk call as no label for the whole chunk, without throwing", async () => {
+  it("treats a failed chunk call as no facts for the whole chunk, without throwing", async () => {
     const failing = {
       async getMultipleAccountsInfo() {
         throw new Error("429 too many requests");
       },
     };
-    const names = await readMintNames(failing, [MINT_A, mintKey(2)]);
-    expect(names.size).toBe(0);
+    const facts = await readMintFacts(failing, [MINT_A, mintKey(2)]);
+    expect(facts.size).toBe(0);
+  });
+
+  it("decodes classic mints through the same read, deduped across both programs", async () => {
+    // The same mint string arriving from both token programs is read
+    // once: dedupe is on the address, not the finding kind.
+    const classic = classicMintBuffer({
+      mintAuthority: AUTHORITY_A,
+      freezeAuthority: AUTHORITY_B,
+    });
+    const { reader, calls } = mockMintReader({
+      [MINT_A]: { owner: TOKEN_PROGRAM_ID, data: classic },
+    });
+    const facts = await readMintFacts(reader, [MINT_A, MINT_A]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual([MINT_A]);
+    expect(facts.get(MINT_A)).toEqual({
+      mintAuthorityActive: true,
+      mintAuthority: AUTHORITY_A,
+      freezeAuthorityActive: true,
+      freezeAuthority: AUTHORITY_B,
+    });
+  });
+
+  it("carries authority facts alone for a Token-2022 mint with no metadata", async () => {
+    const { reader } = mockMintReader({
+      [MINT_A]: t22MintBuffer({ mintAuthority: AUTHORITY_A }),
+    });
+    const facts = await readMintFacts(reader, [MINT_A]);
+    expect(facts.get(MINT_A)?.name).toBeUndefined();
+    expect(facts.get(MINT_A)?.mintAuthorityActive).toBe(true);
+    expect(facts.get(MINT_A)?.mintAuthority).toBe(AUTHORITY_A);
+    expect(facts.get(MINT_A)?.freezeAuthorityActive).toBe(false);
+  });
+});
+
+describe("the mint authority decode", () => {
+  it("decodes a classic mint with both authorities active", () => {
+    const decoded = decodeMintAuthorities(MINT_KEY, {
+      owner: TOKEN_PROGRAM_ID,
+      data: classicMintBuffer({
+        mintAuthority: AUTHORITY_A,
+        freezeAuthority: AUTHORITY_B,
+      }),
+    });
+    expect(decoded).toEqual({
+      mintAuthorityActive: true,
+      mintAuthority: AUTHORITY_A,
+      freezeAuthorityActive: true,
+      freezeAuthority: AUTHORITY_B,
+    });
+  });
+
+  it("decodes a classic mint with both authorities revoked", () => {
+    const decoded = decodeMintAuthorities(MINT_KEY, {
+      owner: TOKEN_PROGRAM_ID,
+      data: classicMintBuffer({}),
+    });
+    expect(decoded).toEqual({
+      mintAuthorityActive: false,
+      freezeAuthorityActive: false,
+    });
+  });
+
+  it("decodes the mixed classic cases at the documented offsets", () => {
+    const mintOnly = decodeMintAuthorities(MINT_KEY, {
+      owner: TOKEN_PROGRAM_ID,
+      data: classicMintBuffer({ mintAuthority: AUTHORITY_A }),
+    });
+    expect(mintOnly).toEqual({
+      mintAuthorityActive: true,
+      mintAuthority: AUTHORITY_A,
+      freezeAuthorityActive: false,
+    });
+    const freezeOnly = decodeMintAuthorities(MINT_KEY, {
+      owner: TOKEN_PROGRAM_ID,
+      data: classicMintBuffer({ freezeAuthority: AUTHORITY_B }),
+    });
+    expect(freezeOnly).toEqual({
+      mintAuthorityActive: false,
+      freezeAuthorityActive: true,
+      freezeAuthority: AUTHORITY_B,
+    });
+  });
+
+  it("decodes a Token-2022 mint through unpackMint with both authorities active", () => {
+    const decoded = decodeMintAuthorities(MINT_KEY, {
+      owner: TOKEN_2022_PROGRAM_ID,
+      data: t22MintBuffer({
+        mintAuthority: AUTHORITY_A,
+        freezeAuthority: AUTHORITY_B,
+      }),
+    });
+    expect(decoded).toEqual({
+      mintAuthorityActive: true,
+      mintAuthority: AUTHORITY_A,
+      freezeAuthorityActive: true,
+      freezeAuthority: AUTHORITY_B,
+    });
+  });
+
+  it("decodes a Token-2022 mint with both authorities revoked", () => {
+    const decoded = decodeMintAuthorities(MINT_KEY, {
+      owner: TOKEN_2022_PROGRAM_ID,
+      data: t22MintBuffer({}),
+    });
+    expect(decoded).toEqual({
+      mintAuthorityActive: false,
+      freezeAuthorityActive: false,
+    });
+  });
+
+  it("gives no facts for an account whose owner is neither token program", () => {
+    expect(
+      decodeMintAuthorities(MINT_KEY, {
+        owner: MINT_KEY,
+        data: classicMintBuffer({ mintAuthority: AUTHORITY_A }),
+      })
+    ).toBeNull();
+  });
+
+  it("gives no facts for a classic account that is not the 82-byte mint shape", () => {
+    // A multisig is 355 bytes and owned by a token program; the classic
+    // decode reads only the exact mint layout.
+    const multisig = Buffer.alloc(355);
+    multisig.writeUInt32LE(1, 0);
+    expect(
+      decodeMintAuthorities(MINT_KEY, { owner: TOKEN_PROGRAM_ID, data: multisig })
+    ).toBeNull();
+    expect(
+      decodeMintAuthorities(MINT_KEY, {
+        owner: TOKEN_PROGRAM_ID,
+        data: Buffer.alloc(81),
+      })
+    ).toBeNull();
+    expect(
+      decodeMintAuthorities(MINT_KEY, {
+        owner: TOKEN_PROGRAM_ID,
+        data: Buffer.alloc(83),
+      })
+    ).toBeNull();
+  });
+
+  it("decodes an all-zero mint shape to both-revoked, without throwing", () => {
+    // The all-zero 82-byte shape is what an unformatted account looks
+    // like to both decode paths; the offsets and unpackMint read the
+    // same bytes and both report the zero option flags. The scan only
+    // feeds this decode mints named by real token accounts, which the
+    // token programs keep initialized, so the shape exists only in
+    // fixtures - what is pinned here is that the decode never throws
+    // and says exactly what the bytes say.
+    expect(
+      decodeMintAuthorities(MINT_KEY, {
+        owner: TOKEN_2022_PROGRAM_ID,
+        data: Buffer.alloc(82),
+      })
+    ).toEqual({ mintAuthorityActive: false, freezeAuthorityActive: false });
+    expect(
+      decodeMintAuthorities(MINT_KEY, {
+        owner: TOKEN_PROGRAM_ID,
+        data: Buffer.alloc(82),
+      })
+    ).toEqual({ mintAuthorityActive: false, freezeAuthorityActive: false });
+    const truncated = t22MintBuffer({
+      mintAuthority: AUTHORITY_A,
+    }).subarray(0, 90);
+    expect(
+      decodeMintAuthorities(MINT_KEY, {
+        owner: TOKEN_2022_PROGRAM_ID,
+        data: truncated,
+      })
+    ).toBeNull();
+    expect(decodeMintAuthorities(MINT_KEY, null)).toBeNull();
   });
 });

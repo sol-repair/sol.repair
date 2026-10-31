@@ -1,13 +1,19 @@
 /**
- * Scan integration for the authority-naming v2 spec: the one chunked
- * read that attaches Token-2022 mint name/symbol evidence to the two
- * foreign-close-authority skip kinds.
+ * Scan integration for the authority-naming v2 spec and the mint and
+ * freeze authority display spec (Rev 1, section 3): the one chunked
+ * read of ALL distinct mints behind the wallet's token accounts, whose
+ * response bytes serve the Token-2022 name decode (unchanged, attached
+ * only to the two foreign-close-authority kinds) and the new per-mint
+ * authority evidence (attached to every skip whose mint decoded).
  *
- * Pinned here, per the spec: zero additional reads on any scan with no
- * foreign-close-authority accounts; classic-program mints never read;
- * distinct-mint dedupe; a failed or empty decode leaves the skip entry
- * unchanged; and the scan's decisions (eligibility, causes, reasons,
- * lamports) are byte-identical with and without the metadata evidence.
+ * Pinned here, per the specs: distinct-mint dedupe across both token
+ * programs; chunking at 100; a failed or empty decode leaves the skip
+ * entry unchanged; and the scan's decisions (eligibility, causes,
+ * reasons, lamports) are byte-identical with and without the evidence.
+ * The v2 pins that the read set never includes classic mints and never
+ * fires without foreign-close-authority accounts were superseded by the
+ * display spec's widened read set and are rewritten here to pin the
+ * widened contract instead.
  */
 
 import { describe, expect, it } from "vitest";
@@ -91,17 +97,79 @@ function mintBuffer(name: string, symbol: string): Buffer {
   return Buffer.concat([Buffer.alloc(165), Buffer.from([1]), tlv]);
 }
 
+/** A raw Token-2022 mint buffer with authorities set at the base
+ *  layout's offsets, an initialized base, and an optional TokenMetadata
+ *  extension. */
+function t22MintBufferWithAuthorities(
+  opts: {
+    mintAuthority?: string | null;
+    freezeAuthority?: string | null;
+    name?: string;
+    symbol?: string;
+  } = {}
+): Buffer {
+  const base = Buffer.alloc(165);
+  if (opts.mintAuthority) {
+    base.writeUInt32LE(1, 0);
+    new PublicKey(opts.mintAuthority).toBuffer().copy(base, 4);
+  }
+  if (opts.freezeAuthority) {
+    base.writeUInt32LE(1, 46);
+    new PublicKey(opts.freezeAuthority).toBuffer().copy(base, 50);
+  }
+  base[44] = 6;
+  base[45] = 1;
+  const typeByte = Buffer.from([1]);
+  if (opts.name === undefined && opts.symbol === undefined) {
+    return Buffer.concat([base, typeByte]);
+  }
+  const meta = pack({
+    updateAuthority: PublicKey.default,
+    mint: PublicKey.default,
+    name: opts.name ?? "",
+    symbol: opts.symbol ?? "",
+    uri: "",
+    additionalMetadata: [],
+  });
+  const tlv = Buffer.alloc(4 + meta.length);
+  tlv.writeUInt16LE(19, 0);
+  tlv.writeUInt16LE(meta.length, 2);
+  Buffer.from(meta).copy(tlv, 4);
+  return Buffer.concat([base, typeByte, tlv]);
+}
+
+/** A raw classic SPL mint buffer: exactly the 82-byte layout. */
+function classicMintBuffer(
+  opts: { mintAuthority?: string | null; freezeAuthority?: string | null } = {}
+): Buffer {
+  const data = Buffer.alloc(82);
+  if (opts.mintAuthority) {
+    data.writeUInt32LE(1, 0);
+    new PublicKey(opts.mintAuthority).toBuffer().copy(data, 4);
+  }
+  data[44] = 9;
+  data[45] = 1;
+  if (opts.freezeAuthority) {
+    data.writeUInt32LE(1, 46);
+    new PublicKey(opts.freezeAuthority).toBuffer().copy(data, 50);
+  }
+  return data;
+}
+
 /** Mock the two RPC boundaries the scan touches: the parsed accounts
  *  call, and getMultipleAccountsInfo, which now serves BOTH the
- *  close-blocker read (keyed by account pubkey) and the mint-name read
- *  (keyed by mint pubkey). mintByAddress answers the mint-name read;
- *  anything it does not know falls through rawByPubkey, then to a
- *  clean extension-free account so unrelated fixtures are unaffected.
+ *  close-blocker read (keyed by account pubkey) and the mint read
+ *  (keyed by mint pubkey). mintByAddress answers the mint read; a bare
+ *  Buffer means the Token-2022 program owns the account, and an
+ *  explicit shape carries a different owner (classic fixtures).
  *  Every chunked call is recorded. */
 function mockConnection(
   byProgram: Record<string, ReturnType<typeof tokenAccount>[]>,
   rawByPubkey: Record<string, { owner: PublicKey; data: Buffer } | null> = {},
-  mintByAddress: Record<string, Buffer | null> = {}
+  mintByAddress: Record<
+    string,
+    Buffer | { owner: PublicKey; data: Buffer } | null
+  > = {}
 ) {
   const rawCalls: string[][] = [];
   const connection = {
@@ -115,11 +183,13 @@ function mockConnection(
       rawCalls.push(keys.map((key) => key.toBase58()));
       return keys.map((key) => {
         const address = key.toBase58();
+        const entry = mintByAddress[address];
         if (address in mintByAddress) {
-          const data = mintByAddress[address];
-          return data === null
-            ? null
-            : { owner: TOKEN_2022_PROGRAM_ID, data };
+          if (entry === null) return null;
+          if (Buffer.isBuffer(entry)) {
+            return { owner: TOKEN_2022_PROGRAM_ID, data: entry };
+          }
+          return entry;
         }
         return address in rawByPubkey
           ? rawByPubkey[address]
@@ -138,7 +208,10 @@ async function runScan(
   splAccounts: ReturnType<typeof tokenAccount>[],
   token22Accounts: ReturnType<typeof tokenAccount>[],
   rawByPubkey: Record<string, { owner: PublicKey; data: Buffer } | null> = {},
-  mintByAddress: Record<string, Buffer | null> = {}
+  mintByAddress: Record<
+    string,
+    Buffer | { owner: PublicKey; data: Buffer } | null
+  > = {}
 ) {
   const { connection, rawCalls } = mockConnection(
     {
@@ -221,25 +294,110 @@ describe("scan attaches mint name evidence to foreign-close-authority skips", ()
     }
   });
 
-  it("never reads a classic-program mint", async () => {
+  it("reads a classic-program mint too (the widened read set)", async () => {
+    // Supersedes the v2 pin "never reads a classic-program mint": the
+    // display spec's widened set is all distinct mints behind the
+    // wallet's token accounts, both programs. The name evidence still
+    // never lands on the entry (no on-chain name exists for a classic
+    // mint), while the authority facts do.
     const classic = tokenAccount(2, {
       closeAuthority: FOREIGN_AUTHORITY,
       program: "spl",
     });
-    const { result, rawCalls } = await runScan([classic], [], {}, {});
+    const { result, rawCalls } = await runScan(
+      [classic],
+      [],
+      {},
+      {
+        [pk(102).toBase58()]: {
+          owner: TOKEN_PROGRAM_ID,
+          data: classicMintBuffer({ freezeAuthority: FOREIGN_AUTHORITY }),
+        },
+      }
+    );
     expect(result.skippedAccounts[0].cause).toBe("close-authority");
     expect(result.skippedAccounts[0].mintName).toBeUndefined();
-    expect(rawCalls).toHaveLength(0);
+    expect(result.skippedAccounts[0].mintSymbol).toBeUndefined();
+    expect(result.skippedAccounts[0].mintAuthorityActive).toBe(false);
+    expect(result.skippedAccounts[0].freezeAuthorityActive).toBe(true);
+    expect(result.skippedAccounts[0].freezeAuthority).toBe(FOREIGN_AUTHORITY);
+    expect(rawCalls).toHaveLength(1);
+    expect(rawCalls[0]).toEqual([pk(102).toBase58()]);
   });
 
-  it("makes zero additional reads when no foreign-close-authority account exists", async () => {
+  it("reads every distinct held mint once even with no foreign-close-authority account", async () => {
+    // Supersedes the v2 pin "makes zero additional reads when no
+    // foreign-close-authority account exists": the widened read set
+    // covers all held mints, so a plain wallet's mints are read once,
+    // deduped across both programs.
     const { rawCalls } = await runScan(
       [tokenAccount(2)],
       [tokenAccount(3, { balance: "5", program: "token-2022" })],
       {},
       {}
     );
-    expect(rawCalls).toHaveLength(0);
+    expect(rawCalls).toHaveLength(1);
+    expect(rawCalls[0]).toEqual([
+      pk(102).toBase58(),
+      pk(103).toBase58(),
+    ]);
+  });
+
+  it("attaches mint and freeze authority evidence to a frozen funded skip", async () => {
+    const funded = tokenAccount(3, {
+      balance: "100",
+      program: "spl",
+      // tokenAccount sets state initialized; a frozen funded account
+      // carries the frozen flag instead of the reason swap only for
+      // T22 fixtures below, so force the state here.
+    });
+    funded.account.data.parsed.info.mint = pk(102).toBase58();
+    funded.account.data.parsed.info.state = "frozen";
+    const { result } = await runScan(
+      [funded],
+      [],
+      {},
+      {
+        [pk(102).toBase58()]: {
+          owner: TOKEN_PROGRAM_ID,
+          data: classicMintBuffer({
+            mintAuthority: null,
+            freezeAuthority: FOREIGN_AUTHORITY,
+          }),
+        },
+      }
+    );
+    expect(result.skippedAccounts[0].cause).toBe("funded");
+    expect(result.skippedAccounts[0].frozen).toBe(true);
+    expect(result.skippedAccounts[0].mintAuthorityActive).toBe(false);
+    expect(result.skippedAccounts[0].freezeAuthorityActive).toBe(true);
+    expect(result.skippedAccounts[0].freezeAuthority).toBe(FOREIGN_AUTHORITY);
+  });
+
+  it("keeps name evidence scoped to the two foreign-close-authority kinds", async () => {
+    // The widened read decodes names for every T22 mint, but the v2
+    // attachment scope is unchanged: a funded skip without a foreign
+    // close authority gets authority facts, never a mint name.
+    const funded = tokenAccount(3, {
+      balance: "5",
+      program: "token-2022",
+    });
+    funded.account.data.parsed.info.mint = MINT_1;
+    const { result } = await runScan(
+      [],
+      [funded],
+      {},
+      {
+        [MINT_1]: t22MintBufferWithAuthorities({
+          name: "MomoCoin",
+          symbol: "MOMO",
+        }),
+      }
+    );
+    expect(result.skippedAccounts[0].cause).toBe("funded");
+    expect(result.skippedAccounts[0].mintName).toBeUndefined();
+    expect(result.skippedAccounts[0].mintSymbol).toBeUndefined();
+    expect(result.skippedAccounts[0].mintAuthorityActive).toBe(false);
   });
 
   it("leaves the skip entry unchanged when the read fails or comes back empty", async () => {

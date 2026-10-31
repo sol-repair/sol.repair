@@ -65,11 +65,20 @@ function AccountLink({ address }: { address: string }) {
 /** One row of a grouped authority list: the authority address (undefined
  *  when entries carried no address), how many accounts it covers, and
  *  the distinct mints behind those accounts that carried self-declared
- *  Token-2022 metadata. */
+ *  Token-2022 metadata and, where the mint decoded, the mint and freeze
+ *  authority states. */
 interface AuthorityGroup {
   address?: string;
   count: number;
-  mints?: Array<{ mint: string; name?: string; symbol?: string }>;
+  mints?: Array<{
+    mint: string;
+    name?: string;
+    symbol?: string;
+    mintAuthorityActive?: boolean;
+    mintAuthority?: string;
+    freezeAuthorityActive?: boolean;
+    freezeAuthority?: string;
+  }>;
 }
 
 /**
@@ -83,8 +92,22 @@ function groupByCloseAuthority(
 ): AuthorityGroup[] {
   const counts = new Map<string, number>();
   // Per authority: the distinct mints behind its accounts that carried
-  // self-declared Token-2022 metadata, one row per mint.
-  const mintMeta = new Map<string, Map<string, { name?: string; symbol?: string }>>();
+  // self-declared Token-2022 metadata, one row per mint, plus the mint
+  // and freeze authority states where the mint decoded.
+  const mintMeta = new Map<
+    string,
+    Map<
+      string,
+      {
+        name?: string;
+        symbol?: string;
+        mintAuthorityActive?: boolean;
+        mintAuthority?: string;
+        freezeAuthorityActive?: boolean;
+        freezeAuthority?: string;
+      }
+    >
+  >();
   let unrecorded = 0;
   for (const entry of entries) {
     // Only a SkippedAccount carries a cause, so the union narrows there.
@@ -94,11 +117,25 @@ function groupByCloseAuthority(
       continue;
     }
     counts.set(authority, (counts.get(authority) ?? 0) + 1);
-    if ("cause" in entry && (entry.mintName || entry.mintSymbol)) {
+    if (
+      "cause" in entry &&
+      (entry.mintName ||
+        entry.mintSymbol ||
+        entry.mintAuthorityActive !== undefined ||
+        entry.freezeAuthorityActive !== undefined)
+    ) {
       const perAuthority = mintMeta.get(authority) ?? new Map();
       perAuthority.set(entry.mint, {
         ...(entry.mintName ? { name: entry.mintName } : {}),
         ...(entry.mintSymbol ? { symbol: entry.mintSymbol } : {}),
+        ...(entry.mintAuthorityActive !== undefined
+          ? { mintAuthorityActive: entry.mintAuthorityActive }
+          : {}),
+        ...(entry.mintAuthority ? { mintAuthority: entry.mintAuthority } : {}),
+        ...(entry.freezeAuthorityActive !== undefined
+          ? { freezeAuthorityActive: entry.freezeAuthorityActive }
+          : {}),
+        ...(entry.freezeAuthority ? { freezeAuthority: entry.freezeAuthority } : {}),
       });
       mintMeta.set(authority, perAuthority);
     }
@@ -138,7 +175,11 @@ function labelFor(address: string): string | undefined {
 
 /** The self-declared mint lines under one authority row: name and
  *  symbol as plain text after the mint link, exactly as the mint
- *  declares them. See the CAUTION above the grouping function. */
+ *  declares them; then, where the scan decoded the mint, the mint
+ *  authority and freeze authority states with the owner-approved copy
+ *  and an authority link only when an authority exists. See the CAUTION
+ *  above the grouping function: states are on-chain facts, the authority
+ *  address is just an address, and neither judges anything. */
 function MintLines({ group }: { group: AuthorityGroup }) {
   if (!group.mints || group.mints.length === 0) return null;
   return (
@@ -147,6 +188,30 @@ function MintLines({ group }: { group: AuthorityGroup }) {
         <div key={entry.mint} className="break-all">
           mint <AccountLink address={entry.mint} />{" "}
           {[entry.name, entry.symbol].filter(Boolean).join(" ")}
+          {entry.mintAuthorityActive !== undefined && (
+            <>
+              {" · mint authority: "}
+              {entry.mintAuthorityActive ? (
+                <>
+                  active <AccountLink address={entry.mintAuthority!} />
+                </>
+              ) : (
+                "revoked"
+              )}
+            </>
+          )}
+          {entry.freezeAuthorityActive !== undefined && (
+            <>
+              {" · freeze authority: "}
+              {entry.freezeAuthorityActive ? (
+                <>
+                  active <AccountLink address={entry.freezeAuthority!} />
+                </>
+              ) : (
+                "none"
+              )}
+            </>
+          )}
         </div>
       ))}
     </>

@@ -644,7 +644,9 @@ describe("getClosableAccounts Token-2022 close-blocker check", () => {
     expect(result.eligibleAccounts[0].program).toBe("token-2022");
     expect(result.recoverableLamports).toBe(2_039_280n);
     expect(result.skippedAccounts).toHaveLength(0);
-    expect(rawCalls).toEqual([1]);
+    // One close-blocker read, then the widened mint read for the
+    // account's mint (mint/freeze authority display spec).
+    expect(rawCalls).toEqual([1, 1]);
   });
 
   it("skips a withheld-fee account with the approved reason and evidence", async () => {
@@ -744,8 +746,9 @@ describe("getClosableAccounts Token-2022 close-blocker check", () => {
     expect(result.eligibleAccounts[0].program).toBe("spl");
     expect(result.recoverableLamports).toBe(2_039_280n);
     expect(result.skippedAccounts).toHaveLength(1);
-    // The raw read covers only the Token-2022 candidate, never classic.
-    expect(rawCalls).toEqual([1]);
+    // The close-blocker read covers only the Token-2022 candidate; the
+    // widened mint read then covers both accounts' mints (display spec).
+    expect(rawCalls).toEqual([1, 2]);
   });
 
   it("carries the delegated flag onto a blocked skip", async () => {
@@ -764,10 +767,12 @@ describe("getClosableAccounts Token-2022 close-blocker check", () => {
     expect(result.skippedAccounts[0].delegated).toBe(true);
   });
 
-  it("issues no raw read when only classic accounts are eligible", async () => {
+  it("issues no close-blocker read when only classic accounts are eligible, and reads their mint", async () => {
     const { result, rawCalls } = await runScan([tokenAccount(30)]);
     expect(result.eligibleAccounts).toHaveLength(1);
-    expect(rawCalls).toEqual([]);
+    // No close-blocker read (classic), then the widened mint read of
+    // the account's mint (mint/freeze authority display spec).
+    expect(rawCalls).toEqual([1]);
   });
 
   it("chunks the raw read at 100 accounts", async () => {
@@ -776,6 +781,8 @@ describe("getClosableAccounts Token-2022 close-blocker check", () => {
     );
     const { result, rawCalls } = await runScan([], accounts);
     expect(result.eligibleAccounts).toHaveLength(150);
-    expect(rawCalls).toEqual([100, 50]);
+    // The close-blocker read chunks at 100, then the widened mint read
+    // chunks the 150 distinct mints the same way (display spec).
+    expect(rawCalls).toEqual([100, 50, 100, 50]);
   });
 });

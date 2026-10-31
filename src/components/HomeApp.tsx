@@ -668,6 +668,26 @@ function HomeAppInner() {
                             · Token-2022
                           </span>
                         )}
+                        {account.cause === "funded" && account.frozen && (
+                          // The display spec's frozen funded row: the
+                          // owner-approved sentence, byte-exact (hence
+                          // the string expression), with the freeze
+                          // authority link only where the mint decoded
+                          // and named an active authority.
+                          <span className="block">
+                            {
+                              "This account is frozen. Only the token's freeze authority can unfreeze it."
+                            }
+                            {account.freezeAuthority && (
+                              <>
+                                {" "}
+                                <AccountLink
+                                  address={account.freezeAuthority}
+                                />
+                              </>
+                            )}
+                          </span>
+                        )}
                       </span>
                       <span className="whitespace-nowrap text-amber-500/70">
                         {account.reason}
