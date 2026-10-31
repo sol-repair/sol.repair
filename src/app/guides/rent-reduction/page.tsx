@@ -18,7 +18,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/rent-reduction",
   datePublished: "2026-09-30",
-  dateModified: "2026-09-30",
+  dateModified: "2026-10-31",
 });
 
 export default function RentReductionGuide() {

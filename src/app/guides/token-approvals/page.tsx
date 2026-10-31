@@ -18,7 +18,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/token-approvals",
   datePublished: "2026-09-30",
-  dateModified: "2026-09-30",
+  dateModified: "2026-10-31",
 });
 
 export default function TokenApprovalsGuide() {
@@ -156,15 +156,6 @@ export default function TokenApprovalsGuide() {
               you want to keep it, an approval-revoking tool is the right
               instrument.{" "}
               <a
-                href="https://revoke.cash"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline underline-offset-2 hover:text-zinc-100"
-              >
-                Revoke.cash
-              </a>{" "}
-              is the established one and supports Solana, and{" "}
-              <a
                 href="https://sol-incinerator.com/revoke"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -172,8 +163,8 @@ export default function TokenApprovalsGuide() {
               >
                 Solana Incinerator
               </a>{" "}
-              has a revoke page. Read what each one shows you before you
-              sign, and check their fee terms on their own pages.
+              has a revoke page. Read what it shows you before you sign,
+              and check its fee terms on its own page.
             </p>
             <p className="mt-2">
               From the command line. The spl-token CLI has a revoke
@@ -207,9 +198,11 @@ export default function TokenApprovalsGuide() {
               </li>
               <li>
                 A dashboard sweep of many approvals in one go: not what this
-                site is. If you want to review every approval across your
-                wallet in one place, Revoke.cash is genuinely the better
-                tool for that job.
+                site is. If you want to review and clear many approvals
+                across your wallet in one place, Solana Incinerator is
+                genuinely the better tool for that job: it scans your
+                wallet, lists your approvals, and can clear several in one
+                batched transaction.
               </li>
             </ul>
           </section>

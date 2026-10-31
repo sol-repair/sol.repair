@@ -18,7 +18,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/what-did-i-just-sign",
   datePublished: "2026-09-19",
-  dateModified: "2026-09-30",
+  dateModified: "2026-10-31",
 });
 
 export default function WhatDidIJustSignGuide() {

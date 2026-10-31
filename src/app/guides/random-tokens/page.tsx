@@ -18,7 +18,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/random-tokens",
   datePublished: "2026-09-03",
-  dateModified: "2026-09-30",
+  dateModified: "2026-10-31",
 });
 
 export default function RandomTokensGuide() {
@@ -76,16 +76,18 @@ export default function RandomTokensGuide() {
             <p>
               The tokens are not the cost. The account holding them is. Every
               token account on Solana must keep a deposit of rent to stay
-              open. For a standard token account, that deposit is about 0.002
-              SOL. Accounts created before September 4, 2026 hold 2,039,280
-              lamports, and newer ones hold 1,855,569 lamports. It sits there
-              for as long as the
+              open. For a standard token account, that deposit is between
+              about 0.00149 and 0.00208 SOL, depending on when it was
+              created: accounts created before September 4, 2026 hold
+              2,039,280 lamports, and newer ones hold 1,488,440 lamports. It
+              sits there for as long as the
               account exists. It does not drain away. It is your SOL, held in
               an account you never asked for.
             </p>
             <p className="mt-2">
-              If you have ten of these accounts, about 0.02 SOL of yours is
-              locked. Twenty, about 0.04. It adds up.
+              If you have ten of these accounts, between about 0.015 and
+              0.02 SOL of yours is locked. Twenty, between about 0.03 and
+              0.04. It adds up.
             </p>
           </section>
 

@@ -35,14 +35,21 @@ describe("terms page pins the fee and service claims", () => {
     ).toBeTruthy();
   });
 
-  it("states the network base fee and the observed priority fee range", () => {
+  it("states the network base fee and the priority fee's dependence on settings", () => {
     render(<TermsPage />);
     expect(
       screen.getByText(/base fee of about 0\.000005 SOL per transaction/i)
     ).toBeTruthy();
+    // The stale August priority-fee range is gone (the October verbiage
+    // audit's F3 fix): the terms no longer present a two-month-old
+    // observation as current, and the burn fee is stated like the
+    // repair fee is.
+    expect(
+      screen.queryByText(/recently run between about/i)
+    ).toBeNull();
     expect(
       screen.getByText(
-        /recently run between about 0\.000075 and 0\.00015 SOL per transaction/i
+        /1%\sof the SOL the close returns, only when the recovery succeeds/i
       )
     ).toBeTruthy();
   });

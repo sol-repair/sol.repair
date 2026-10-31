@@ -110,8 +110,9 @@ export default function Home() {
 
         <footer className="mt-12 border-t border-zinc-900 pt-6 text-xs leading-relaxed text-zinc-400">
           <p>
-            Built with @solana/spl-token CloseAccount and Revoke
-            instructions. Read-only connection. Every transaction is
+            Built with @solana/spl-token CloseAccount, Revoke, and Burn
+            instructions, plus Token-2022’s WithdrawExcessLamports.
+            Read-only connection. Every transaction is
             signed by you, in your own wallet, and rent is returned to
             your own address.
           </p>

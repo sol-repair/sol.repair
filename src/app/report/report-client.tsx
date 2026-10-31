@@ -68,6 +68,10 @@ export default function ReportPage() {
                 Which accounts hold tokens, carry delegations, are frozen,
                 or could not be read.
               </li>
+              <li>
+                For each token you hold, its public mint account: who can
+                mint more, and who can freeze.
+              </li>
             </ul>
             <p className="mt-3 text-xs leading-relaxed text-zinc-400">
               It does not read your SOL balance, stake accounts, or
@@ -111,8 +115,10 @@ export default function ReportPage() {
               {inspection && <WalletStateSummary summary={inspection} />}
             </div>
             <p className="text-sm leading-relaxed text-zinc-400">
-              Closing empty accounts, revoking delegations, and unwrapping
-              wrapped SOL all happen on the home page. This page only reads.
+              Closing empty accounts, burning and closing dust accounts,
+              revoking delegations, withdrawing excess lamports, and
+              unwrapping wrapped SOL all happen on the home page. This page
+              only reads.
             </p>
             <Link
               href="/"

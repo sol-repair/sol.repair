@@ -709,7 +709,7 @@ describe("formatBlockTime", () => {
   });
 
   it("renders a dash for a missing blockTime", () => {
-    expect(formatBlockTime(null)).toBe("—");
+    expect(formatBlockTime(null)).toBe("-");
   });
 });
 
