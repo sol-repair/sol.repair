@@ -19,6 +19,18 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-31",
+    title: "A correction pass on the guides, the terms, and the disclosure lines",
+    body:
+      "A full read of every page found two stale claims: the approvals guide " +
+      "named Revoke.cash as a Solana revoking tool when its own site does not " +
+      "list Solana, and the random-tokens guide still quoted the September " +
+      "rent minimum from before the second cut. Both are corrected. The terms " +
+      "now describe the burn-and-close action and its fee. The report page " +
+      "and the homepage now say the scan also reads the public mint accounts " +
+      "behind held tokens. Several smaller wording fixes ride along.",
+  },
+  {
+    date: "2026-10-31",
     title: "The scan rows are redesigned with labeled fields and authority facts",
     body:
       "Every row now labels what each address is: the Account (the token " +

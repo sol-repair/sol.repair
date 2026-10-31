@@ -20,7 +20,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/solana-rent",
   datePublished: "2026-09-03",
-  dateModified: "2026-09-30",
+  dateModified: "2026-10-31",
 });
 
 export default function SolanaRentGuide() {
