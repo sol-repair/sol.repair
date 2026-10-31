@@ -78,46 +78,74 @@ export function PreConnectInfo() {
           <span aria-hidden="true" className="text-zinc-400">02</span>{" "}
           <span className="text-emerald-400">Example scan</span>
         </h2>
-        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-          <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
-            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
-              <span className="flex items-start gap-2">
-                <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
-                <span>7kPqX…9mZ2 · mint 4dTvN…xW5a</span>
+        <div className="mt-3 space-y-2">
+          <div className="flex items-start gap-2 rounded-md border border-zinc-800/60 bg-black/20 p-2 font-mono text-[11px] leading-relaxed text-zinc-400">
+            <span
+              aria-hidden="true"
+              className="mt-[3px] inline-block h-3 w-3 shrink-0 rounded-sm border border-zinc-700 bg-emerald-500/30"
+            />
+            <span className="min-w-0 flex-1 break-all">
+              <span className="block">
+                <span className="text-zinc-500">Account </span>
+                7kPqX…9mZ2
               </span>
-              <span className="whitespace-nowrap text-zinc-400">
-                0.002039 SOL
+              <span className="mt-0.5 block">
+                <span className="text-zinc-500">Mint </span>
+                4dTvN…xW5a
               </span>
-            </div>
-            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
-              <span className="flex items-start gap-2">
-                <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
-                <span>
-                  2bLmR…cF8h · mint 9jKsD…pQ3e ·{" "}
-                  <span className="text-sky-400/80">Token-2022</span>
-                  {" · "}
-                  <span className="text-sky-400/80">revoke + close</span>
+            </span>
+            <span className="whitespace-nowrap text-right font-semibold text-emerald-400">
+              recovers 0.002039 SOL
+            </span>
+          </div>
+          <div className="flex items-start gap-2 rounded-md border border-zinc-800/60 bg-black/20 p-2 font-mono text-[11px] leading-relaxed text-zinc-400">
+            <span
+              aria-hidden="true"
+              className="mt-[3px] inline-block h-3 w-3 shrink-0 rounded-sm border border-zinc-700 bg-emerald-500/30"
+            />
+            <span className="min-w-0 flex-1 break-all">
+              <span className="block">
+                <span className="text-zinc-500">Account </span>
+                2bLmR…cF8h{" "}
+                <span className="rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                  Token-2022
+                </span>{" "}
+                <span className="rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                  revoke + close
                 </span>
               </span>
-              <span className="whitespace-nowrap text-zinc-400">
-                0.002074 SOL
+              <span className="mt-0.5 block">
+                <span className="text-zinc-500">Mint </span>
+                9jKsD…pQ3e
               </span>
-            </div>
-            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
-              <span className="flex items-start gap-2">
-                <span className="mt-[2px] inline-block h-3 w-3 rounded-sm border border-zinc-700 bg-emerald-500/30" />
-                <span>5wNtY…vB7u · mint 6hGfA…kL1o</span>
+            </span>
+            <span className="whitespace-nowrap text-right font-semibold text-emerald-400">
+              recovers 0.002074 SOL
+            </span>
+          </div>
+          <div className="flex items-start gap-2 rounded-md border border-zinc-800/60 bg-black/20 p-2 font-mono text-[11px] leading-relaxed text-zinc-400">
+            <span
+              aria-hidden="true"
+              className="mt-[3px] inline-block h-3 w-3 shrink-0 rounded-sm border border-zinc-700 bg-emerald-500/30"
+            />
+            <span className="min-w-0 flex-1 break-all">
+              <span className="block">
+                <span className="text-zinc-500">Account </span>
+                5wNtY…vB7u
               </span>
-              <span className="whitespace-nowrap text-zinc-400">
-                0.001488 SOL
+              <span className="mt-0.5 block">
+                <span className="text-zinc-500">Mint </span>
+                6hGfA…kL1o
               </span>
-            </div>
+            </span>
+            <span className="whitespace-nowrap text-right font-semibold text-emerald-400">
+              recovers 0.001488 SOL
+            </span>
           </div>
           <p className="mt-2 text-emerald-400">
             0.005601 SOL recoverable · 1 transaction
           </p>
-        </div>
-      </section>
+        </div></section>
 
       <section className="mb-10">
         <h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">

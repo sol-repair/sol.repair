@@ -19,6 +19,21 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-10-31",
+    title: "The scan rows are redesigned with labeled fields and authority facts",
+    body:
+      "Every row now labels what each address is: the Account (the token " +
+      "account itself) and the Mint (the token), so the two can no longer " +
+      "be confused. Rows holding tokens also show who controls the token: " +
+      "whether the mint authority is active or revoked, and whether a " +
+      "freeze authority exists, with a link to the controlling address. " +
+      "Frozen accounts lead with Frozen. and state plainly that only the " +
+      "token’s freeze authority can unfreeze them, or that nothing can " +
+      "when that authority was given up. The amount each empty account " +
+      "recovers is emphasized, the example scan before connecting matches " +
+      "the real scan, and the scrolled lists use a slim dark scrollbar.",
+  },
+  {
+    date: "2026-10-31",
     title: "The report shows who can mint and who can freeze each token",
     body:
       "The scan now reads each token's mint account and shows whether " +

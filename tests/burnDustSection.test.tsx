@@ -168,7 +168,10 @@ describe("BurnDustSection finding rows", () => {
     expect(screen.getByText(/1 account holds tokens/i)).toBeTruthy();
     expect(screen.getAllByText(/Burn and close/)).toHaveLength(1);
     expect(screen.getAllByText(/5,000 base units/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/2,039,280 lamports total/)).toBeTruthy();
+    expect(screen.getByText("Balance")).toBeTruthy();
+    expect(screen.getByText(/5,000 base units/)).toBeTruthy();
+    expect(screen.getByText("Account rent")).toBeTruthy();
+    expect(screen.getByText(/2,039,280 lamports/)).toBeTruthy();
     expect(screen.getByText(/Burning a token destroys it permanently/i)).toBeTruthy();
     expect(
       screen.getByText(/cannot judge what a token is worth/i)
@@ -484,5 +487,54 @@ describe("the awaiting-signature hint (burn card)", () => {
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     expect(text.includes("!")).toBe(false);
+  });
+});
+
+describe("BurnDustSection authority facts (the approved redesign)", () => {
+  it("labels the account, mint, balance, and rent, and shows the authority facts", () => {
+    const { container } = render(
+      <BurnDustSection
+        scan={scanWith([
+          dustEntry({
+            mintAuthorityActive: true,
+            mintAuthority: Keypair.generate().publicKey.toBase58(),
+            freezeAuthorityActive: false,
+          }),
+        ])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={false}
+      />
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("Account ");
+    expect(text).toContain("Mint ");
+    expect(text).toContain("Balance ");
+    expect(text).toContain("Account rent ");
+    expect(text).toContain("Mint authority: active");
+    expect(text).toContain("Freeze authority: none");
+  });
+
+  it("shows revoked and none without links when the mint gave its authorities up", () => {
+    const { container } = render(
+      <BurnDustSection
+        scan={scanWith([
+          dustEntry({
+            mintAuthorityActive: false,
+            freezeAuthorityActive: false,
+          }),
+        ])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={false}
+      />
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("Mint authority: revoked");
+    expect(text).toContain("Freeze authority: none");
   });
 });

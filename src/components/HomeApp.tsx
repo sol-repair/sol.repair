@@ -599,47 +599,45 @@ function HomeAppInner() {
                     Select none
                   </button>
                 </div>
-                <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
+                <div className="mt-2 max-h-72 space-y-1 scroll-slim overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
                   {result.eligibleAccounts.map((account) => (
                     <label
                       key={account.pubkey}
-                      className="flex cursor-pointer items-baseline justify-between gap-3"
+                      className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-800/60 bg-black/20 p-2 transition-colors hover:border-zinc-700"
                     >
-                      <span className="flex items-start gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(account.pubkey)}
-                          onChange={() => toggleSelected(account.pubkey)}
-                          className="mt-[2px] accent-emerald-500"
-                        />
-                        <span className="break-all">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(account.pubkey)}
+                        onChange={() => toggleSelected(account.pubkey)}
+                        className="mt-[3px] accent-emerald-500"
+                      />
+                      <span className="min-w-0 flex-1 break-all">
+                        <span className="block">
+                          <span className="text-zinc-500">Account </span>
                           <AccountLink address={account.pubkey} />
-                          {" · "}
-                          <AccountLink
-                            address={account.mint}
-                            label="mint"
-                          />
                           {account.program === "token-2022" && (
-                            <span className="text-sky-400/80">
-                              {" "}
-                              · Token-2022
+                            <span className="ml-1 rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                              Token-2022
                             </span>
                           )}
                           {account.frozen && (
-                            <span className="text-sky-400/80">
-                              {" "}
-                              · frozen, close only
+                            <span className="ml-1 rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                              frozen, close only
                             </span>
                           )}
                           {account.needsRevoke && (
-                            <span className="text-sky-400/80">
-                              {" "}
-                              · revoke + close
+                            <span className="ml-1 rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                              revoke + close
                             </span>
                           )}
                         </span>
+                        <span className="mt-0.5 block">
+                          <span className="text-zinc-500">Mint </span>
+                          <AccountLink address={account.mint} />
+                        </span>
                       </span>
-                      <span className="whitespace-nowrap text-zinc-400">
+                      <span className="whitespace-nowrap text-right font-semibold text-emerald-400">
+                        recovers{" "}
                         {lamportsToSol(BigInt(account.lamports))} SOL
                       </span>
                     </label>
@@ -654,44 +652,94 @@ function HomeAppInner() {
                   {result.skippedAccounts.length} skipped, kept safe, with
                   reasons
                 </summary>
-                <div className="mt-2 max-h-72 space-y-1 overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
+                <div className="mt-2 max-h-72 space-y-1 scroll-slim overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
                   {result.skippedAccounts.map((account) => (
                     <div
                       key={account.pubkey}
-                      className="flex items-baseline justify-between gap-3"
+                      className="rounded-md border border-zinc-800/60 bg-black/20 p-2"
                     >
                       <span className="break-all">
+                        <span className="text-zinc-500">Account </span>
                         <AccountLink address={account.pubkey} />
                         {account.program === "token-2022" && (
-                          <span className="text-sky-400/80">
-                            {" "}
-                            · Token-2022
+                          <span className="ml-1 rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                            Token-2022
                           </span>
                         )}
-                        {account.cause === "funded" && account.frozen && (
-                          // The display spec's frozen funded row: the
-                          // owner-approved sentence, byte-exact (hence
-                          // the string expression), with the freeze
-                          // authority link only where the mint decoded
-                          // and named an active authority.
-                          <span className="block">
-                            {
-                              "This account is frozen. Only the token's freeze authority can unfreeze it."
-                            }
-                            {account.freezeAuthority && (
-                              <>
-                                {" "}
+                      </span>
+                      <span className="mt-0.5 block break-all">
+                        <span className="text-zinc-500">Mint </span>
+                        <AccountLink address={account.mint} />
+                      </span>
+                      {(account.mintAuthorityActive !== undefined ||
+                        account.freezeAuthorityActive !== undefined) && (
+                        <span className="mt-1 block space-y-0.5">
+                          {account.mintAuthorityActive !== undefined && (
+                            <span className="block">
+                              <span className="text-zinc-500">
+                                Mint authority:{" "}
+                              </span>
+                              {account.mintAuthorityActive ? (
+                                <span className="font-semibold text-amber-400/90">
+                                  active{" "}
+                                  <AccountLink
+                                    address={account.mintAuthority!}
+                                  />
+                                </span>
+                              ) : (
+                                <span className="text-zinc-500">revoked</span>
+                              )}
+                            </span>
+                          )}
+                          {account.freezeAuthorityActive !== undefined && (
+                            <span className="block">
+                              <span className="text-zinc-500">
+                                Freeze authority:{" "}
+                              </span>
+                              {account.freezeAuthorityActive ? (
+                                <span className="font-semibold text-amber-400/90">
+                                  active{" "}
+                                  <AccountLink
+                                    address={account.freezeAuthority!}
+                                  />
+                                </span>
+                              ) : (
+                                <span className="text-zinc-500">none</span>
+                              )}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {account.cause === "funded" && account.frozen && (
+                        <span className="mt-1 block">
+                          <span className="font-semibold text-amber-400/90">
+                            Frozen.
+                          </span>{" "}
+                          {account.freezeAuthorityActive === false ? (
+                            <span className="text-zinc-300">
+                              Its token has no freeze authority anymore, so
+                              nothing can unfreeze it.
+                            </span>
+                          ) : (
+                            <>
+                              <span className="text-zinc-300">
+                                Only the token’s freeze authority can
+                                unfreeze it:
+                              </span>{" "}
+                              {account.freezeAuthority && (
                                 <AccountLink
                                   address={account.freezeAuthority}
                                 />
-                              </>
-                            )}
-                          </span>
-                        )}
-                      </span>
-                      <span className="whitespace-nowrap text-amber-500/70">
-                        {account.reason}
-                      </span>
+                              )}
+                            </>
+                          )}
+                        </span>
+                      )}
+                      {!(account.cause === "funded" && account.frozen) && (
+                        <span className="mt-1 block text-amber-500/70">
+                          {account.reason}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

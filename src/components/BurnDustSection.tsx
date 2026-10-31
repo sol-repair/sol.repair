@@ -201,6 +201,35 @@ export function BurnDustSection({
     [scan]
   );
 
+  // LOCAL DEMO: per-mint authority facts from the scan evidence.
+  const mintFactsByMint = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        mintAuthorityActive?: boolean;
+        mintAuthority?: string;
+        freezeAuthorityActive?: boolean;
+        freezeAuthority?: string;
+      }
+    >();
+    for (const s of scan.skippedAccounts) {
+      if (
+        s.mintAuthorityActive === undefined &&
+        s.freezeAuthorityActive === undefined
+      )
+        continue;
+      if (!map.has(s.mint)) {
+        map.set(s.mint, {
+          mintAuthorityActive: s.mintAuthorityActive,
+          mintAuthority: s.mintAuthority,
+          freezeAuthorityActive: s.freezeAuthorityActive,
+          freezeAuthority: s.freezeAuthority,
+        });
+      }
+    }
+    return map;
+  }, [scan]);
+
   // Report the in-flight signal upward so the page can hold the repair
   // button and the other sections can hold their buttons (the
   // affordance half; the mutex is the guarantee).
@@ -424,20 +453,53 @@ export function BurnDustSection({
         {dust.map((c) => (
           <div
             key={c.pubkey}
-            className="rounded-md border border-zinc-800 bg-black/40 p-2"
+            className="rounded-md border border-zinc-800/60 bg-black/20 p-2"
           >
             <div className="flex items-baseline justify-between gap-3 font-mono text-[11px] leading-relaxed text-zinc-400">
               <span className="min-w-0 break-all">
+                <span className="text-zinc-500">Account </span>
                 <AccountLink address={c.pubkey} />
-                {" · mint "}
+                {c.program === "token-2022" && (
+                  <span className="ml-1 rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                    Token-2022
+                  </span>
+                )}
+                <br />
+                <span className="text-zinc-500">Mint </span>
                 <AccountLink address={c.mint} />
                 <br />
-                balance {groupDigits(c.amountAtScan)} base units (
-                {c.decimals} decimals, at scan time) · account holds{" "}
-                {groupCount(c.lamports)} lamports total ·{" "}
-                {c.program === "token-2022"
-                  ? "Token-2022"
-                  : "SPL Token Program"}
+                <span className="text-zinc-500">Balance </span>
+                {groupDigits(c.amountAtScan)} base units ({c.decimals}{" "}
+                decimals, at scan time)
+                <br />
+                <span className="text-zinc-500">Account rent </span>
+                {groupCount(c.lamports)} lamports
+                {(() => {
+                  const f = mintFactsByMint.get(c.mint);
+                  if (!f) return null;
+                  return (
+                    <>
+                      <br />
+                      <span className="text-zinc-500">Mint authority: </span>
+                      {f.mintAuthorityActive ? (
+                        <span className="font-semibold text-amber-400/90">
+                          active <AccountLink address={f.mintAuthority!} />
+                        </span>
+                      ) : (
+                        <span className="text-zinc-500">revoked</span>
+                      )}
+                      <br />
+                      <span className="text-zinc-500">Freeze authority: </span>
+                      {f.freezeAuthorityActive ? (
+                        <span className="font-semibold text-amber-400/90">
+                          active <AccountLink address={f.freezeAuthority!} />
+                        </span>
+                      ) : (
+                        <span className="text-zinc-500">none</span>
+                      )}
+                    </>
+                  );
+                })()}
               </span>
               <button
                 onClick={() => beginReview(c)}

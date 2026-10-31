@@ -119,7 +119,7 @@ describe("mint lines carry the authority states", () => {
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(text.includes("!")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
-    expect(text).not.toMatch(/scam|safe|risky|verdict|score/i);
+    expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
   });
 });
 
@@ -223,35 +223,61 @@ function frozenFundedSkip(
   });
 }
 
-describe("the frozen funded row sentence", () => {
-  it("appends the exact sentence with the freeze authority link when the mint was readable", async () => {
+describe("the frozen funded row (the approved redesign)", () => {
+  it("leads with Frozen. and shows the unfreeze authority with a link when the mint was readable", async () => {
     await renderHomeWithScan(
       frozenFundedSkip({
         freezeAuthorityActive: true,
         freezeAuthority: FREEZE_AUTHORITY,
       })
     );
+    expect(screen.getAllByText("Frozen.").length).toBe(1);
     expect(
       screen.getAllByText(
-        "This account is frozen. Only the token's freeze authority can unfreeze it."
+        "Only the token\u2019s freeze authority can unfreeze it:"
       ).length
     ).toBe(1);
-    expect(screen.getAllByTitle(FREEZE_AUTHORITY).length).toBe(1);
+    // The authority appears on both deliberate surfaces of the frozen
+    // row: the facts line and the sentence. Two links is the design.
+    expect(screen.getAllByTitle(FREEZE_AUTHORITY).length).toBe(2);
   });
 
-  it("renders the sentence without a link when the mint was unreadable", async () => {
-    const { container } = await renderHomeWithScan(frozenFundedSkip({}));
+  it("renders the nobody-can-unfreeze sentence when the token revoked its freeze authority", async () => {
+    const { container } = await renderHomeWithScan(
+      frozenFundedSkip({ freezeAuthorityActive: false })
+    );
     expect(
       screen.getAllByText(
-        "This account is frozen. Only the token's freeze authority can unfreeze it."
+        "Its token has no freeze authority anymore, so nothing can unfreeze it."
       ).length
     ).toBe(1);
     expect(screen.queryByTitle(FREEZE_AUTHORITY)).toBeNull();
-    // Nothing else is added beyond the sentence.
-    expect(container.textContent).not.toContain("freeze authority:");
   });
 
-  it("renders no sentence on funded rows that are not frozen", async () => {
+  it("renders the Frozen. lead-in without a link when the mint was unreadable", async () => {
+    const { container } = await renderHomeWithScan(frozenFundedSkip({}));
+    expect(screen.getAllByText("Frozen.").length).toBe(1);
+    expect(
+      screen.getAllByText(
+        "Only the token\u2019s freeze authority can unfreeze it:"
+      ).length
+    ).toBe(1);
+    expect(screen.queryByTitle(FREEZE_AUTHORITY)).toBeNull();
+  });
+
+  it("suppresses the duplicated frozen reason on the redesigned row", async () => {
+    const { container } = await renderHomeWithScan(
+      frozenFundedSkip({
+        freezeAuthorityActive: true,
+        freezeAuthority: FREEZE_AUTHORITY,
+      })
+    );
+    expect(container.textContent).not.toContain(
+      "is frozen by the token's freeze authority"
+    );
+  });
+
+  it("renders no frozen treatment on funded rows that are not frozen", async () => {
     await renderHomeWithScan(
       scan({
         totalAccounts: 1,
@@ -264,11 +290,7 @@ describe("the frozen funded row sentence", () => {
         ],
       })
     );
-    expect(
-      screen.queryByText(
-        "This account is frozen. Only the token's freeze authority can unfreeze it."
-      )
-    ).toBeNull();
+    expect(screen.queryByText("Frozen.")).toBeNull();
   });
 
   it("adds no score, verdict, or pre-trade framing on the frozen row", async () => {
@@ -278,13 +300,86 @@ describe("the frozen funded row sentence", () => {
         freezeAuthority: FREEZE_AUTHORITY,
       })
     );
-    // Scope the check to the row that carries the new sentence: the
-    // page's own long-standing copy is not this spec's surface.
-    const sentence = screen.getByText(
-      "This account is frozen. Only the token's freeze authority can unfreeze it."
-    );
-    const row = sentence.closest("div");
+    const lead = screen.getByText("Frozen.");
+    const row = lead.closest("div");
     const text = row?.textContent ?? "";
+    expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
+  });
+});
+
+describe("the redesigned scan rows carry labels and authority facts", () => {
+  it("labels the account and mint and shows the recoverable amount on eligible rows", async () => {
+    await renderHomeWithScan(
+      scan({
+        totalAccounts: 1,
+        eligibleAccounts: [
+          {
+            pubkey: Keypair.generate().publicKey.toBase58(),
+            mint: MINT,
+            lamports: 2039280,
+            program: "spl",
+          },
+        ],
+        recoverableLamports: 2039280n,
+      })
+    );
+    expect(screen.getAllByText("Account").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Mint").length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByText(/recovers 0\.002039 SOL/).length
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows the authority facts with labels on funded skip rows", async () => {
+    const { container } = await renderHomeWithScan(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            cause: "funded",
+            reason: "holds a token balance",
+            balance: "100",
+            mintAuthorityActive: true,
+            mintAuthority: MINT_AUTHORITY,
+            freezeAuthorityActive: false,
+          }),
+        ],
+      })
+    );
+    expect(container.textContent).toContain("Mint authority: active");
+    expect(container.textContent).toContain("Freeze authority: none");
+    // The reason stays on non-frozen rows.
+    expect(container.textContent).toContain("holds a token balance");
+  });
+
+  it("keeps the owner writing rules on the redesigned rows", async () => {
+    const { container } = await renderHomeWithScan(
+      scan({
+        totalAccounts: 2,
+        eligibleAccounts: [
+          {
+            pubkey: Keypair.generate().publicKey.toBase58(),
+            mint: MINT,
+            lamports: 2039280,
+            program: "spl",
+          },
+        ],
+        skippedAccounts: [
+          skip({
+            cause: "funded",
+            reason: "holds a token balance",
+            balance: "100",
+            mintAuthorityActive: false,
+            freezeAuthorityActive: false,
+          }),
+        ],
+        recoverableLamports: 2039280n,
+      })
+    );
+    const text = container.textContent ?? "";
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(text.includes("!")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
   });
 });
