@@ -18,6 +18,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-01",
+    title: "The recovered-to-date counter refreshes for the week",
+    body:
+      "The counter now reads 1.334663483 SOL across 43 wallets and 721 " +
+      "closed accounts, as of November 1, 2026. Every row behind the " +
+      "number is chain-verifiable on the fee ledger, and the next " +
+      "scheduled update is November 8, 2026.",
+  },
+  {
     date: "2026-10-31",
     title: "A correction pass on the guides, the terms, and the disclosure lines",
     body:
