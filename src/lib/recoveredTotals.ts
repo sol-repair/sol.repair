@@ -23,10 +23,10 @@ export interface RecoveredTotals {
 }
 
 export const RECOVERED_TOTALS: RecoveredTotals = {
-  asOf: "2026-10-26",
-  nextUpdate: "2026-11-01",
-  wallets: 38,
-  closes: 694,
-  lamportsFreed: "1281370243",
-  lamportsFreedSol: "1.281370243",
+  asOf: "2026-11-01",
+  nextUpdate: "2026-11-08",
+  wallets: 43,
+  closes: 721,
+  lamportsFreed: "1334663483",
+  lamportsFreedSol: "1.334663483",
 };
