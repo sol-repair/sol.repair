@@ -572,7 +572,7 @@ export function formatLamportsSol(lamports: number): string {
 /** blockTime (unix seconds) to "2026-08-19 03:36 UTC". Null becomes an
  *  honest dash; the row stays listed. */
 export function formatBlockTime(blockTime: number | null): string {
-  if (blockTime == null) return "—";
+  if (blockTime == null) return "-";
   const d = new Date(blockTime * 1000);
   const p = (n: number) => String(n).padStart(2, "0");
   return (

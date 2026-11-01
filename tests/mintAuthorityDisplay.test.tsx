@@ -257,9 +257,11 @@ describe("the frozen funded row (the approved redesign)", () => {
   it("renders the Frozen. lead-in without a link when the mint was unreadable", async () => {
     const { container } = await renderHomeWithScan(frozenFundedSkip({}));
     expect(screen.getAllByText("Frozen.").length).toBe(1);
+    // No link, no dangling colon: the sentence closes with a period
+    // when there is no authority to name (the audit's F10 fix).
     expect(
       screen.getAllByText(
-        "Only the token\u2019s freeze authority can unfreeze it:"
+        "Only the token\u2019s freeze authority can unfreeze it."
       ).length
     ).toBe(1);
     expect(screen.queryByTitle(FREEZE_AUTHORITY)).toBeNull();

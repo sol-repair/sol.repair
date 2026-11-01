@@ -724,12 +724,15 @@ function HomeAppInner() {
                             <>
                               <span className="text-zinc-300">
                                 Only the token’s freeze authority can
-                                unfreeze it:
-                              </span>{" "}
+                                unfreeze it{account.freezeAuthority ? ":" : "."}
+                              </span>
                               {account.freezeAuthority && (
-                                <AccountLink
-                                  address={account.freezeAuthority}
-                                />
+                                <>
+                                  {" "}
+                                  <AccountLink
+                                    address={account.freezeAuthority}
+                                  />
+                                </>
                               )}
                             </>
                           )}

@@ -18,7 +18,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/close-token-accounts",
   datePublished: "2026-09-03",
-  dateModified: "2026-09-30",
+  dateModified: "2026-10-31",
 });
 
 export default function CloseTokenAccountsGuide() {
@@ -218,7 +218,8 @@ export default function CloseTokenAccountsGuide() {
               your seed phrase, leave. No real tool needs it.
             </p>
             <p className="mt-2">
-              You can also simulate first. This site runs a free simulation of
+              You can also simulate first. This site can run a free
+              simulation of
               the actual transaction before you sign, so you can watch it fail
               or succeed without spending anything.
             </p>

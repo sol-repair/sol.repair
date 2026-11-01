@@ -1,5 +1,17 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { NetworkBadge } from "@/components/NetworkBadge";
+
+// The 404 owns its title instead of inheriting the homepage's: a dead
+// URL should not present itself as the repair tool. No robots key here
+// (the framework injects the noindex; a second robots meta would be an
+// ambiguous signal) and no canonical (a missing page is nobody's
+// duplicate). The bundled not-found doc supports this metadata export.
+export const metadata: Metadata = {
+  title: "Page not found",
+  description:
+    "The page could not be found. Nothing was requested from your wallet.",
+};
 
 // Root not-found: without this file the framework default renders a bare
 // "404" with no way back into the site, which on a phone is a dead end.

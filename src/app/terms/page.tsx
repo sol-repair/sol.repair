@@ -18,7 +18,7 @@ export default function TermsPage() {
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
           Terms of Service
         </h1>
-            <p className="mb-8 text-sm text-zinc-400">Last updated: August 15, 2026</p>
+            <p className="mb-8 text-sm text-zinc-400">Last updated: October 31, 2026</p>
 
         <div className="space-y-8 text-sm leading-relaxed text-zinc-300">
           <section>
@@ -57,9 +57,12 @@ export default function TermsPage() {
               Before approving any transaction, review what it does. Your
               wallet displays the full contents of each transaction. By
               approving a transaction, you accept responsibility for its
-              effects. The tool only proposes the closing of token accounts
-              that hold zero tokens, but blockchain software can contain bugs
-              and networks can behave unexpectedly; verify before you sign.
+              effects. The tool proposes closing token accounts that hold
+              zero tokens; the related actions it can propose are revoking a
+              delegate, unwrapping wrapped SOL, burning a dust balance so
+              its account can close, and withdrawing excess lamports from a
+              Token-2022 account. Blockchain software can contain bugs and
+              networks can behave unexpectedly; verify before you sign.
             </p>
           </section>
 
@@ -84,9 +87,14 @@ export default function TermsPage() {
               your own principal coming home. Only the standard Solana
               network fees apply, and they are paid to the Solana network,
               not to us: a base fee of about 0.000005 SOL per transaction,
-              plus the priority fee your wallet adds when you approve (with
-              Phantom&rsquo;s default settings that has recently run between
-              about 0.000075 and 0.00015 SOL per transaction).
+              plus the priority fee your wallet adds when you approve; that
+              fee depends on your wallet&rsquo;s settings and on how busy the
+              network is.
+            </p>
+            <p>
+              A dust burn-and-close is charged the same way as a repair: 1%
+              of the SOL the close returns, only when the recovery succeeds.
+              The burn itself is charged nothing.
             </p>
             <p>
               Standard Solana network fees also apply to repairs and are

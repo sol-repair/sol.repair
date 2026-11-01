@@ -16,8 +16,9 @@ export function PreConnectInfo() {
     <>
       <div className="mb-8 text-xs leading-relaxed text-zinc-400">
         <p>
-          Connecting only lets the site read your wallet address and its
-          token accounts.
+          Connecting only lets the site read your wallet address, its
+          token accounts, and the public mint accounts behind the tokens
+          you hold.
         </p>
         <p className="mt-1">
           On your phone, open this page inside the Phantom app (the

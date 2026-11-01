@@ -101,7 +101,7 @@ describe("homepage how-it-works strip guides a first-timer", () => {
     // in the steps, and must survive any rewording of the steps.
     expect(
       screen.getByText(
-        /Connecting only lets the site read your wallet address and its token accounts/
+        /Connecting only lets the site read your wallet address, its token accounts, and the public mint accounts/
       )
     ).toBeTruthy();
   });

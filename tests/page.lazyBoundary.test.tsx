@@ -85,7 +85,7 @@ describe("homepage lazy wallet boundary", () => {
       ).toBeTruthy();
       expect(
         screen.getByText(
-          /Connecting only lets the site read your wallet address and its token accounts/
+          /Connecting only lets the site read your wallet address, its token accounts, and the public mint accounts/
         )
       ).toBeTruthy();
     },

@@ -112,7 +112,10 @@ describe("guide pages render with their content", () => {
       screen.getByRole("heading", { level: 1, name: /random tokens/i })
     ).toBeTruthy();
     expect(screen.getByText(/2,039,280/)).toBeTruthy();
-    expect(screen.getByText(/1,855,569/)).toBeTruthy();
+    // The current-minimum figure (chain-verified 2026-09-14). The old
+    // step-1 figure, 1,855,569, must not come back as today's number.
+    expect(screen.getByText(/1,488,440/)).toBeTruthy();
+    expect(screen.queryByText(/1,855,569/)).toBeNull();
     expect(screen.getByText(/skipped and kept safe/)).toBeTruthy();
     expectLinkTo("/guides/close-token-accounts");
   });
@@ -181,9 +184,11 @@ describe("guide pages render with their content", () => {
     ).toBeTruthy();
     expect(screen.getByText(/listed read-only/)).toBeTruthy();
     expect(screen.getByText(/revoke plus close together/i)).toBeTruthy();
+    // Revoke.cash does not support Solana (its own FAQ and site as of
+    // 2026-10-31); the guide must not recommend it for Solana approvals.
     expect(
       document.querySelector('a[href="https://revoke.cash"]')
-    ).not.toBeNull();
+    ).toBeNull();
     expect(
       document.querySelector('a[href="https://sol-incinerator.com/revoke"]')
     ).not.toBeNull();
