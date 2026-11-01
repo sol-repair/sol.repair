@@ -13,7 +13,7 @@
  *  3. Every internal link inside a guide resolves to a route the app
  *     actually serves (walked from src/app, the way the sitemap test
  *     does), so no guide can ship a dead link.
- *  4. The owner's writing rules hold mechanically: no emdashes, no
+ *  4. The project writing rules hold mechanically: no emdashes, no
  *     emojis, no cussing in the public copy. A test fails if any of
  *     that slips in.
  */
@@ -396,7 +396,7 @@ describe("the guide list is a single source", () => {
     }
   });
 
-  it("holds the owner's writing rules on the raw strings", () => {
+  it("holds the project writing rules on the raw strings", () => {
     const text = GUIDES.map((g) => `${g.title} ${g.summary}`).join(" ");
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);

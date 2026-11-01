@@ -219,7 +219,7 @@ describe("fees page: the incomplete-history notice (audit F2)", () => {
     expect(screen.queryByText(/could not be read from the RPC/)).toBeNull();
   });
 
-  it("keeps the owner's writing rules on the notice copy", () => {
+  it("keeps the project writing rules on the notice copy", () => {
     for (const text of [SINGULAR, PLURAL]) {
       expect(text.includes("—") || text.includes("–")).toBe(false);
       expect(text.includes("!")).toBe(false);

@@ -34,7 +34,7 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
-/* LOCAL DEMO: slim dark scrollbar for the scan's scrollable lists. */
+/* Slim dark scrollbar for the scan's scrollable lists. */
 .scroll-slim {
   scrollbar-width: thin;
   scrollbar-color: #3f3f46 transparent;

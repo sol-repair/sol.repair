@@ -3,7 +3,7 @@
 /**
  * In-flight repair progress tests (page.tsx).
  *
- * The first real mainnet repair (the owner, iPhone, Phantom) exposed a
+ * The first real mainnet repair (iPhone, Phantom) exposed a
  * dead window: after approving in the wallet, the page showed only
  * static text while the network confirmed, and a static line reads as
  * frozen ("is this stuck? is this a scam?"). The in-flight box must
@@ -208,7 +208,7 @@ describe("in-flight repair progress panel", () => {
     expect(box.querySelector("svg.animate-spin")).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the in-flight copy", async () => {
+  it("keeps the project writing rules on the in-flight copy", async () => {
     const panels: string[] = [];
     for (const status of ["sending", "checking"] as const) {
       mocks.repair.status = status;
@@ -306,7 +306,7 @@ describe("the awaiting-signature hint", () => {
     expect(vi.getTimerCount()).toBe(withHint - 1);
   });
 
-  it("keeps the owner's writing rules on the hint", async () => {
+  it("keeps the project writing rules on the hint", async () => {
     await mountAwaiting();
     await act(async () => {
       vi.advanceTimersByTime(AWAITING_HINT_DELAY_MS);

@@ -30,7 +30,7 @@ export const FEE_PERCENT = 1;
 /**
  * Devnet fee goes to a dedicated devnet fee wallet, separate from the test
  * wallet, so test runs can watch the fee land exactly the way it will on
- * mainnet. Its keypair file lives on the owner's disk (key inventory in
+ * mainnet. Its keypair file lives outside the repo (key inventory in
  * PROJECT_STATE.md), so devnet fees stay recoverable.
  */
 export const DEV_FEE_WALLET = new PublicKey(

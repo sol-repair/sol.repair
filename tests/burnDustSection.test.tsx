@@ -3,7 +3,7 @@
 /**
  * Component tests for BurnDustSection (dust spec Rev 1): the finding
  * rows, the per-item consent card with its permanent-destruction
- * warning, the fee line per the owner's Q1 ruling, the terminal
+ * warning, the fee line per the Q1 ruling, the terminal
  * cards, and the cross-action affordance. The hook is mocked (its
  * behavior is pinned in tests/useBurnDust.test.tsx); the rendered copy
  * is what must be honest.
@@ -258,7 +258,7 @@ describe("BurnDustSection consent card", () => {
     ).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the card copy", async () => {
+  it("keeps the project writing rules on the card copy", async () => {
     renderWithEntry(true);
     fireEvent.click(screen.getByRole("button", { name: "Burn and close" }));
     await screen.findByText(/Review before you sign/);
@@ -477,7 +477,7 @@ describe("the awaiting-signature hint (burn card)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("keeps the owner's writing rules on the hint", async () => {
+  it("keeps the project writing rules on the hint", async () => {
     vi.useFakeTimers();
     renderBurn();
     await act(async () => {

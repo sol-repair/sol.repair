@@ -101,7 +101,7 @@ describe("understand page renders its read-only promise", () => {
     expect(screen.getByText(/never asks you to sign anything/i)).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the static copy", () => {
+  it("keeps the project writing rules on the static copy", () => {
     const { container } = render(<UnderstandPage />);
     const text = container.textContent ?? "";
     expect(text).not.toMatch(/[\u2014\u2013]/);

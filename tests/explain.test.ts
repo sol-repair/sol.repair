@@ -503,7 +503,7 @@ describe("explainInstruction token setup family", () => {
     );
   });
 
-  it("explains the space question, the owner lock, and the wrapped SOL sync", () => {
+  it("explains the space question, the lock, and the wrapped SOL sync", () => {
     const space = explainInstruction({
       programId: TOKEN_2022_PROGRAM,
       accountPubkeys: [TOKEN_ACCOUNT],

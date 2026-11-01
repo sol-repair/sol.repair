@@ -241,7 +241,7 @@ describe("getClosableAccounts eligibility checks", () => {
     expect(result.skippedAccounts[1].closeAuthority).toBeUndefined();
   });
 
-  it("offers a delegated frozen account for close only (owner-approved 2026-09-25)", async () => {
+  it("offers a delegated frozen account for close only (approved 2026-09-25)", async () => {
     // The on-chain Revoke rejects frozen accounts (AccountFrozen in both
     // programs), so no Revoke is emitted for this account. The close
     // itself consults no frozen state, and a closed account leaves no

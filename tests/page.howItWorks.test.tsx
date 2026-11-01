@@ -106,7 +106,7 @@ describe("homepage how-it-works strip guides a first-timer", () => {
     ).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the strip", () => {
+  it("keeps the project writing rules on the strip", () => {
     render(<Home />);
 
     // Scope to the strip section: the cannot-do list is also a list, but

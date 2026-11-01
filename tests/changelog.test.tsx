@@ -6,7 +6,7 @@
  * Future entries are added by hand in later PRs, so the page is
  * optimized for that: one entry in src/lib/changelog.ts is one visible
  * item. These tests pin the contract that must survive hand edits: the
- * data shape, newest-first order, the owner's writing rules, the page
+ * data shape, newest-first order, the project writing rules, the page
  * rendering every entry, and the link targets in the homepage tools
  * section and footer. The route-derived sitemap and metadata sync tests
  * (sitemapRobots, routeMetadata) cover the rest of the route contract.
@@ -101,7 +101,7 @@ describe("the changelog data list", () => {
     expect(new Set(titles).size).toBe(titles.length);
   });
 
-  it("keeps the owner writing rules on every string", () => {
+  it("keeps the project writing rules on every string", () => {
     for (const entry of CHANGELOG) {
       const text = `${entry.date} ${entry.title} ${entry.body}`;
       expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);

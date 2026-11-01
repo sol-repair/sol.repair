@@ -2,7 +2,7 @@
 
 /**
  * The mint and freeze authority display (the display spec Rev 1,
- * section 4, whose exact strings are owner-approved and frozen).
+ * section 4, whose exact strings are approved and frozen).
  *
  * Two render surfaces, both pre-existing:
  *  - the mint lines under the grouped authority lists in
@@ -108,7 +108,7 @@ describe("mint lines carry the authority states", () => {
     expect(container.textContent).not.toContain("freeze authority:");
   });
 
-  it("keeps the owner writing rules on the rendered authority copy", () => {
+  it("keeps the project writing rules on the rendered authority copy", () => {
     const { container } = renderForeignCA({
       mintAuthorityActive: true,
       mintAuthority: MINT_AUTHORITY,
@@ -354,7 +354,7 @@ describe("the redesigned scan rows carry labels and authority facts", () => {
     expect(container.textContent).toContain("holds a token balance");
   });
 
-  it("keeps the owner writing rules on the redesigned rows", async () => {
+  it("keeps the project writing rules on the redesigned rows", async () => {
     const { container } = await renderHomeWithScan(
       scan({
         totalAccounts: 2,

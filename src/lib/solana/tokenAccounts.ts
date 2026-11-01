@@ -100,7 +100,7 @@ export type SkipCause =
   | "close-authority"
   | "wrapped-sol"
   | "uninitialized"
-  // No scan site produces this since the owner-approved close-only rule
+  // No scan site produces this since the approved close-only rule
   // of 2026-09-25 (a frozen delegated account is now eligible). The
   // member and the inspection mapping stay so a stale fixture or a
   // future site cannot silently misaggregate.
@@ -431,7 +431,7 @@ export async function getClosableAccounts(
       //    simulation) and confirmed against both token programs' source,
       //    where neither CloseAccount path consults the frozen bit (it guards
       //    transfers, burns, approvals, and revokes only). This includes a
-      //    frozen account with an active delegate (owner-approved
+      //    frozen account with an active delegate (approved
       //    2026-09-25): the Revoke we emit before a delegated close DOES
       //    reject frozen accounts (AccountFrozen in both programs), so the
       //    frozen case is closed WITHOUT a Revoke - closing the account

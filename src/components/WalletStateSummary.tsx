@@ -176,7 +176,7 @@ function labelFor(address: string): string | undefined {
 /** The self-declared mint lines under one authority row: name and
  *  symbol as plain text after the mint link, exactly as the mint
  *  declares them; then, where the scan decoded the mint, the mint
- *  authority and freeze authority states with the owner-approved copy
+ *  authority and freeze authority states with the approved copy
  *  and an authority link only when an authority exists. See the CAUTION
  *  above the grouping function: states are on-chain facts, the authority
  *  address is just an address, and neither judges anything. */
