@@ -4,7 +4,7 @@
  * Hook tests for useBurnDust (docs/dust-zeroing-spec-draft.md Rev 1).
  * The lib's selection/gate/builder rules are pinned in burnDust.test.ts;
  * here the lifecycle is: the cross-action mutex, the in-lock gate, the
- * fee riding after the close (the owner's Q1 ruling), the honest
+ * fee riding after the close (the Q1 ruling), the honest
  * terminals, and the §8.11 lock hold on the unresolved outcome.
  */
 

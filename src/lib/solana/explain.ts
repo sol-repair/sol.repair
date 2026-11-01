@@ -7,7 +7,7 @@
  * instruction. The module is pure: no React, no fetch, no network. A
  * later slice adds its own signature fetcher and the /understand page.
  *
- * Honesty rules (product-level, owner-locked):
+ * Honesty rules (product-level, locked):
  * - A program outside the registry renders as "cannot describe", never a
  *   guess. Understatement is the worst failure mode for a safety tool.
  * - A known program with data this module does not decode renders as an

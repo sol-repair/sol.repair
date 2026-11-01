@@ -260,7 +260,7 @@ describe("report page scan states", () => {
 });
 
 describe("report page writing rules", () => {
-  it("keeps the owner's writing rules on the static copy", () => {
+  it("keeps the project writing rules on the static copy", () => {
     const { container } = render(<ReportPage />);
     const text = container.textContent ?? "";
     expect(text).not.toMatch(/[\u2014\u2013]/);

@@ -13,7 +13,7 @@
  *     and lamports drift is Case B, consented with current figures);
  *   - the builder is burn-then-close from the gate's current balance;
  *   - the 1% fee rides AFTER the close when the page's feeReady says
- *     the fee account exists (the owner's Q1 ruling; the repair model).
+ *     the fee account exists (the Q1 ruling; the repair model).
  *
  * This hook NEVER signs anything itself. It hands the unsigned
  * transaction to the wallet adapter for the user to approve.
@@ -339,7 +339,7 @@ export function useBurnDust() {
             },
             actionOwner
           );
-          // The 1% fee rides AFTER the close, per the owner's Q1
+          // The 1% fee rides AFTER the close, per the Q1
           // ruling, gated on the page's feeReady decision exactly like
           // the repair. The fee base is the account's lamports — the
           // rent the close frees.

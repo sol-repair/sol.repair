@@ -17,7 +17,7 @@
  *  3. The title is bare (no site-name suffix; the layout template
  *     appends it) and the Open Graph URL/title/description name the
  *     page itself, not the homepage.
- *  4. The owner's writing rules hold on metadata strings too: no
+ *  4. The project writing rules hold on metadata strings too: no
  *     emdashes, no emojis, no exclamation marks.
  *
  * The homepage is the one allowed client page: it is the route the
@@ -135,7 +135,7 @@ describe("every non-root page owns its metadata", () => {
       expect(typeof first.alt).toBe("string");
     });
 
-    it(`${route} metadata follows the owner writing rules`, async () => {
+    it(`${route} metadata follows the project writing rules`, async () => {
       const metadata = await loadMetadata(route, file);
       const text = `${metadata.title ?? ""} ${metadata.description ?? ""}`;
       expect(

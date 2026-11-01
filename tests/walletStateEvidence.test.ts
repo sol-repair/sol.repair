@@ -235,7 +235,7 @@ describe("G.2 evidence: delegate address and nativeStatus (additive only)", () =
   it("drops the skip-only delegate evidence when a frozen delegated account goes close-only", async () => {
     // The delegate address and the nativeStatus derivation used to
     // travel on the frozen-with-delegate SKIP. That site no longer
-    // exists (owner-approved 2026-09-25): the account is eligible, and
+    // exists (approved 2026-09-25): the account is eligible, and
     // the delegate is irrelevant to a close that ends the delegation
     // with the account.
     const delegate = pk(25).toBase58();

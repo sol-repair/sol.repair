@@ -6,7 +6,7 @@
  * The terms page states the fee numbers the product actually charges and
  * the privacy page states the data claims the site is built on; both are
  * load-bearing trust copy, so they get the same treatment as the home
- * page: the claims are pinned, and the owner's writing rules (no emdashes,
+ * page: the claims are pinned, and the project writing rules (no emdashes,
  * no emojis, no exclamation marks) hold mechanically. A test fails if any
  * of that drifts.
  */
@@ -96,7 +96,7 @@ describe("privacy page pins the data claims", () => {
   });
 });
 
-describe("legal pages keep the owner's writing rules", () => {
+describe("legal pages keep the project writing rules", () => {
   it("renders without emdashes, emojis, or exclamation marks", () => {
     for (const { name, Component } of PAGES) {
       const { container } = render(<Component />);

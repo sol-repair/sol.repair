@@ -240,7 +240,7 @@ describe("connect failure copy on Brave on iOS (row 17)", () => {
     );
   });
 
-  it("keeps the owner's writing rules on the Brave copy", () => {
+  it("keeps the project writing rules on the Brave copy", () => {
     const text = BRAVE_IOS_CONNECT_MESSAGE;
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);

@@ -1,5 +1,5 @@
 /**
- * M9 per-call failover (owner-approved): the app's RPC transport with
+ * M9 per-call failover (approved): the app's RPC transport with
  * rotation across the ordered endpoint list from connection.ts.
  *
  * Rotation rules:

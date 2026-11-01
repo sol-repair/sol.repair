@@ -1107,7 +1107,7 @@ function HomeAppInner() {
           />
 
           {/* Dust burn-and-close (per-item consent, one account per
-              action, owner-approved 2026-09-26). Renders nothing when
+              action, approved 2026-09-26). Renders nothing when
               the scan has no eligible dust accounts. */}
           <BurnDustSection
             scan={result}
@@ -1121,7 +1121,7 @@ function HomeAppInner() {
           />
 
           {/* G.4: excess-lamport withdrawal (per-item consent, one
-              account per action, owner-approved 2026-09-26). Detects
+              account per action, approved 2026-09-26). Detects
               on mount and renders nothing without candidates. */}
           <ExcessSection
             scan={result}

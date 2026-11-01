@@ -2,7 +2,7 @@
 
 /**
  * The pre-connect Example scan block mirrors the redesigned scan rows
- * (the owner-approved demo design): labeled Account and Mint lines,
+ * (the approved demo design): labeled Account and Mint lines,
  * the program chips, and the recoverable amount emphasized per card.
  */
 
@@ -25,7 +25,7 @@ describe("the pre-connect example scan", () => {
     expect(screen.getAllByText("revoke + close").length).toBe(1);
   });
 
-  it("keeps the owner writing rules on the example block", () => {
+  it("keeps the project writing rules on the example block", () => {
     const { container } = render(<PreConnectInfo />);
     const text = container.textContent ?? "";
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);

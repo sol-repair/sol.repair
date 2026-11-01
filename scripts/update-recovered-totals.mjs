@@ -11,7 +11,7 @@
 // and writes NOTHING - the counter never ships a number derived from
 // non-conforming data.
 //
-// Run from the repo root on the weekly bump (Sundays, per the owner's
+// Run from the repo root on the weekly bump (Sundays, per the standing
 // ruling): node scripts/update-recovered-totals.mjs
 // Then commit the regenerated constant, open the bump PR, and obtain the
 // owner's merge word. A missed week leaves a true as-of date - a late

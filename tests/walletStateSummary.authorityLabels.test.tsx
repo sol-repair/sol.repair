@@ -215,7 +215,7 @@ describe("the labels stay observations, not verdicts", () => {
     expect(container.textContent).not.toMatch(/safe/i);
   });
 
-  it("keeps the owner writing rules on the labels and guidance", () => {
+  it("keeps the project writing rules on the labels and guidance", () => {
     const texts = [
       SYSTEM_PROGRAM_LABEL,
       IMITATION_LABEL,

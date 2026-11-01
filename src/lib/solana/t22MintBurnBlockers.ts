@@ -119,7 +119,7 @@ interface MintReader {
  * Read and classify one mint. Never throws: a vanished mint, a mint
  * owned by another program, malformed data, or an RPC failure all come
  * back as unreadable, and the caller aborts conservatively (fail toward
- * not promising, the owner's standing ruling).
+ * not promising, the standing ruling).
  */
 export async function readMintBurnBlockers(
   connection: MintReader,

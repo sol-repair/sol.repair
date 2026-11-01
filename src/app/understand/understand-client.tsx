@@ -4,7 +4,7 @@
  * Transaction explainer (UNDERSTAND, M2). Paste a transaction signature,
  * read what the transaction did in plain language.
  *
- * Read-only forever, by owner lock: this page never connects a wallet
+ * Read-only forever, locked: this page never connects a wallet
  * for signing and never asks you to sign anything. It reuses the fee
  * ledger's fetch and decoder (base64, version-1 capable) and the
  * explain module's plain-language dictionary; anything the dictionary

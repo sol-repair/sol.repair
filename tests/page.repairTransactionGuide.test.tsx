@@ -12,7 +12,7 @@
  *     drift from the code. Numbers with no constant (the byte budget,
  *     the wire tags) are pinned against the shipped source comments
  *     that state them, so either side moving alone fails here.
- *  3. The owner's writing rules hold mechanically on the new strings.
+ *  3. The project writing rules hold mechanically on the new strings.
  *  4. The registry entry, the guides index, and the homepage section
  *     all include the guide.
  *  5. Breadcrumb, table of contents, and JSON-LD follow the guide

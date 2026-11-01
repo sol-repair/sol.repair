@@ -52,7 +52,7 @@ export interface BurnableDustAccount {
   /** Owning token program; selects both instructions' programId. */
   program: TokenProgram;
   /** All lamports the account holds at scan — what the close moves to
-   *  the wallet, and the 1% fee's base by the owner's Q1 ruling. */
+   *  the wallet, and the 1% fee's base by the Q1 ruling. */
   lamports: number;
   /** Token balance at scan, exact base units. */
   amountAtScan: string;

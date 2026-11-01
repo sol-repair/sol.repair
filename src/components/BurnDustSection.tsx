@@ -201,7 +201,7 @@ export function BurnDustSection({
     [scan]
   );
 
-  // LOCAL DEMO: per-mint authority facts from the scan evidence.
+  // Per-mint authority facts from the scan evidence.
   const mintFactsByMint = useMemo(() => {
     const map = new Map<
       string,

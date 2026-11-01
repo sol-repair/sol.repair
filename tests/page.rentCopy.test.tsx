@@ -90,7 +90,7 @@ describe("homepage rent copy matches the two-regime reality", () => {
     // The instruction name was library jargon on a first-timer page.
     expect(screen.queryByText(/createCloseAccountInstruction/)).toBeNull();
 
-    // The owner's writing rules hold on the new copy.
+    // The project writing rules hold on the new copy.
     const text = hero.textContent ?? "";
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
@@ -133,7 +133,7 @@ describe("homepage recovered-to-date line", () => {
       )
     ).toBeTruthy();
 
-    // The owner's writing rules hold here too.
+    // The project writing rules hold here too.
     const line = screen.getByText(
       /Total SOL recovered through repairs and burn-closes since launch/
     );

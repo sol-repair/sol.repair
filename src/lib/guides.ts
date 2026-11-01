@@ -1,6 +1,6 @@
 /** Single source for the published guides. The home-page section and the
  *  guides index both render this list, so do not add a second copy anywhere;
- *  the owner's writing rules are enforced on these strings by tests.
+ *  the project writing rules are enforced on these strings by tests.
  */
 export type Guide = {
   href: string;

@@ -116,7 +116,7 @@ export default function FeesPage() {
         </p>
 
         {/* The fee rules, side by side (G.3 spec §7.7 + the dust rule
-            from the 2026-09-26 owner ruling): the 1%-of-recovered rule
+            from the 2026-09-26 ruling): the 1%-of-recovered rule
             for repair closes, the same rule for dust burn-and-close,
             and the no-fee rule for wrapped-SOL unwrap share one
             rationale, written beside them — we charge for unlocking
@@ -144,8 +144,7 @@ export default function FeesPage() {
           </p>
           <p className="mt-2">
             <span className="text-zinc-300">Dust burn-and-close</span>{" "}
-            (accounts holding tokens, per the
-            owner&rsquo;s 2026-09-26 ruling): the same 1% fee on the
+            (accounts holding tokens: the same 1% fee on the
             rent the close recovers. The burn itself destroys the token
             balance permanently and is charged nothing; the fee covers
             the same service as the empty-account repair. SOL.REPAIR

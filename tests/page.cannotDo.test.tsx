@@ -90,7 +90,7 @@ describe("homepage cannot-do section is receipt-backed trust copy", () => {
     ).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules and exactly three limits", () => {
+  it("keeps the project writing rules and exactly three limits", () => {
     render(<Home />);
 
     const section = screen

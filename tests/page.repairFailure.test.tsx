@@ -177,7 +177,7 @@ describe("honest repair failure reporting", () => {
     expect(box.querySelector("svg.animate-spin")).toBeTruthy();
   });
 
-  it("keeps the owner's writing rules on the failure copy", async () => {
+  it("keeps the project writing rules on the failure copy", async () => {
     mocks.repair.status = "error";
     mocks.repair.error = GENERIC;
     await renderHome();

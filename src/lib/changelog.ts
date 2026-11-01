@@ -5,7 +5,7 @@
  * entry here is exactly one visible item there. Adding an entry is a
  * hand edit: put it at the top of the array with an ISO date and plain
  * language. The tests in tests/changelog.test.tsx pin the shape, the
- * newest-first order, and the owner's writing rules, so a hand edit
+ * newest-first order, and the project writing rules, so a hand edit
  * that drifts fails loudly.
  */
 

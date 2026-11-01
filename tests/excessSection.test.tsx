@@ -203,7 +203,7 @@ describe("the awaiting-signature hint (excess card)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("keeps the owner's writing rules on the hint", async () => {
+  it("keeps the project writing rules on the hint", async () => {
     setHook({ status: "awaiting-signature" }, true);
     vi.useFakeTimers();
     await renderSection();
