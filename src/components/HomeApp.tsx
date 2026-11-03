@@ -275,6 +275,24 @@ function HomeAppInner() {
     setFeeOwner(feeOwnerKey);
     setFeeReady(false);
   }
+
+  // Post-run continue (fleet flow): the base58 wallet whose completed
+  // repair run armed the one-click continue affordance in the result
+  // area. Armed only by the success card's Done action - the completion
+  // path; the error path keeps its own honest report and arms nothing.
+  // The count the affordance states is the fresh post-run scan's own
+  // eligible count, and the click path is the same repair() the main
+  // button calls. No new RPC anywhere.
+  const [continueAfterRun, setContinueAfterRun] = useState<string | null>(
+    null
+  );
+  if (continueAfterRun !== null && continueAfterRun !== feeOwnerKey) {
+    // Same render-time reset pattern as the fee decision above: the arm
+    // dies with the wallet it ran for (disconnect or wallet switch; the
+    // network is build-pinned, so a network change is a fresh page and
+    // fresh state).
+    setContinueAfterRun(null);
+  }
   useEffect(() => {
     if (!publicKey) return;
     let cancelled = false;
@@ -329,6 +347,47 @@ function HomeAppInner() {
     setPrevResult(result);
     setSelected(new Set(result?.eligibleAccounts.map((a) => a.pubkey) ?? []));
   }
+
+  // A landed scan that finds at or under the run cap spends the armed
+  // continue: the normal flow covers everything the fresh scan found.
+  // Kept as its own reset-during-render block (the same pattern as the
+  // two above) because a landed scan is the only event that spends the
+  // arm; null, a scan still in flight, keeps it, and the fresh scan's
+  // own count decides when it lands.
+  const [prevLandedResult, setPrevLandedResult] = useState(result);
+  if (result !== null && result !== prevLandedResult) {
+    setPrevLandedResult(result);
+    if (result.eligibleAccounts.length <= MAX_ACCOUNTS_PER_RUN) {
+      setContinueAfterRun(null);
+    }
+  }
+
+  // The one-click continue: re-select what the fresh scan found and
+  // start the same repair the main button starts - the same fresh
+  // fee-existence read first, then the same repair() with its cap
+  // slice, wallet pinning, mutex, per-batch approvals, and honest
+  // reporting. No new transaction construction anywhere; the accounts
+  // come from the scan the page already holds.
+  const continueRepair = useCallback(async () => {
+    if (!result || !publicKey || checkingFee) return;
+    const eligible = result.eligibleAccounts;
+    if (eligible.length <= MAX_ACCOUNTS_PER_RUN) return;
+    setSelected(new Set(eligible.map((a) => a.pubkey)));
+    setCheckingFee(true);
+    let ready = false;
+    try {
+      // Fail toward fee-off, exactly like beginConfirmation: a failing
+      // read means the repair proceeds without the fee transfer.
+      ready = await feeAccountReady(connection);
+      setFeeReady(ready);
+    } finally {
+      setCheckingFee(false);
+    }
+    // repair() caps the slice itself and releases its own in-flight
+    // flag; a double click in the gap before its state lands is its
+    // existing no-op.
+    void repair(eligible, ready);
+  }, [result, publicKey, checkingFee, connection, repair]);
 
   const toggleSelected = useCallback((pubkey: string) => {
     setSelected((prev) => {
@@ -758,6 +817,45 @@ function HomeAppInner() {
               </p>
             )}
 
+          {/* Post-run continue: a completed repair followed by the
+              standard post-run re-scan that still finds more than one
+              full run's worth of closable accounts. One click
+              re-selects what the fresh scan found and starts the same
+              repair. Wallets at or under the cap never render this
+              block - the flow below it is byte-identical to before. */}
+          {continueAfterRun !== null &&
+            continueAfterRun === feeOwnerKey &&
+            !confirming &&
+            status === "idle" &&
+            result !== null &&
+            result.eligibleAccounts.length > MAX_ACCOUNTS_PER_RUN && (
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-4">
+                <p className="text-sm leading-relaxed text-zinc-400">
+                  A fresh scan after your repair still lists{" "}
+                  {result.eligibleAccounts.length} closable accounts.
+                  Continue starts the same repair flow for them: your
+                  wallet asks for an approval on each transaction, the
+                  1% service fee appears in each approval, and nothing
+                  is signed until you approve it there.
+                </p>
+                <button
+                  onClick={() => void continueRepair()}
+                  disabled={
+                    checkingFee ||
+                    repairInFlight ||
+                    revokeInFlight ||
+                    unwrapInFlight ||
+                    burnInFlight ||
+                    excessInFlight
+                  }
+                  className="mt-3 w-full rounded-lg bg-[#14F195] px-4 py-3 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Continue repair ({result.eligibleAccounts.length} more
+                  found)
+                </button>
+              </div>
+            )}
+
           {/* Repair button, only shown when there are eligible accounts */}
           {hasEligible && !confirming && status === "idle" && (
             <>
@@ -1029,6 +1127,11 @@ function HomeAppInner() {
                   onClick={() => {
                     reset();
                     setConfirming(false);
+                    // Arm the post-run continue for this wallet: the
+                    // rescan below is the standard post-run re-scan,
+                    // and its eligible count decides whether the
+                    // affordance renders (completion path only).
+                    setContinueAfterRun(feeOwnerKey);
                     rescan();
                   }}
                   className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
