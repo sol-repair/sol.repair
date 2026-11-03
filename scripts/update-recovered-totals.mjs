@@ -2,14 +2,18 @@
 //
 // Walks the mainnet fee wallet's full history read-only and rewrites
 // src/lib/recoveredTotals.ts with { asOf, nextUpdate, wallets, closes,
-// lamportsFreed }. The classification mirrors the shipped ledger exactly:
-// a row is a repair row when the transaction contains at least one
-// token-program closeAccount AND a System transfer INTO the fee wallet;
-// the fee must equal exactly floor(1%) of the rent the closes freed.
-// Known operator-test signatures and the wallet's own funding transfer
-// are excluded. If any organic row fails the 1% rule, the script aborts
-// and writes NOTHING - the counter never ships a number derived from
-// non-conforming data.
+// lamportsFreed }. The signature walk paginates with the before cursor
+// until exhausted, so history growth past any single page can never
+// silently truncate the counter's input. The classification mirrors the
+// shipped ledger exactly: a row is a repair row when the transaction
+// contains at least one token-program closeAccount AND a System
+// transfer INTO the fee wallet; the fee must equal exactly floor(1%)
+// of the rent the closes freed. Known operator-test signatures and the
+// wallet's own funding transfer are excluded, every exclusion is
+// printed with its signature, and nothing is ever silently skipped: a
+// row that cannot be read aborts the run, and if any organic row fails
+// the 1% rule, the script aborts and writes NOTHING - the counter
+// never ships a number derived from a partial walk.
 //
 // Run from the repo root on the weekly bump (Sundays, per the standing
 // ruling): node scripts/update-recovered-totals.mjs
@@ -108,27 +112,62 @@ async function call(fn) {
   }
 }
 
-const sigs = await call(() => c.getSignaturesForAddress(new PublicKey(FEE_WALLET), { limit: 1000 }));
-console.log("lifetime signatures:", sigs.length);
+const sigs = [];
+let pages = 0;
+let before = null;
+for (;;) {
+  const options = { limit: 1000 };
+  if (before) options.before = before;
+  const page = await call(() =>
+    c.getSignaturesForAddress(new PublicKey(FEE_WALLET), options)
+  );
+  pages++;
+  for (const s of page) sigs.push(s);
+  if (page.length < 1000) break;
+  before = page[page.length - 1].signature;
+  await sleep(400);
+}
+// The before cursor prevents page overlap; this dedupe is defense in
+// depth so a duplicate row can never be counted twice.
+const seenSigs = new Set();
+const uniqueSigs = [];
+for (const s of sigs) {
+  if (seenSigs.has(s.signature)) continue;
+  seenSigs.add(s.signature);
+  uniqueSigs.push(s);
+}
+console.log("signature pages fetched:", pages);
+console.log("lifetime signatures:", uniqueSigs.length);
 
 let organicRows = 0;
 const wallets = new Set();
 let closes = 0;
 let freedTotal = 0n;
 let violations = 0;
-let skipped = 0;
+const unreadable = [];
+const failed = [];
+const nonFee = [];
+let testCount = 0;
 
-for (const s of sigs) {
+for (const s of uniqueSigs) {
   await sleep(120);
   const t = await call(() => c.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 1 }));
-  if (!t || t.meta?.err) { skipped++; continue; }
+  if (!t) { unreadable.push(s.signature); continue; }
+  if (t.meta?.err) { failed.push(s.signature); continue; }
   const ix = t.transaction.message.instructions || [];
   const closesIx = ix.filter((i) => i.parsed?.type === "closeAccount");
   const feeXfers = ix.filter(
     (i) => String(i.programId) === SYSTEM_PROGRAM && i.parsed?.type === "transfer" && i.parsed?.info?.destination === FEE_WALLET
   );
-  if (closesIx.length === 0 || feeXfers.length === 0) { skipped++; continue; }
+  if (closesIx.length === 0 || feeXfers.length === 0) {
+    nonFee.push({
+      signature: s.signature,
+      reason: `${closesIx.length} closeAccount, ${feeXfers.length} fee transfer`,
+    });
+    continue;
+  }
   const isTest = TEST_SIGS.has(s.signature);
+  if (isTest) { testCount++; continue; }
   const keys = (t.transaction.message.accountKeys || []).map((k) => (typeof k === "string" ? k : String(k.pubkey)));
   let freed = 0n;
   for (const cl of closesIx) {
@@ -137,7 +176,6 @@ for (const s of sigs) {
     if (idx >= 0) freed += BigInt(t.meta.preBalances[idx]);
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
-  if (isTest) continue;
   organicRows++;
   if (feeAmt !== freed / 100n) {
     violations++;
@@ -150,6 +188,14 @@ for (const s of sigs) {
   freedTotal += freed;
 }
 
+// A partial walk is a lie the counter must never ship. Any row the
+// endpoint could not read aborts the update entirely: the constant is
+// either derived from the full readable history or not written.
+if (unreadable.length > 0) {
+  console.error(`ALARM: ${unreadable.length} signature(s) could not be read - constant NOT updated:`);
+  for (const sig of unreadable) console.error("  UNREADABLE", sig);
+  process.exit(1);
+}
 if (violations > 0) {
   console.error(`ALARM: ${violations} organic row(s) violate the 1% rule - constant NOT updated`);
   process.exit(1);
@@ -199,5 +245,8 @@ export const RECOVERED_TOTALS: RecoveredTotals = {
 writeFileSync(OUT_FILE, out);
 console.log(`organic rows: ${organicRows} | wallets: ${wallets.size} | closes: ${closes}`);
 console.log(`freed total: ${lamportsFreed} lamports = ${Number(freedTotal) / 1e9} SOL`);
-console.log(`violations: ${violations} | skipped (tests/funding/non-fee): ${skipped}`);
+console.log(`violations: ${violations} | known test signatures excluded: ${testCount}`);
+console.log(`excluded readable rows: ${failed.length} failed transaction(s), ${nonFee.length} non-fee row(s) - listed above`);
+for (const sig of failed) console.log("  FAILED-TX", sig);
+for (const { signature, reason } of nonFee) console.log(`  NON-FEE ${signature} (${reason})`);
 console.log(`wrote ${OUT_FILE.pathname} (asOf ${today}, nextUpdate ${nextUpdate})`);
