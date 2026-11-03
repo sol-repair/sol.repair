@@ -18,6 +18,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-03",
+    title: "Large repairs can continue with one click",
+    body:
+      "After a repair finishes, the wallet is scanned again, as before. " +
+      "When that fresh scan still finds more than one run's worth of " +
+      "closable accounts, the page now offers a continue button: one " +
+      "click re-selects what the scan found and starts the next repair, " +
+      "wallet approvals included. Wallets at or under the 100-account " +
+      "run cap see no change at all. The transactions themselves are " +
+      "unchanged: still 20 closes per transaction, with the 1% service " +
+      "fee transfer riding at the end of each batch, exactly as the " +
+      "developer guide describes.",
+  },
+  {
     date: "2026-11-01",
     title: "The recovered-to-date counter refreshes for the week",
     body:
