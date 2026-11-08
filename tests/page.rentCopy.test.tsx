@@ -120,16 +120,20 @@ describe("homepage recovered-to-date line", () => {
 
     // Values come from the generated constant, so the Sunday bump can
     // never break this pin: the test reads the same module the page does.
+    // The leading sentence is its own styled span, so the pin checks the
+    // span and the trailing as-of line as separate nodes.
     expect(
       screen.getByText(
         new RegExp(
-          `Total SOL recovered through repairs and burn-closes since launch: ${RECOVERED_TOTALS.lamportsFreedSol} SOL\\. As of `
+          `^Total SOL recovered through repairs and burn-closes since launch: ${RECOVERED_TOTALS.lamportsFreedSol} SOL\\.$`
         )
       )
     ).toBeTruthy();
     expect(
       screen.getByText(
-        new RegExp(`Next weekly update: .+\\. The fee ledger has every row\\.`)
+        new RegExp(
+          `^As of .+\\. Next weekly update: .+\\. The fee ledger has every row\\.$`
+        )
       )
     ).toBeTruthy();
 
