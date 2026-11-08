@@ -95,9 +95,11 @@ export default function Home() {
           Recovered SOL is returned to the wallet that owns the account.
         </p>
         <p className="mb-6 font-mono text-xs leading-relaxed text-zinc-400">
-          Total SOL recovered through repairs and burn-closes since launch:{" "}
-          {RECOVERED_TOTALS.lamportsFreedSol} SOL. As of{" "}
-          {longDate(RECOVERED_TOTALS.asOf)}. Next weekly update:{" "}
+          <span className="font-bold text-white">
+            Total SOL recovered through repairs and burn-closes since launch:{" "}
+            {RECOVERED_TOTALS.lamportsFreedSol} SOL.
+          </span>{" "}
+          As of {longDate(RECOVERED_TOTALS.asOf)}. Next weekly update:{" "}
           {longDate(RECOVERED_TOTALS.nextUpdate)}. The fee ledger has every
           row.
         </p>
