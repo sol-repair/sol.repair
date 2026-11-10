@@ -72,12 +72,9 @@ export default function Home() {
           Reclaim SOL from empty token accounts.
         </h1>
         <p className="mb-2 text-zinc-300">
-          Close empty SPL and Token-2022 accounts and recover the SOL held in
-          them.
-        </p>
-        <p className="mb-4 text-zinc-300">
-          100% open source. 1% success fee, only when SOL is successfully
-          recovered.{" "}
+          Only a 1% fee when your SOL actually comes back. As transparent as
+          it gets: every fee lands on chain where anyone can audit it, and
+          every line of code is public.{" "}
           <a
             href="https://github.com/sol-repair/sol.repair"
             target="_blank"
@@ -87,6 +84,10 @@ export default function Home() {
             Verify exactly what the app does in the source code
           </a>
           .
+        </p>
+        <p className="mb-4 text-zinc-300">
+          Close empty SPL and Token-2022 accounts and recover the SOL held in
+          them.
         </p>
         <p className="mb-6 font-mono text-xs leading-relaxed text-zinc-400">
           Most empty token accounts hold about 0.00149 to 0.00208 SOL,
