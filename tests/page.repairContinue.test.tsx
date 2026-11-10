@@ -294,8 +294,12 @@ describe("post-run continue affordance", () => {
     expect(armed.container.innerHTML).toBe(baselineHtml);
   });
 
-  it("starts the next normal run in place: same repair(), fresh fee re-check, no review detour", async () => {
-    await armedWithFreshScan(SCAN_101);
+  it(
+    "starts the next normal run in place: same repair(), fresh fee re-check, no review detour",
+    { timeout: 15000 },
+    async () => {
+      // Timeout widened for the same reason as its siblings below.
+      await armedWithFreshScan(SCAN_101);
 
     const feeReadsBefore =
       mocks.conn.getAccountInfo.mock.calls.length;
@@ -331,29 +335,44 @@ describe("post-run continue affordance", () => {
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(
       sendsBefore + 5
     );
-  });
+    }
+  );
 
-  it("clears once the continued run's fresh scan finds at or under the cap", async () => {
-    const utils = await armedWithFreshScan(SCAN_101);
-    fireEvent.click(continueButton()!);
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(screen.getByText(/Wallet repaired/)).toBeTruthy();
+  it(
+    "clears once the continued run's fresh scan finds at or under the cap",
+    { timeout: 15000 },
+    async () => {
+      // Timeout widened, not the assertion: under full-suite worker
+      // contention these render-heavy drive tests run 3.5 to 5.6s
+      // against an 800ms isolation baseline (the load-artifact class
+      // the 2026-11-03 react-bump investigation recorded), and the
+      // "repair everything found" suite adds one more file to the
+      // same scheduling waves. 5s stopped being honest headroom.
+      const utils = await armedWithFreshScan(SCAN_101);
+      fireEvent.click(continueButton()!);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(screen.getByText(/Wallet repaired/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    await landFreshScan(utils, SCAN_1);
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await landFreshScan(utils, SCAN_1);
 
-    expect(continueButton()).toBeNull();
-    expect(screen.queryByText(/more found/)).toBeNull();
-    // The one remaining account is handled by today's normal flow.
-    expect(
-      screen.getByRole("button", { name: "Repair Wallet" })
-    ).toBeTruthy();
-  });
+      expect(continueButton()).toBeNull();
+      expect(screen.queryByText(/more found/)).toBeNull();
+      // The one remaining account is handled by today's normal flow.
+      expect(
+        screen.getByRole("button", { name: "Repair Wallet" })
+      ).toBeTruthy();
+    }
+  );
 
-  it("is disabled while the fee re-check is in flight", async () => {
-    await armedWithFreshScan(SCAN_185);
+  it(
+    "is disabled while the fee re-check is in flight",
+    { timeout: 15000 },
+    async () => {
+      // Timeout widened for the same reason as its sibling above.
+      await armedWithFreshScan(SCAN_185);
 
     let releaseFeeRead: ((value: null) => void) | null = null;
     mocks.conn.getAccountInfo.mockImplementation(
@@ -386,5 +405,6 @@ describe("post-run continue affordance", () => {
     // down while the review is up.
     expect(screen.getByText(/Review before you sign/)).toBeTruthy();
     expect(continueButton()).toBeNull();
-  });
+    }
+  );
 });

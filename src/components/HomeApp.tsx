@@ -18,7 +18,7 @@
  * the lib/solana modules are consumed exactly as before.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { VersionedTransaction } from "@solana/web3.js";
 import { WalletButton } from "@/components/WalletButton";
@@ -36,6 +36,11 @@ import {
   MAX_ACCOUNTS_PER_RUN,
   useRepairWallet,
 } from "@/hooks/useRepairWallet";
+import { useBurnDust, type BurnStatus } from "@/hooks/useBurnDust";
+import {
+  selectBurnableDustAccounts,
+  type BurnableDustAccount,
+} from "@/lib/solana/burnDust";
 import {
   TOKEN_2022_PROGRAM_ID,
   lamportsToSol,
@@ -131,6 +136,45 @@ function accountUrl(address: string): string | null {
 function short(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
+
+/** Thousands grouping for exact base-unit strings (string-safe for
+ *  full u64 values, no float rounding). */
+function groupDigits(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Where a "repair everything found" pass stands
+ * (docs/repair-everything-spec-draft.md). The pass is page
+ * orchestration only: stage 1 is the repair hook's own run over the
+ * scan's empty accounts, stage 2 is the burn hook's own action once per
+ * dust candidate. It builds no transaction of its own.
+ */
+type PassStage =
+  | { kind: "idle" }
+  | { kind: "confirming" }
+  | { kind: "stage1" }
+  | { kind: "stage2"; index: number }
+  | { kind: "done" }
+  | { kind: "stopped"; reason: string };
+
+/** One finished dust candidate in a pass, in the burn hook's own
+ *  words wherever the hook supplied them. */
+interface PassLogEntry {
+  pubkey: string;
+  line: string;
+}
+
+/** The burn hook's in-flight statuses, worded exactly as the per-card
+ *  dust section words them. */
+const PASS_BURN_STATUS_TEXT: Partial<Record<BurnStatus, string>> = {
+  "checking-current-state": "Checking the account's current state...",
+  building: "Building transaction...",
+  "awaiting-signature": "Check your wallet. Approve to burn and close.",
+  sending: "Approved. Sending to the network...",
+  confirming: "Sent. Waiting for the network to confirm...",
+  verifying: "Confirmed. Verifying the account is gone on-chain...",
+};
 
 /** True when a scan error is the RPC throttling reads of the wallet.
  *  Matched on anchored wordings only, never on a bare "429", because
@@ -328,6 +372,24 @@ function HomeAppInner() {
 
   const hasEligible = result && result.eligibleAccounts.length > 0;
 
+  // The pass's confirmation preview, computed over the capped run the
+  // same way the classic review computes it.
+  const passPreview = useMemo(() => {
+    const eligible = result ? result.eligibleAccounts : [];
+    const run = eligible.slice(0, MAX_ACCOUNTS_PER_RUN);
+    const batches = run.length > 0 ? chunkInstructions(run) : [];
+    return {
+      eligibleCount: eligible.length,
+      runCount: run.length,
+      batchCount: batches.length,
+      runLamports: run.reduce((sum, a) => sum + BigInt(a.lamports), 0n),
+      serviceFeeLamports: batches.reduce(
+        (sum, batch) => sum + feeAmountLamports(batch),
+        0n
+      ),
+    };
+  }, [result]);
+
   // G.1 wallet state inspection: pure aggregation of the completed scan.
   // Read-only; no new RPC, no actions. Rendered inside the scan panel.
   const inspection = useMemo(
@@ -388,6 +450,252 @@ function HomeAppInner() {
     // existing no-op.
     void repair(eligible, ready);
   }, [result, publicKey, checkingFee, connection, repair]);
+
+  // The dust candidates the pass's stage 2 would cover, derived from
+  // the scan the page already holds (the same selector the per-card
+  // dust section uses). Pure aggregation; no new RPC anywhere.
+  const dustCandidates = useMemo(
+    () => (result ? selectBurnableDustAccounts(result) : []),
+    [result]
+  );
+
+  // --- "Repair everything found" (docs/repair-everything-spec-draft.md).
+  // One page-level confirmation, then only wallet approvals until a stop
+  // condition. Stage 1 calls the same repair() the main button calls;
+  // stage 2 calls the same burn() the per-card dust section calls, once
+  // per candidate, through its own hook instance here. The cross-action
+  // mutex (not this state machine) is what keeps the two stages and the
+  // per-card section from ever overlapping.
+  const {
+    status: passBurnStatus,
+    outcome: passBurnOutcome,
+    error: passBurnError,
+    note: passBurnNote,
+    signatures: passBurnSignatures,
+    accountPubkey: passBurnAccount,
+    actionInFlight: passBurnInFlight,
+    burn: passBurnAction,
+    reset: passBurnReset,
+  } = useBurnDust();
+
+  const [passStage, setPassStage] = useState<PassStage>({ kind: "idle" });
+  const [passLog, setPassLog] = useState<PassLogEntry[]>([]);
+  // The scan snapshot the pass works from: a rescan landing mid-pass can
+  // never change what a running pass closes or burns.
+  const [passCandidates, setPassCandidates] = useState<BurnableDustAccount[]>(
+    []
+  );
+  // Whether this pass drove a repair run (its finish then replaces the
+  // success card's Done: same reset, same arm rule, same re-scan).
+  const [passRanRepair, setPassRanRepair] = useState(false);
+  // The wallet the pass belongs to; its finish arms the continue
+  // affordance for this wallet only.
+  const [passOwner, setPassOwner] = useState<string | null>(null);
+  const passLaunchedIndex = useRef(-1);
+
+  const passActive =
+    passStage.kind === "confirming" ||
+    passStage.kind === "stage1" ||
+    passStage.kind === "stage2";
+
+  let passOfferLabel: string | null = null;
+  if (passStage.kind === "idle" && result) {
+    const emptyCount = result.eligibleAccounts.length;
+    const dustCount = dustCandidates.length;
+    if (emptyCount > 0 || dustCount > 0) {
+      const parts: string[] = [];
+      if (emptyCount > 0) parts.push(`${emptyCount} empty`);
+      if (dustCount > 0) parts.push(`${dustCount} dust`);
+      passOfferLabel = parts.join(", ");
+    }
+  }
+
+  // The pass's confirmation opens only after a FRESH fee-existence read,
+  // the same moment-of-click re-check the main review path performs
+  // (audit L2). feeAccountReady never rejects; a failing read fails
+  // toward fee-off for both stages.
+  const beginPassConfirmation = useCallback(async () => {
+    if (checkingFee) return;
+    setCheckingFee(true);
+    try {
+      setFeeReady(await feeAccountReady(connection));
+    } finally {
+      setCheckingFee(false);
+      setPassStage({ kind: "confirming" });
+    }
+  }, [checkingFee, connection]);
+
+  const launchPass = useCallback(() => {
+    if (!result || !publicKey) return;
+    const eligible = result.eligibleAccounts;
+    const dust = selectBurnableDustAccounts(result);
+    if (eligible.length === 0 && dust.length === 0) return;
+    passLaunchedIndex.current = -1;
+    setPassCandidates(dust);
+    setPassOwner(publicKey.toBase58());
+    setPassRanRepair(eligible.length > 0);
+    setPassLog([]);
+    setSelected(new Set(eligible.map((a) => a.pubkey)));
+    if (passBurnStatus !== "idle") passBurnReset();
+    if (eligible.length > 0) {
+      setPassStage({ kind: "stage1" });
+      // The same repair() the main button calls: the cap slice, wallet
+      // pinning, mutex, per-batch approvals, and honest reporting are
+      // all inside the untouched hook.
+      void repair(eligible, feeReady);
+    } else {
+      setPassStage({ kind: "stage2", index: 0 });
+    }
+  }, [
+    result,
+    publicKey,
+    passBurnStatus,
+    passBurnReset,
+    repair,
+    feeReady,
+  ]);
+
+  // Stage 1 ends when the repair hook reaches a terminal. Done moves on
+  // to the burn stage; anything else stops the whole pass (the repair's
+  // own error card keeps its honest report).
+  const [passSeenRepairStatus, setPassSeenRepairStatus] = useState(status);
+  if (status !== passSeenRepairStatus) {
+    setPassSeenRepairStatus(status);
+    if (passStage.kind === "stage1") {
+      if (status === "done") {
+        setPassStage(
+          passCandidates.length > 0
+            ? { kind: "stage2", index: 0 }
+            : { kind: "done" }
+        );
+      } else if (status === "error") {
+        setPassStage({
+          kind: "stopped",
+          reason: repairError ?? "The repair stage stopped.",
+        });
+      }
+    }
+  }
+
+  // Stage 2 bookkeeping: the burn hook's terminal for the CURRENT
+  // candidate classifies as a continue (record the hook's own words,
+  // clear the hook, advance) or as a stop for the whole pass. Terminals
+  // from a candidate other than the current index are the previous
+  // candidate's already-recorded outcome, never re-classified.
+  const passBurnTerminalKey =
+    passBurnStatus === "done" ||
+    passBurnStatus === "error" ||
+    passBurnStatus === "unverified"
+      ? `${passBurnAccount ?? ""}|${passBurnStatus}|${passBurnOutcome ?? ""}`
+      : null;
+  const [passSeenBurnTerminal, setPassSeenBurnTerminal] = useState<
+    string | null
+  >(null);
+  if (passBurnTerminalKey !== passSeenBurnTerminal) {
+    setPassSeenBurnTerminal(passBurnTerminalKey);
+    if (passBurnTerminalKey !== null && passStage.kind === "stage2") {
+      const candidate = passCandidates[passStage.index];
+      const current =
+        candidate !== undefined &&
+        (passBurnAccount === candidate.pubkey || passBurnAccount === null);
+      if (current) {
+        const short_ = short(candidate.pubkey);
+        const continueOutcome =
+          (passBurnStatus === "done" &&
+            (passBurnOutcome === "burn-verified" ||
+              passBurnOutcome === "close-unattributed" ||
+              passBurnOutcome === "already-gone" ||
+              passBurnOutcome === "already-empty")) ||
+          (passBurnStatus === "error" &&
+            passBurnOutcome === "gate-state-changed");
+        if (continueOutcome) {
+          const line =
+            passBurnOutcome === "burn-verified"
+              ? `${short_}: burned and closed, verified on-chain.`
+              : passBurnOutcome === "already-gone" ||
+                  passBurnOutcome === "already-empty" ||
+                  passBurnOutcome === "gate-state-changed"
+                ? `${short_}: skipped. ${passBurnError ?? ""}`
+                : `${short_}: ${passBurnError ?? ""}`;
+          const next: PassStage =
+            passStage.index + 1 < passCandidates.length
+              ? { kind: "stage2", index: passStage.index + 1 }
+              : { kind: "done" };
+          setPassLog((prev) => [...prev, { pubkey: candidate.pubkey, line }]);
+          setPassStage(next);
+        } else {
+          const line =
+            passBurnOutcome === "burn-verified"
+              ? `${short_}: burned and closed, verified on-chain.`
+              : `${short_}: ${passBurnError ?? "The burn stopped."}`;
+          setPassLog((prev) => [...prev, { pubkey: candidate.pubkey, line }]);
+          setPassStage({
+            kind: "stopped",
+            reason:
+              passBurnError ??
+              "The burn stopped. Nothing more will be sent automatically.",
+          });
+        }
+      }
+    }
+  }
+
+  // Launch the current candidate. A stale terminal from the previous
+  // candidate is cleared first (its outcome is already in the log); an
+  // unresolved hold never reaches here, because that terminal stops the
+  // pass before the index advances.
+  useEffect(() => {
+    if (passStage.kind !== "stage2") return;
+    const candidate = passCandidates[passStage.index];
+    if (!candidate) return;
+    if (passLaunchedIndex.current === passStage.index) return;
+    if (passBurnInFlight) return;
+    if (passBurnStatus !== "idle") {
+      passBurnReset();
+      return;
+    }
+    passLaunchedIndex.current = passStage.index;
+    void passBurnAction(candidate, feeReady);
+  }, [
+    passStage,
+    passCandidates,
+    passBurnStatus,
+    passBurnInFlight,
+    passBurnReset,
+    passBurnAction,
+    feeReady,
+  ]);
+
+  // The pass's finish replaces the success card's Done for the run it
+  // drove: same reset, same arm rule (a completed repair run only, for
+  // the wallet that ran it), same standard post-run re-scan.
+  const finishPass = useCallback(() => {
+    if (passRanRepair && passOwner !== null && passOwner === feeOwnerKey) {
+      setContinueAfterRun(feeOwnerKey);
+    }
+    reset();
+    setConfirming(false);
+    passBurnReset();
+    setPassStage({ kind: "idle" });
+    setPassLog([]);
+    rescan();
+  }, [
+    passRanRepair,
+    passOwner,
+    feeOwnerKey,
+    reset,
+    passBurnReset,
+    rescan,
+  ]);
+
+  // Closing a stopped pass releases the burn hook's terminal (its own
+  // dismissal contract releases an unresolved hold); the repair hook's
+  // cards keep their own dismissals.
+  const closePassSummary = useCallback(() => {
+    passBurnReset();
+    setPassStage({ kind: "idle" });
+    setPassLog([]);
+  }, [passBurnReset]);
 
   const toggleSelected = useCallback((pubkey: string) => {
     setSelected((prev) => {
@@ -817,6 +1125,259 @@ function HomeAppInner() {
               </p>
             )}
 
+          {/* Repair everything found: the offer. One page-level
+              confirmation for everything this scan found that the tool
+              can close; the classic per-section actions stay below,
+              unchanged, for anyone who prefers them. */}
+          {passOfferLabel !== null && !confirming && status === "idle" && (
+            <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-4">
+              <p className="text-sm leading-relaxed text-zinc-400">
+                One confirmation covers everything this scan found that
+                the tool can close. Your wallet still asks for an
+                approval on each transaction, and nothing is signed
+                until you approve it there.
+              </p>
+              <button
+                onClick={() => void beginPassConfirmation()}
+                disabled={
+                  checkingFee ||
+                  repairInFlight ||
+                  revokeInFlight ||
+                  unwrapInFlight ||
+                  burnInFlight ||
+                  excessInFlight
+                }
+                className="mt-3 w-full rounded-lg border border-[#14F195] px-4 py-3 font-medium text-[#14F195] transition-colors hover:bg-[#14F195]/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Repair everything found ({passOfferLabel})
+              </button>
+            </div>
+          )}
+
+          {/* Repair everything found: the one confirmation. Both stages
+              are enumerated before anything starts; every transaction
+              still gets its own wallet approval. */}
+          {passStage.kind === "confirming" && (
+            <div
+              data-testid="repair-everything-confirmation"
+              className="rounded-lg border border-zinc-700 bg-zinc-950 p-4"
+            >
+              <p className="text-sm font-medium text-zinc-200">
+                Repair everything found
+              </p>
+              {passPreview.runCount > 0 && (
+                <>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                    Stage 1, close empty accounts: {passPreview.runCount}{" "}
+                    account{passPreview.runCount === 1 ? "" : "s"} in{" "}
+                    {passPreview.batchCount} transaction
+                    {passPreview.batchCount === 1 ? "" : "s"}, one wallet
+                    approval each.
+                  </p>
+                  {passPreview.eligibleCount > passPreview.runCount && (
+                    <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                      This run covers the first {MAX_ACCOUNTS_PER_RUN} of
+                      the {passPreview.eligibleCount} found. After it
+                      finishes, run the repair again or use continue to
+                      close the remaining{" "}
+                      {passPreview.eligibleCount - passPreview.runCount}.
+                    </p>
+                  )}
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                    About {lamportsToSol(passPreview.runLamports)} SOL
+                    returns to your wallet from these closes.
+                  </p>
+                </>
+              )}
+              {dustCandidates.length > 0 && (
+                <>
+                  <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+                    Stage 2, burn and close dust: {dustCandidates.length}{" "}
+                    account{dustCandidates.length === 1 ? "" : "s"}, one
+                    transaction and one wallet approval each. A
+                    transaction that expires asks for one more approval.
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-amber-400/90">
+                    Burning a token destroys it permanently, and
+                    SOL.REPAIR cannot judge what a token is worth or
+                    whether it is still wanted. That judgment is yours.
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                    Burning permanently destroys the token balance. It
+                    is not undoable by this tool or any tool. Closing
+                    the account afterwards returns every lamport it
+                    holds to your wallet.
+                  </p>
+                  <div className="mt-2 max-h-72 space-y-1 scroll-slim overflow-auto font-mono text-[11px] leading-relaxed text-zinc-400">
+                    {dustCandidates.map((c) => (
+                      <div
+                        key={c.pubkey}
+                        className="rounded-md border border-zinc-800/60 bg-black/20 p-2"
+                      >
+                        <span className="block break-all">
+                          <span className="text-zinc-500">Account </span>
+                          <AccountLink address={c.pubkey} />
+                        </span>
+                        <span className="block break-all">
+                          <span className="text-zinc-500">Mint </span>
+                          <AccountLink address={c.mint} />
+                        </span>
+                        <span className="block">
+                          <span className="text-zinc-500">Balance </span>
+                          {groupDigits(c.amountAtScan)} base units (
+                          {c.decimals} decimals, at scan time)
+                        </span>
+                        <span className="block">
+                          <span className="text-zinc-500">Account rent </span>
+                          {groupDigits(c.lamports.toString())} lamports
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                    Each dust account is read again before its turn. One
+                    that has changed is skipped with the reason, and the
+                    pass moves on.
+                  </p>
+                </>
+              )}
+              <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+                Total approvals expected:{" "}
+                {passPreview.batchCount + dustCandidates.length}.
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                {feeReady
+                  ? "The 1% service fee appears in each approval: 1% of the SOL each close returns, shown in your wallet before you approve."
+                  : "Service fee: none on this pass (the fee account is not ready yet)."}{" "}
+                Each wallet approval shows the exact instructions
+                before you sign.
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                If you reject an approval, the pass stops there, and
+                everything already finished stays finished.
+              </p>
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={launchPass}
+                  className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584]"
+                >
+                  Approve &amp; start
+                </button>
+                <button
+                  onClick={() => setPassStage({ kind: "idle" })}
+                  className="rounded-lg border border-zinc-700 px-4 py-2.5 text-zinc-400 transition-colors hover:text-zinc-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Repair everything found: progress and report. The repair
+              and burn hooks own every status, error, and receipt shown
+              here; this panel only says which stage the pass is on. */}
+          {(passStage.kind === "stage1" ||
+            passStage.kind === "stage2" ||
+            passStage.kind === "done" ||
+            passStage.kind === "stopped") && (
+            <div
+              data-testid="repair-everything-panel"
+              className="rounded-lg border border-zinc-700 bg-zinc-950 p-4"
+            >
+              {passStage.kind === "stage1" && (
+                <p className="text-sm leading-relaxed text-zinc-300">
+                  Repair everything found: stage 1, closing empty
+                  accounts. This is the usual repair run; its progress
+                  shows below.
+                </p>
+              )}
+              {passStage.kind === "stage2" && (
+                <div role="status">
+                  <p className="text-sm leading-relaxed text-zinc-300">
+                    Repair everything found: stage 2, burn and close (
+                    {passStage.index + 1} of {passCandidates.length}).
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                    {PASS_BURN_STATUS_TEXT[passBurnStatus] ??
+                      "Preparing the next account..."}
+                  </p>
+                  {passBurnStatus === "awaiting-signature" && (
+                    <AwaitingSignatureHint />
+                  )}
+                  {passBurnNote && (
+                    <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                      {passBurnNote}
+                    </p>
+                  )}
+                </div>
+              )}
+              {passStage.kind === "done" && (
+                <p className="text-sm font-medium text-emerald-400">
+                  Everything this pass covered is finished.
+                </p>
+              )}
+              {passStage.kind === "stopped" && (
+                <>
+                  <p className="text-sm font-medium text-amber-300">
+                    The pass stopped.
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-amber-300/80">
+                    {passStage.reason}
+                  </p>
+                  {passBurnSignatures.map((sig) => (
+                    <p
+                      key={sig}
+                      className="mt-2 break-all font-mono text-xs text-amber-300/80"
+                    >
+                      Signature: {sig}
+                    </p>
+                  ))}
+                </>
+              )}
+              {passStage.kind === "done" && passRanRepair && (
+                <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                  Closed {closedCount} empty account
+                  {closedCount === 1 ? "" : "s"}, recovered{" "}
+                  {lamportsToSol(recoveredLamports)} SOL.
+                </p>
+              )}
+              {passStage.kind === "done" &&
+                passRanRepair &&
+                signatures.map((sig) => (
+                  <ExplorerLink key={sig} signature={sig} />
+                ))}
+              {passLog.length > 0 && (
+                <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
+                  {passLog.map((entry) => (
+                    <p key={entry.pubkey} className="break-all">
+                      {entry.line}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {passStage.kind === "done" && (
+                <div className="mt-4">
+                  <button
+                    onClick={finishPass}
+                    className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+                  >
+                    Finish and rescan
+                  </button>
+                </div>
+              )}
+              {passStage.kind === "stopped" && (
+                <div className="mt-4">
+                  <button
+                    onClick={closePassSummary}
+                    className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+                  >
+                    Close pass summary
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Post-run continue: a completed repair followed by the
               standard post-run re-scan that still finds more than one
               full run's worth of closable accounts. One click
@@ -825,6 +1386,7 @@ function HomeAppInner() {
               block - the flow below it is byte-identical to before. */}
           {continueAfterRun !== null &&
             continueAfterRun === feeOwnerKey &&
+            passStage.kind === "idle" &&
             !confirming &&
             status === "idle" &&
             result !== null &&
@@ -856,8 +1418,9 @@ function HomeAppInner() {
               </div>
             )}
 
-          {/* Repair button, only shown when there are eligible accounts */}
-          {hasEligible && !confirming && status === "idle" && (
+          {/* Repair button, only shown when there are eligible accounts
+              and the pass is not working the wallet */}
+          {hasEligible && !confirming && status === "idle" && !passActive && (
             <>
               <button
                 onClick={() => {
@@ -1097,8 +1660,14 @@ function HomeAppInner() {
             </div>
           )}
 
-          {/* Success */}
-          {status === "done" && signature && (
+          {/* Success. While the pass is working its stages past a
+              finished run (or reporting the pass's own finish), the
+              pass panel carries this run's report and its finish
+              performs this card's Done. */}
+          {status === "done" &&
+            signature &&
+            passStage.kind !== "stage2" &&
+            passStage.kind !== "done" && (
             <div className="rounded-lg border border-emerald-800 bg-emerald-950/30 p-4">
               <p className="text-sm font-medium text-emerald-400">
                 Wallet repaired
@@ -1211,17 +1780,23 @@ function HomeAppInner() {
 
           {/* Dust burn-and-close (per-item consent, one account per
               action, approved 2026-09-26). Renders nothing when
-              the scan has no eligible dust accounts. */}
-          <BurnDustSection
-            scan={result}
-            rescan={rescan}
-            repairInFlight={repairInFlight}
-            revokeInFlight={revokeInFlight}
-            unwrapInFlight={unwrapInFlight}
-            excessInFlight={excessInFlight}
-            feeReady={feeReady}
-            onActionInFlightChange={setBurnInFlight}
-          />
+              the scan has no eligible dust accounts. While the pass is
+              working the wallet, this section stands down: its cards
+              are exactly the accounts the pass's stage 2 is driving,
+              and the mutex would only turn a mid-pass click into an
+              action-conflict stop. */}
+          {!passActive && (
+            <BurnDustSection
+              scan={result}
+              rescan={rescan}
+              repairInFlight={repairInFlight}
+              revokeInFlight={revokeInFlight}
+              unwrapInFlight={unwrapInFlight}
+              excessInFlight={excessInFlight}
+              feeReady={feeReady}
+              onActionInFlightChange={setBurnInFlight}
+            />
+          )}
 
           {/* G.4: excess-lamport withdrawal (per-item consent, one
               account per action, approved 2026-09-26). Detects
