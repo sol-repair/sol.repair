@@ -18,6 +18,26 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-10",
+    title: "The interface is changing, the transaction format is not",
+    body:
+      "This note is for the two groups that depend on how a repair is " +
+      "built: developers running their own clients from the published " +
+      "transaction format, and people finishing a repair in the browser. " +
+      "The interface has changed and is changing: on November 3 large " +
+      "repairs gained a one-click continue after a finished run, and a " +
+      "single pass that repairs everything a scan finds is being designed " +
+      "now and has not shipped. The transaction format has not changed and " +
+      "is not part of that work. The instructions and their order are the " +
+      "same, each transaction still closes at most 20 accounts, the " +
+      "service fee is still 1% of the SOL the closes return, floored to " +
+      "whole lamports and sent as one transfer riding at the end of each " +
+      "transaction to the same fee wallet, and the rules that decide " +
+      "which accounts can be closed are the same. The guide to the repair " +
+      "transaction remains accurate as published, and any future change " +
+      "to the format is announced here before it ships.",
+  },
+  {
     date: "2026-11-03",
     title: "Large repairs can continue with one click",
     body:
