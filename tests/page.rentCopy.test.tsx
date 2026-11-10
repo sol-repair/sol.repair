@@ -81,11 +81,13 @@ describe("homepage rent copy matches the two-regime reality", () => {
       /Most empty token accounts hold about 0\.00149 to 0\.00208 SOL, depending on when they were created/
     );
     expect(hero).toBeTruthy();
+    // The wallet-owns-the-account line was removed on the owner's
+    // 2026-11-10 ruling; the rent range stands alone.
     expect(
-      screen.getByText(
+      screen.queryByText(
         /Recovered SOL is returned to the wallet that owns the account/
       )
-    ).toBeTruthy();
+    ).toBeNull();
     expect(screen.queryByText(/~0\.002 SOL rent/)).toBeNull();
     // The instruction name was library jargon on a first-timer page.
     expect(screen.queryByText(/createCloseAccountInstruction/)).toBeNull();
@@ -114,34 +116,93 @@ describe("homepage rent copy matches the two-regime reality", () => {
   });
 });
 
+describe("homepage fee and transparency lines", () => {
+  it("leads with the bold fee line and the transparency line below it", () => {
+    const { container } = render(<Home />);
+
+    const paragraphs = Array.from(container.querySelectorAll("p"));
+    const feeLine = paragraphs.find(
+      (p) =>
+        p.textContent === "Only a 1% fee when your SOL actually comes back."
+    );
+    expect(feeLine).toBeTruthy();
+    // The owner's ruling: the same bold the recovered counter displays
+    // (the #52 treatment, font-bold text-white).
+    expect(feeLine!.className).toContain("font-bold");
+    expect(feeLine!.className).toContain("text-white");
+
+    const transparency = paragraphs.find((p) =>
+      (p.textContent ?? "").startsWith(
+        "As transparent as it gets: every fee lands on chain where anyone can audit it."
+      )
+    );
+    expect(transparency).toBeTruthy();
+    // A separate paragraph below the fee line, not the same node.
+    expect(
+      feeLine!.compareDocumentPosition(transparency!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // The amended sentence: the code-public clause is gone.
+    expect(screen.queryByText(/every line of code is public/)).toBeNull();
+
+    // The source link survives on the closing sentence.
+    const link = Array.from(container.querySelectorAll("a")).find((a) =>
+      (a.textContent ?? "").includes(
+        "Verify exactly what the app does in the source code"
+      )
+    );
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute("href")).toBe(
+      "https://github.com/sol-repair/sol.repair"
+    );
+
+    // The writing rules hold on the new copy.
+    const text = `${feeLine!.textContent ?? ""} ${transparency!.textContent ?? ""}`;
+    expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+    expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    expect(text.includes("!")).toBe(false);
+  });
+});
+
 describe("homepage recovered-to-date line", () => {
   it("renders the weekly counter from the generated constant", () => {
     render(<Home />);
 
     // Values come from the generated constant, so the Sunday bump can
     // never break this pin: the test reads the same module the page does.
-    // The leading sentence is its own styled span, so the pin checks the
-    // span and the trailing as-of line as separate nodes.
+    // The leading sentence is its own styled span; the weekly-update
+    // line renders below it after a break (the owner's 2026-11-10
+    // layout ruling), and the as-of date no longer renders here.
     expect(
       screen.getByText(
         new RegExp(
-          `^Total SOL recovered through repairs and burn-closes since launch: ${RECOVERED_TOTALS.lamportsFreedSol} SOL\\.$`
+          `^Total SOL recovered through repairs and burn-closes: ${RECOVERED_TOTALS.lamportsFreedSol} SOL\\.$`
         )
       )
     ).toBeTruthy();
     expect(
       screen.getByText(
-        new RegExp(
-          `^As of .+\\. Next weekly update: .+\\. The fee ledger has every row\\.$`
-        )
+        new RegExp(`^Next weekly update: .+\\. The fee ledger has every row\\.$`)
       )
+    ).toBeTruthy();
+    expect(screen.queryByText(/since launch/)).toBeNull();
+
+    const counterSpan = screen.getByText(
+      /Total SOL recovered through repairs and burn-closes:/
+    );
+    const counterBlock = counterSpan.closest("p");
+    expect(counterBlock).toBeTruthy();
+    expect(counterBlock!.textContent).not.toContain("As of");
+    const br = counterBlock!.querySelector("br");
+    expect(br).toBeTruthy();
+    // The weekly-update line sits below the counter line, not beside it.
+    expect(
+      counterSpan.compareDocumentPosition(br!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
 
     // The project writing rules hold here too.
-    const line = screen.getByText(
-      /Total SOL recovered through repairs and burn-closes since launch/
-    );
-    const text = line.textContent ?? "";
+    const text = counterSpan.textContent ?? "";
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     expect(text.includes("!")).toBe(false);
