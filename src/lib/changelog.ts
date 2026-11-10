@@ -24,11 +24,14 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       "This note is for the two groups that depend on how a repair is " +
       "built: developers running their own clients from the published " +
       "transaction format, and people finishing a repair in the browser. " +
-      "The interface has changed and is changing: on November 3 large " +
-      "repairs gained a one-click continue after a finished run, and a " +
-      "single pass that repairs everything a scan finds is being designed " +
-      "now and has not shipped. The transaction format has not changed and " +
-      "is not part of that work. The instructions and their order are the " +
+      "The interface has changed: on November 3 large repairs gained a " +
+      "one-click continue after a finished run, and a single pass that " +
+      "repairs everything a scan finds has now shipped. One confirmation " +
+      "covers closing the empty accounts and burning the dust balances, " +
+      "every transaction still asks for its own wallet approval, and " +
+      "the separate repair and burn actions stay where they were. The " +
+      "transaction format has not changed and is not part of that work. " +
+      "The instructions and their order are the " +
       "same, each transaction still closes at most 20 accounts, the " +
       "service fee is still 1% of the SOL the closes return, floored to " +
       "whole lamports and sent as one transfer riding at the end of each " +
