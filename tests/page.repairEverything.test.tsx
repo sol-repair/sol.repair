@@ -669,6 +669,16 @@ describe("repair everything found: stops and skips", () => {
       expect(
         screen.queryByText(/Everything this pass covered is finished\./)
       ).toBeNull();
+
+      // Closing the summary returns the page to its controls: the pass
+      // offer renders again for the remaining dust.
+      fireEvent.click(
+        screen.getByRole("button", { name: "Close pass summary" })
+      );
+      expect(
+        screen.queryByText(/The pass stopped\./)
+      ).toBeNull();
+      expect(passButton()).toBeTruthy();
     },
     30000
   );
@@ -700,6 +710,45 @@ describe("repair everything found: stops and skips", () => {
       ).toBeTruthy();
       // Exactly one account carries the skip marker in the pass log.
       expect(screen.getAllByText(/: skipped\. /).length).toBe(1);
+    },
+    30000
+  );
+
+  it(
+    "a stop after stage 1 completed releases the page when the summary closes",
+    async () => {
+      // The E-journey finding: stage 1 lands, a burn refusal stops the
+      // pass, and the repair hook sits on its suppressed done card.
+      // Closing the summary must return the offer and the classic
+      // controls.
+      wireHappyPath();
+      const dust = dustOf(2);
+      seedChain(dust);
+      let signs = 0;
+      mocks.wallet.signTransaction = vi.fn(async (tx: Transaction) => {
+        signs += 1;
+        if (signs === 2) throw new Error("User rejected the request.");
+        tx.sign(WALLET_KEYPAIR);
+        return tx;
+      });
+      await landInitialScan(scanOf(emptiesOf(3), dust));
+
+      await startPass();
+
+      await waitFor(
+        () => expect(screen.getByText(/The pass stopped\./)).toBeTruthy(),
+        LONG
+      );
+      expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Close pass summary" })
+      );
+      expect(screen.queryByText(/The pass stopped\./)).toBeNull();
+      // The offer renders again, and the classic repair control is back.
+      expect(passButton()).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Repair Wallet" })
+      ).toBeTruthy();
     },
     30000
   );

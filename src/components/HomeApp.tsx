@@ -689,13 +689,21 @@ function HomeAppInner() {
   ]);
 
   // Closing a stopped pass releases the burn hook's terminal (its own
-  // dismissal contract releases an unresolved hold); the repair hook's
-  // cards keep their own dismissals.
+  // dismissal contract releases an unresolved hold). When the stop came
+  // after stage 1 COMPLETED, the repair hook sits on its done card,
+  // which the pass panel suppressed: closing the summary must release
+  // the page back to its normal controls. When the stop came from a
+  // stage 1 failure, the classic error card keeps its own Dismiss and
+  // stays exactly as it is.
   const closePassSummary = useCallback(() => {
     passBurnReset();
     setPassStage({ kind: "idle" });
     setPassLog([]);
-  }, [passBurnReset]);
+    if (status === "done") {
+      reset();
+      setConfirming(false);
+    }
+  }, [passBurnReset, status, reset]);
 
   const toggleSelected = useCallback((pubkey: string) => {
     setSelected((prev) => {
