@@ -71,10 +71,12 @@ export default function Home() {
         <h1 className="mb-3 text-3xl font-semibold tracking-tight text-zinc-50">
           Reclaim SOL from empty token accounts.
         </h1>
+        <p className="mb-2 font-bold text-white">
+          Only a 1% fee when your SOL actually comes back.
+        </p>
         <p className="mb-2 text-zinc-300">
-          Only a 1% fee when your SOL actually comes back. As transparent as
-          it gets: every fee lands on chain where anyone can audit it, and
-          every line of code is public.{" "}
+          As transparent as it gets: every fee lands on chain where anyone
+          can audit it.{" "}
           <a
             href="https://github.com/sol-repair/sol.repair"
             target="_blank"
@@ -92,17 +94,15 @@ export default function Home() {
         <p className="mb-6 font-mono text-xs leading-relaxed text-zinc-400">
           Most empty token accounts hold about 0.00149 to 0.00208 SOL,
           depending on when they were created.
-          <br />
-          Recovered SOL is returned to the wallet that owns the account.
         </p>
         <p className="mb-6 font-mono text-xs leading-relaxed text-zinc-400">
           <span className="font-bold text-white">
-            Total SOL recovered through repairs and burn-closes since launch:{" "}
+            Total SOL recovered through repairs and burn-closes:{" "}
             {RECOVERED_TOTALS.lamportsFreedSol} SOL.
-          </span>{" "}
-          As of {longDate(RECOVERED_TOTALS.asOf)}. Next weekly update:{" "}
-          {longDate(RECOVERED_TOTALS.nextUpdate)}. The fee ledger has every
-          row.
+          </span>
+          <br />
+          Next weekly update: {longDate(RECOVERED_TOTALS.nextUpdate)}. The
+          fee ledger has every row.
         </p>
 
         <HomeApp />
