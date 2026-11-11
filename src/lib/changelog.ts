@@ -19,6 +19,22 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-11-11",
+    title:
+      "A retry now only happens when the account still matches your review",
+    body:
+      "When a transaction expires without landing, the burn, unwrap, " +
+      "withdraw, and revoke flows offer one retry. That retry now " +
+      "happens only when a fresh read shows the account exactly as it " +
+      "was when you reviewed it. If the balance or lamports moved, the " +
+      "tool stops, shows the current figures, and asks for a fresh " +
+      "review instead of re-asking your wallet. The review cards for " +
+      "those same flows also stop if the account changed between your " +
+      "review and your approval click. Your wallet still approves every " +
+      "transaction, and the transactions themselves are built exactly " +
+      "as before.",
+  },
+  {
+    date: "2026-11-11",
     title: "The pages now say what a failed transaction costs",
     body:
       "A failed transaction still costs the network fee, and the pages " +
@@ -37,8 +53,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       "authority the account owner cannot revoke. The privacy policy " +
       "was refreshed to describe the explainer and the read-only " +
       "transaction listing, and the terms and the transaction-size " +
-      "guide gained two honest qualifiers. No transaction, fee, or " +
-      "eligibility behavior changed.",
+      "guide gained two honest qualifiers.",
   },
   {
     date: "2026-11-10",
