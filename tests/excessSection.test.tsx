@@ -344,3 +344,77 @@ describe("ExcessSection reviewed figures and the preview race", () => {
     ).toBeNull();
   });
 });
+
+describe("ExcessSection detection honesty (B2)", () => {
+  it("renders an honest failed state with a retry affordance when detection fails", async () => {
+    detectMock.mockRejectedValueOnce(new Error("rpc down"));
+    setHook({});
+    render(
+      <ExcessSection
+        scan={scanWithCandidate()}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        burnInFlight={false}
+      />
+    );
+    // A failed detection is never rendered as absence-of-section.
+    expect(
+      await screen.findByText(/could not be read from the network/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/Nothing was checked this round/i)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /scan again/i })
+    ).toBeTruthy();
+    // No candidates list appears: there is nothing to show.
+    expect(screen.queryByText(/holds more lamports/i)).toBeNull();
+  });
+
+  it("recovers through the retry affordance when the rescan succeeds", async () => {
+    detectMock
+      .mockRejectedValueOnce(new Error("rpc down"))
+      .mockResolvedValueOnce([CANDIDATE]);
+    setHook({});
+    render(
+      <ExcessSection
+        scan={scanWithCandidate()}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        burnInFlight={false}
+      />
+    );
+    await screen.findByText(/could not be read from the network/i);
+    fireEvent.click(screen.getByRole("button", { name: /scan again/i }));
+    expect(await screen.findByText(/Excess lamports/)).toBeTruthy();
+    expect(
+      screen.queryByText(/could not be read from the network/i)
+    ).toBeNull();
+  });
+
+  it("still renders nothing when detection completes with no candidates", async () => {
+    detectMock.mockResolvedValue([]);
+    setHook({});
+    const { container } = render(
+      <ExcessSection
+        scan={{
+          totalAccounts: 0,
+          eligibleAccounts: [],
+          recoverableLamports: 0n,
+          skippedAccounts: [],
+        }}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        burnInFlight={false}
+      />
+    );
+    await act(async () => {});
+    // A completed detection round with zero candidates is genuine
+    // emptiness, not a failed scan: absence here is honest.
+    expect(container.textContent).toBe("");
+  });
+});

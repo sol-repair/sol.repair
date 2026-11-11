@@ -19,6 +19,15 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: "2026-11-11",
+    title: "A failed excess-lamport scan now says so",
+    body:
+      "When the excess-lamport check cannot be read from the network, " +
+      "the section now shows an honest failed state with a scan-again " +
+      "button, instead of disappearing as if no account held excess " +
+      "lamports.",
+  },
+  {
+    date: "2026-11-11",
     title:
       "A retry now only happens when the account still matches your review",
     body:
