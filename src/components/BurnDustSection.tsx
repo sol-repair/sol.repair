@@ -210,12 +210,14 @@ export function BurnDustSection({
         mintAuthority?: string;
         freezeAuthorityActive?: boolean;
         freezeAuthority?: string;
+        permanentDelegate?: string;
       }
     >();
     for (const s of scan.skippedAccounts) {
       if (
         s.mintAuthorityActive === undefined &&
-        s.freezeAuthorityActive === undefined
+        s.freezeAuthorityActive === undefined &&
+        s.permanentDelegate === undefined
       )
         continue;
       if (!map.has(s.mint)) {
@@ -224,6 +226,7 @@ export function BurnDustSection({
           mintAuthority: s.mintAuthority,
           freezeAuthorityActive: s.freezeAuthorityActive,
           freezeAuthority: s.freezeAuthority,
+          permanentDelegate: s.permanentDelegate,
         });
       }
     }
@@ -505,6 +508,21 @@ export function BurnDustSection({
                         </span>
                       ) : (
                         <span className="text-zinc-500">none</span>
+                      )}
+                      {f.permanentDelegate && (
+                        <>
+                          <br />
+                          <span className="text-zinc-500">
+                            Permanent delegate:{" "}
+                          </span>
+                          <span className="font-semibold text-amber-400/90">
+                            active <AccountLink address={f.permanentDelegate} />
+                          </span>{" "}
+                          <span className="text-zinc-500">
+                            (a mint-level authority the account owner cannot
+                            revoke)
+                          </span>
+                        </>
                       )}
                     </>
                   );

@@ -446,3 +446,48 @@ describe("WalletStateSummary close-blocked-extension", () => {
     expect(text).not.toMatch(/!/);
   });
 });
+
+describe("WalletStateSummary permanent delegate line", () => {
+  const PERM_DELEGATE = "PERMDELEG";
+
+  function renderForeignCAWithMint(entry: Partial<SkippedAccount>) {
+    const summary = summarizeWalletState(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: "S1",
+            cause: "close-authority",
+            reason: "close authority belongs to another address",
+            closeAuthority: "CA",
+            mint: "MINT",
+            ...entry,
+          }),
+        ],
+      })
+    );
+    return render(<WalletStateSummary summary={summary} />);
+  }
+
+  it("renders the permanent delegate fact with its mint-level qualifier", () => {
+    const { container } = renderForeignCAWithMint({
+      mintAuthorityActive: true,
+      mintAuthority: "MA",
+      permanentDelegate: PERM_DELEGATE,
+    });
+    expect(container.textContent).toContain("permanent delegate: active");
+    expect(container.textContent).toContain(
+      "a mint-level authority the account owner cannot revoke"
+    );
+    // The wallet's own authority lines are unaffected.
+    expect(container.textContent).toContain("mint authority: active");
+  });
+
+  it("renders no permanent delegate line when the mint carried none", () => {
+    const { container } = renderForeignCAWithMint({
+      mintAuthorityActive: true,
+      mintAuthority: "MA",
+    });
+    expect(container.textContent).not.toContain("permanent delegate");
+  });
+});

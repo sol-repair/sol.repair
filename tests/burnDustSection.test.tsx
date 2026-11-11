@@ -340,7 +340,8 @@ describe("BurnDustSection terminal cards", () => {
       status: "error",
       outcome: "on-chain-failure",
       accountPresentAfterAction: true,
-      error: "The transaction was confirmed on-chain but failed. It changed nothing.",
+      error:
+        "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged.",
     });
     render(
       <BurnDustSection

@@ -15,7 +15,11 @@
 
 import { describe, expect, it } from "vitest";
 import { pack } from "@solana/spl-token-metadata";
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  ExtensionType,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 
 import {
@@ -23,6 +27,7 @@ import {
   authorityLabel,
   decodeMintAuthorities,
   decodeMintNameSymbol,
+  decodePermanentDelegate,
   readMintFacts,
 } from "../src/lib/solana/authorityNaming";
 
@@ -95,6 +100,7 @@ function t22MintBuffer(
   opts: {
     mintAuthority?: string | null;
     freezeAuthority?: string | null;
+    permanentDelegate?: string | null;
     name?: string;
     symbol?: string;
   } = {}
@@ -111,22 +117,32 @@ function t22MintBuffer(
   base[44] = 6;
   base[45] = 1;
   const hasMeta = opts.name !== undefined || opts.symbol !== undefined;
-  if (!hasMeta) {
-    return Buffer.concat([base, Buffer.from([1])]);
+  const parts: Buffer[] = [Buffer.from([1])];
+  if (hasMeta) {
+    const meta = pack({
+      updateAuthority: PublicKey.default,
+      mint: PublicKey.default,
+      name: opts.name ?? "",
+      symbol: opts.symbol ?? "",
+      uri: "",
+      additionalMetadata: [],
+    });
+    const metaTlv = Buffer.alloc(4 + meta.length);
+    metaTlv.writeUInt16LE(ExtensionType.TokenMetadata, 0);
+    metaTlv.writeUInt16LE(meta.length, 2);
+    Buffer.from(meta).copy(metaTlv, 4);
+    parts.push(metaTlv);
   }
-  const meta = pack({
-    updateAuthority: PublicKey.default,
-    mint: PublicKey.default,
-    name: opts.name ?? "",
-    symbol: opts.symbol ?? "",
-    uri: "",
-    additionalMetadata: [],
-  });
-  const tlv = Buffer.alloc(4 + meta.length);
-  tlv.writeUInt16LE(19, 0); // ExtensionType.TokenMetadata
-  tlv.writeUInt16LE(meta.length, 2);
-  Buffer.from(meta).copy(tlv, 4);
-  return Buffer.concat([base, Buffer.from([1]), tlv]);
+  if (opts.permanentDelegate) {
+    const delegateTlv = Buffer.alloc(4 + 32);
+    delegateTlv.writeUInt16LE(ExtensionType.PermanentDelegate, 0);
+    delegateTlv.writeUInt16LE(32, 2);
+    new PublicKey(opts.permanentDelegate)
+      .toBuffer()
+      .copy(delegateTlv, 4);
+    parts.push(delegateTlv);
+  }
+  return Buffer.concat([base, ...parts]);
 }
 
 /** The v2 mint buffer: name and symbol only, base area all zeros. */
@@ -449,5 +465,45 @@ describe("the mint authority decode", () => {
       })
     ).toBeNull();
     expect(decodeMintAuthorities(MINT_KEY, null)).toBeNull();
+  });
+});
+
+describe("the permanent delegate decode", () => {
+  const DELEGATE = mintKey(77);
+
+  it("decodes a Token-2022 mint carrying the PermanentDelegate extension", () => {
+    expect(
+      decodePermanentDelegate(
+        MINT_KEY,
+        infoFor(t22MintBuffer({ permanentDelegate: DELEGATE }))
+      )
+    ).toBe(DELEGATE);
+  });
+
+  it("reports no permanent delegate when the extension is absent", () => {
+    expect(
+      decodePermanentDelegate(MINT_KEY, infoFor(t22MintBuffer({})))
+    ).toBeNull();
+  });
+
+  it("never reports a permanent delegate for a classic mint", () => {
+    expect(
+      decodePermanentDelegate(MINT_KEY, {
+        owner: TOKEN_PROGRAM_ID,
+        data: classicMintBuffer({ mintAuthority: AUTHORITY_A }),
+      })
+    ).toBeNull();
+  });
+
+  it("carries the permanent delegate through the chunked read beside the authority facts", async () => {
+    const { reader } = mockMintReader({
+      [MINT_A]: t22MintBuffer({
+        mintAuthority: AUTHORITY_A,
+        permanentDelegate: DELEGATE,
+      }),
+    });
+    const facts = await readMintFacts(reader, [MINT_A]);
+    expect(facts.get(MINT_A)?.mintAuthorityActive).toBe(true);
+    expect(facts.get(MINT_A)?.permanentDelegate).toBe(DELEGATE);
   });
 });

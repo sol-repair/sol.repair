@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { WalletRecentTransactions } from "@/components/WalletRecentTransactions";
-import { IS_MAINNET } from "@/lib/solana/connection";
+import { IS_MAINNET, SOLANA_NETWORK } from "@/lib/solana/connection";
 import {
   FEE_LEDGER_ENDPOINTS,
   decodeRawTransaction,
@@ -73,6 +73,20 @@ const ENDPOINT = IS_MAINNET
   ? FEE_LEDGER_ENDPOINTS["mainnet-beta"]
   : FEE_LEDGER_ENDPOINTS.devnet;
 
+/** The networks this page can serve honestly. Anything else configured
+ *  here would silently query the devnet endpoint, so an unsupported
+ *  deployment gets an explicit unsupported-network state instead of
+ *  data from a network the user is not on. */
+const SUPPORTED_NETWORKS: ReadonlySet<string> = new Set([
+  "mainnet-beta",
+  "devnet",
+]);
+
+/** Pure predicate for the supported-network check, exported for tests. */
+export function understandSupportsNetwork(network: string): boolean {
+  return SUPPORTED_NETWORKS.has(network);
+}
+
 /** Ticking counter for the in-flight read. A changing number is the honest
  *  "not stuck" signal on a slow public endpoint: real time passing, no fake
  *  progress. Same pattern as the homepage's repair counter. */
@@ -123,6 +137,7 @@ export default function UnderstandPage() {
       const analysis = analyzeLeftBehind({
         instructions: decoded.instructions,
         failed: raw.meta?.err != null,
+        feeLamports: raw.meta?.fee ?? null,
       });
       if (stale()) return;
       setState({
@@ -186,180 +201,230 @@ export default function UnderstandPage() {
             </li>
             <li>
               A transaction that failed on chain is reported as changed
-              nothing, because a failed transaction has no effects.
+              nothing except the network fee, which was still charged. Its
+              attempted instructions are shown as attempted and rolled
+              back, never as effects.
             </li>
           </ul>
         </details>
 
-        <div className="mb-6">
-          <WalletRecentTransactions
-            endpoint={ENDPOINT}
-            onSelect={(chosen) => {
-              setSignature(chosen);
-              void explain(chosen);
-            }}
-          />
-        </div>
-
-        <form
-          className="mb-6 flex flex-col gap-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void explain(signature.trim());
-          }}
-        >
-          <label className="sr-only" htmlFor="signature">
-            Transaction signature
-          </label>
-          <input
-            id="signature"
-            name="signature"
-            autoComplete="off"
-            spellCheck={false}
-            value={signature}
-            onChange={(event) => setSignature(event.target.value)}
-            placeholder="Paste a transaction signature"
-            className="w-full flex-1 rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-          />
-          <button
-            type="submit"
-            disabled={state.kind === "loading"}
-            className="rounded bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-300 disabled:opacity-50"
-          >
-            Explain it
-          </button>
-        </form>
-
-        {state.kind === "invalid" && (
-          <p className="mb-6 text-sm text-red-400">
-            That does not look like a transaction signature.
-          </p>
-        )}
-
-        {state.kind === "loading" && (
-          <p className="mb-6 text-sm text-zinc-400">
-            Reading the chain... The public endpoint can be slow under load.{" "}
-            <ReadingSeconds />
-          </p>
-        )}
-
-        {state.kind === "not-found" && (
-          <p className="mb-6 text-sm text-zinc-300">
-            No transaction with that signature was found on this network. It
-            may belong to the other network, or it may be too old for the
-            RPC to serve.
-          </p>
-        )}
-
-        {state.kind === "unreadable" && (
-          <p className="mb-6 text-sm text-zinc-300">
-            The transaction exists but could not be decoded well enough to
-            explain it. This page only reads transactions and never submits
-            one. Whether the original transaction had effects cannot be
-            determined from this data.
-          </p>
-        )}
-
-        {state.kind === "error" && (
-          <div className="mb-6">
-            <p className="text-sm text-red-400">
-              The transaction could not be fetched.
+        {!understandSupportsNetwork(SOLANA_NETWORK) ? (
+          <div className="mb-6 rounded border border-amber-900/60 bg-amber-950/20 p-4">
+            <p className="text-sm font-medium text-amber-400">
+              This network is not supported here
             </p>
-            <p className="mt-1 text-sm text-zinc-300">
-              The signature may not match a transaction on this network, or
-              the RPC endpoint could not be reached. Check the signature and
-              try again.
+            <p className="mt-2 text-sm leading-relaxed text-zinc-300">
+              This deployment is configured for the {SOLANA_NETWORK} network,
+              and this page does not serve it. Nothing is fetched: the page
+              would otherwise silently read from a different network than the
+              one you are on. Nothing was looked up and nothing was sent.
             </p>
-            {/* Raw library text stays available for debugging but off the
-                primary surface: the same idiom as the repair card. The
-                detail can carry fee-ledger vocabulary, because the fetch
-                layer is shared with the ledger page; it is diagnostic, not
-                page copy. */}
-            {state.detail && (
-              <details className="mt-2">
-                <summary className="cursor-pointer py-1 text-xs text-zinc-400">
-                  Technical details
-                </summary>
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-zinc-400">
-                  {state.detail}
-                </pre>
-              </details>
-            )}
           </div>
-        )}
-
-        {state.kind === "done" && (
-          <section className="space-y-4">
-            <div className="rounded border border-zinc-800 bg-zinc-900/50 p-4">
-              <p className="break-all font-mono text-xs text-zinc-400">
-                {state.signature}
-              </p>
-              <p className="mt-2 text-xs text-zinc-400">
-                Signed {formatBlockTime(state.explained.blockTime)}
-              </p>
+        ) : (
+          <>
+            <div className="mb-6">
+              <WalletRecentTransactions
+                endpoint={ENDPOINT}
+                onSelect={(chosen) => {
+                  setSignature(chosen);
+                  void explain(chosen);
+                }}
+              />
             </div>
-            <div className="space-y-2">
-              <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
-                Left behind
+
+            <form
+              className="mb-6 flex flex-col gap-3 sm:flex-row"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void explain(signature.trim());
+              }}
+            >
+              <label className="sr-only" htmlFor="signature">
+                Transaction signature
+              </label>
+              <input
+                id="signature"
+                name="signature"
+                autoComplete="off"
+                spellCheck={false}
+                value={signature}
+                onChange={(event) => setSignature(event.target.value)}
+                placeholder="Paste a transaction signature"
+                className="w-full flex-1 rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              />
+              <button
+                type="submit"
+                disabled={state.kind === "loading"}
+                className="rounded bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-300 disabled:opacity-50"
+              >
+                Explain it
+              </button>
+            </form>
+
+            {state.kind === "invalid" && (
+              <p className="mb-6 text-sm text-red-400">
+                That does not look like a transaction signature.
               </p>
-              <div className={VERDICT_PANEL_CLASS[state.analysis.verdict]}>
-                <p className={VERDICT_HEADLINE_CLASS[state.analysis.verdict]}>
-                  {state.analysis.headline}
+            )}
+
+            {state.kind === "loading" && (
+              <p className="mb-6 text-sm text-zinc-400">
+                Reading the chain... The public endpoint can be slow under
+                load. <ReadingSeconds />
+              </p>
+            )}
+
+            {state.kind === "not-found" && (
+              <p className="mb-6 text-sm text-zinc-300">
+                No transaction with that signature was found on this network.
+                It may belong to the other network, or it may be too old for
+                the RPC to serve.
+              </p>
+            )}
+
+            {state.kind === "unreadable" && (
+              <p className="mb-6 text-sm text-zinc-300">
+                The transaction exists but could not be decoded well enough to
+                explain it. This page only reads transactions and never
+                submits one. Whether the original transaction had effects
+                cannot be determined from this data.
+              </p>
+            )}
+
+            {state.kind === "error" && (
+              <div className="mb-6">
+                <p className="text-sm text-red-400">
+                  The transaction could not be fetched.
                 </p>
-                {state.analysis.effects.length > 0 && (
-                  <ul className="mt-3 space-y-2">
-                    {state.analysis.effects.map((effect, index) => (
-                      <li
-                        key={index}
-                        className={EFFECT_CLASS[effect.severity]}
-                      >
-                        {effect.text}
-                      </li>
-                    ))}
-                  </ul>
+                <p className="mt-1 text-sm text-zinc-300">
+                  The signature may not match a transaction on this network,
+                  or the RPC endpoint could not be reached. Check the
+                  signature and try again.
+                </p>
+                {/* Raw library text stays available for debugging but off the
+                    primary surface: the same idiom as the repair card. The
+                    detail can carry fee-ledger vocabulary, because the fetch
+                    layer is shared with the ledger page; it is diagnostic, not
+                    page copy. */}
+                {state.detail && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer py-1 text-xs text-zinc-400">
+                      Technical details
+                    </summary>
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-xs text-zinc-400">
+                      {state.detail}
+                    </pre>
+                  </details>
                 )}
               </div>
-            </div>
-            {state.analysis.verdict === "failed" ? (
-              <p className="text-sm text-zinc-400">
-                The instructions it attempted are not shown, because none of
-                them took effect.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
-                  Instructions
-                </p>
-                <p className="text-sm text-zinc-300">
-                  This transaction contains{" "}
-                  {state.explained.instructions.length}{" "}
-                  {state.explained.instructions.length === 1
-                    ? "instruction"
-                    : "instructions"}
-                  . Every sentence below is generated from the
-                  transaction&rsquo;s own bytes.
-                </p>
-                <ol className="space-y-2">
-                  {state.explained.instructions.map((instruction, index) => (
-                    <li
-                      key={index}
-                      className={
-                        instruction.limitation === null
-                          ? "rounded border border-zinc-800 bg-zinc-900/50 p-3 text-sm leading-relaxed text-zinc-200"
-                          : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-400"
-                      }
-                    >
-                      <span className="mr-2 font-mono text-xs text-zinc-400">
-                        {index + 1}.
-                      </span>
-                      {instruction.text}
-                    </li>
-                  ))}
-                </ol>
-              </div>
             )}
-          </section>
+
+            {state.kind === "done" && (
+              <section className="space-y-4">
+                <div className="rounded border border-zinc-800 bg-zinc-900/50 p-4">
+                  <p className="break-all font-mono text-xs text-zinc-400">
+                    {state.signature}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-400">
+                    Signed {formatBlockTime(state.explained.blockTime)}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                    Left behind
+                  </p>
+                  <div className={VERDICT_PANEL_CLASS[state.analysis.verdict]}>
+                    <p
+                      className={VERDICT_HEADLINE_CLASS[state.analysis.verdict]}
+                    >
+                      {state.analysis.headline}
+                    </p>
+                    {state.analysis.effects.length > 0 && (
+                      <ul className="mt-3 space-y-2">
+                        {state.analysis.effects.map((effect, index) => (
+                          <li
+                            key={index}
+                            className={EFFECT_CLASS[effect.severity]}
+                          >
+                            {effect.text}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+                {state.analysis.verdict === "failed" ? (
+                  <div className="space-y-2">
+                    <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                      Attempted instructions
+                    </p>
+                    <p className="text-sm text-zinc-400">
+                      The transaction failed, so none of these took effect.
+                      They are shown as attempted and rolled back, not as
+                      effects. This transaction attempted{" "}
+                      {state.explained.instructions.length}{" "}
+                      {state.explained.instructions.length === 1
+                        ? "instruction"
+                        : "instructions"}
+                      . Every sentence below is generated from the
+                      transaction&rsquo;s own bytes.
+                    </p>
+                    <ol className="space-y-2">
+                      {state.explained.instructions.map((instruction, index) => (
+                        <li
+                          key={index}
+                          className={
+                            instruction.limitation === null
+                              ? "rounded border border-zinc-800 bg-zinc-900/50 p-3 text-sm leading-relaxed text-zinc-200"
+                              : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-400"
+                          }
+                        >
+                          <span className="mr-2 font-mono text-xs text-zinc-400">
+                            {index + 1}.
+                          </span>
+                          {instruction.text}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                      Instructions
+                    </p>
+                    <p className="text-sm text-zinc-300">
+                      This transaction contains{" "}
+                      {state.explained.instructions.length}{" "}
+                      {state.explained.instructions.length === 1
+                        ? "instruction"
+                        : "instructions"}
+                      . Every sentence below is generated from the
+                      transaction&rsquo;s own bytes.
+                    </p>
+                    <ol className="space-y-2">
+                      {state.explained.instructions.map((instruction, index) => (
+                        <li
+                          key={index}
+                          className={
+                            instruction.limitation === null
+                              ? "rounded border border-zinc-800 bg-zinc-900/50 p-3 text-sm leading-relaxed text-zinc-200"
+                              : "rounded border border-zinc-800/60 bg-zinc-900/30 p-3 text-sm leading-relaxed text-zinc-400"
+                          }
+                        >
+                          <span className="mr-2 font-mono text-xs text-zinc-400">
+                            {index + 1}.
+                          </span>
+                          {instruction.text}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </section>
+            )}
+          </>
         )}
+
       </div>
     </main>
   );

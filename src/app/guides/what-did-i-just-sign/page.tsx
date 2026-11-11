@@ -111,9 +111,12 @@ export default function WhatDidIJustSignGuide() {
               site, or connect a wallet read-only to list its recent
               transactions. The panel above the instruction list names
               every lasting change: which permissions now exist, who holds
-              them, and what ended. The instruction list below it is the
-              raw breakdown, in order. Anything the tool cannot describe
-              says so instead of guessing.
+              them, and what ended. When a transaction failed on chain, the
+              panel says so and names the network fee, which the network
+              charged anyway, and the attempted instructions are shown as
+              attempted and rolled back. The instruction list below it is
+              the raw breakdown, in order. Anything the tool cannot
+              describe says so instead of guessing.
             </p>
             <p className="mt-3">
               <Link

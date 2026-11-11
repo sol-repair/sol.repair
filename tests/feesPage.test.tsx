@@ -35,7 +35,11 @@ function row(overrides: Partial<FeeLedgerRow>): FeeLedgerRow {
   };
 }
 
-function mockHook(rows: FeeLedgerRow[], unreadableCount = 0) {
+function mockHook(
+  rows: FeeLedgerRow[],
+  unreadableCount = 0,
+  opts: { hasMore?: boolean } = {}
+) {
   vi.mocked(useFeeLedger).mockReturnValue({
     cluster: "mainnet-beta",
     setCluster: vi.fn(),
@@ -43,7 +47,7 @@ function mockHook(rows: FeeLedgerRow[], unreadableCount = 0) {
     loading: false,
     loadingMore: false,
     error: null,
-    hasMore: false,
+    hasMore: opts.hasMore ?? false,
     loadMore: vi.fn(),
     reload: vi.fn(),
     fetchedAt: 1755577001_000,
@@ -229,7 +233,7 @@ describe("fees page: the incomplete-history notice (audit F2)", () => {
 });
 
 describe("fees page recovered-to-date line", () => {
-  it("renders the weekly all-time line from the generated constant", () => {
+  it("renders the weekly all-time line from the generated constant, qualified as mainnet", () => {
     mockHook([]);
     render(<FeesPage />);
 
@@ -238,9 +242,26 @@ describe("fees page recovered-to-date line", () => {
     expect(
       screen.getByText(
         new RegExp(
-          `As of .+: ${RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs and burn-closes for ${RECOVERED_TOTALS.wallets} wallets across ${RECOVERED_TOTALS.closes} accounts\. Updated weekly\.`
+          `As of .+: ${RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs and burn-closes for ${RECOVERED_TOTALS.wallets} wallets across ${RECOVERED_TOTALS.closes} accounts on mainnet-beta\. Updated weekly\.`
         )
       )
     ).toBeTruthy();
+  });
+});
+
+describe("fees page live-total labeling", () => {
+  it("labels the SOL figure as covering the fees shown while the ledger has more pages", () => {
+    mockHook([row({})], 0, { hasMore: true });
+    render(<FeesPage />);
+    expect(screen.getByText(/fees shown/)).toBeTruthy();
+    expect(screen.getByText(/SOL in the fees shown/)).toBeTruthy();
+    expect(screen.queryByText(/SOL total/)).toBeNull();
+  });
+
+  it("keeps the plain SOL total once the ledger is exhausted", () => {
+    mockHook([row({})]);
+    render(<FeesPage />);
+    expect(screen.getByText(/SOL total/)).toBeTruthy();
+    expect(screen.queryByText(/SOL in the fees shown/)).toBeNull();
   });
 });

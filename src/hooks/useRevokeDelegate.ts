@@ -567,7 +567,7 @@ export function useRevokeDelegate() {
               outcome: "on-chain-failure",
               delegatePresentAtLastRead: presentAfter,
               error:
-                "The transaction was confirmed on-chain but failed. It changed nothing.",
+                "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged.",
             });
             return;
           }

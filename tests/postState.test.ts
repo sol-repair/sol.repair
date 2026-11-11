@@ -54,7 +54,8 @@ function tokenIx(
 }
 
 describe("analyzeLeftBehind verdicts and headlines", () => {
-  it("reports a failed transaction as changed nothing", () => {
+  it("reports a failed transaction as rolled back with the network fee still charged", () => {
+    // No fee figure from the RPC: the honest generic sentence.
     const analysis = analyzeLeftBehind({
       instructions: [
         tokenIx(SPL_TOKEN_PROGRAM, 4, ["a", "b"], 100n),
@@ -64,7 +65,21 @@ describe("analyzeLeftBehind verdicts and headlines", () => {
     expect(analysis.verdict).toBe("failed");
     expect(analysis.effects).toEqual([]);
     expect(analysis.headline).toBe(
-      "This transaction failed on chain. It changed nothing: no balances moved and nothing was left behind."
+      "This transaction failed on chain. Its instruction effects were rolled back, and the network fee was still charged."
+    );
+  });
+
+  it("reports a failed transaction with the exact network fee when the RPC returned one", () => {
+    const analysis = analyzeLeftBehind({
+      instructions: [
+        tokenIx(SPL_TOKEN_PROGRAM, 4, ["a", "b"], 100n),
+      ],
+      failed: true,
+      feeLamports: 5000,
+    });
+    expect(analysis.verdict).toBe("failed");
+    expect(analysis.headline).toBe(
+      "This transaction failed on chain. Its instruction effects were rolled back, and the network fee of 0.000005 SOL was still charged."
     );
   });
 

@@ -195,6 +195,12 @@ export interface SkippedAccount {
   /** Base58 address of the active freeze authority, carried with
    *  `freezeAuthorityActive`. */
   freezeAuthority?: string;
+  /** Base58 address of the mint's Token-2022 permanent delegate: a
+   *  mint-level spending authority over every account of that token,
+   *  which an account owner cannot revoke. Present only when the mint
+   *  was read and decoded and carries the extension. Evidence only;
+   *  the skip decision is unchanged. */
+  permanentDelegate?: string;
 }
 
 /** Result of scanning a wallet for closeable accounts. */
@@ -578,6 +584,9 @@ export async function getClosableAccounts(
       entry.freezeAuthorityActive = mintFacts.freezeAuthorityActive;
       if (mintFacts.freezeAuthority !== undefined) {
         entry.freezeAuthority = mintFacts.freezeAuthority;
+      }
+      if (mintFacts.permanentDelegate !== undefined) {
+        entry.permanentDelegate = mintFacts.permanentDelegate;
       }
     }
   }

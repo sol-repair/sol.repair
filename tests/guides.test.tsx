@@ -409,4 +409,25 @@ describe("the guide list is a single source", () => {
       expect(routes.has(guide.href), `unknown route ${guide.href}`).toBe(true);
     }
   });
+
+  it("mentions the failed-transaction fee on the what-did-i-just-sign guide", () => {
+    const entry = PAGES.find((g) => g.name === "what-did-i-just-sign");
+    expect(entry).toBeTruthy();
+    const SignGuide = entry!.Component;
+    const { container } = render(<SignGuide />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("names the network fee");
+    expect(text).toContain("attempted and rolled back");
+  });
+
+  it("draws the mint-level permanent delegate distinction on the token-approvals guide", () => {
+    const entry = PAGES.find((g) => g.name === "token-approvals");
+    expect(entry).toBeTruthy();
+    const ApprovalsGuide = entry!.Component;
+    const { container } = render(<ApprovalsGuide />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("permanent delegate");
+    expect(text).toContain("mint-level");
+    expect(text).toContain("does not remove it");
+  });
 });

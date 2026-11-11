@@ -739,7 +739,7 @@ describe("terminal outcomes after a confirmed status", () => {
     });
     await flushUntil(result, (s) => s === "error");
     expect(result.current.outcome).toBe("on-chain-failure");
-    expect(result.current.error).toContain("changed nothing");
+    expect(result.current.error).toContain("Nothing changed except the network fee");
     expect(result.current.accountPresentAfterAction).toBe(true);
     expect(signWith).toHaveBeenCalledTimes(1);
   });

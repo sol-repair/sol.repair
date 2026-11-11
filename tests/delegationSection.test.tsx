@@ -461,7 +461,7 @@ describe("terminal outcome cards (§8.9, §10.4.7-8)", () => {
       outcome: "on-chain-failure",
       delegatePresentAtLastRead: true,
       error:
-        "The transaction was confirmed on-chain but failed. It changed nothing.",
+        "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged.",
     });
     render(
       <DelegationSection
@@ -470,7 +470,9 @@ describe("terminal outcome cards (§8.9, §10.4.7-8)", () => {
         repairInFlight={false}
       />
     );
-    expect(screen.getByText(/changed nothing/)).toBeTruthy();
+    expect(
+      screen.getByText(/Nothing changed except the network fee/)
+    ).toBeTruthy();
     expect(
       screen.getByText(/the delegate was still on the account/)
     ).toBeTruthy();

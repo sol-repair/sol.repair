@@ -185,12 +185,14 @@ export default function FeesPage() {
           As of {longDate(RECOVERED_TOTALS.asOf)}:{" "}
           {RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs
           and burn-closes for {RECOVERED_TOTALS.wallets} wallets across{" "}
-          {RECOVERED_TOTALS.closes} accounts. Updated weekly.
+          {RECOVERED_TOTALS.closes} accounts on mainnet-beta. Updated weekly.
         </p>
 
         <p className="mb-4 font-mono text-xs text-zinc-400">
-          {rows.length} fee{rows.length === 1 ? "" : "s"} ·{" "}
-          {formatLamportsSol(totalLamports)} SOL total · rpc {cluster} ·
+          {rows.length} fee{rows.length === 1 ? "" : "s"}
+          {hasMore ? " shown" : ""} ·{" "}
+          {formatLamportsSol(totalLamports)} SOL{" "}
+          {hasMore ? "in the fees shown" : "total"} · rpc {cluster} ·
           updated {updatedAgo(fetchedAt, now)}
         </p>
 

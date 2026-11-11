@@ -177,6 +177,16 @@ describe("numbers without a constant stay pinned to the shipped source", () => {
     expect(text).toContain(`about ${roughlyFit} of them fit`);
   });
 
+  it("qualifies the byte limit with the legacy-format scope (B6)", () => {
+    // The 1,232-byte limit is a property of the legacy format this
+    // tool builds, not of every Solana transaction: v1 transactions
+    // support larger sizes, and this app does not build them.
+    const { container } = renderGuide();
+    const text = container.textContent ?? "";
+    expect(text).toContain("in the legacy format");
+    expect(text).toContain("does not build");
+  });
+
   it("wire tags match the tags the source modules state", () => {
     const revokeTag = sourceNumber(
       "lib/solana/revokeDelegation.ts",

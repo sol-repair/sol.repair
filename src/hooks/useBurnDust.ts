@@ -581,7 +581,7 @@ export function useBurnDust() {
               outcome: "on-chain-failure",
               accountPresentAfterAction: presentAfter,
               error:
-                "The transaction was confirmed on-chain but failed. It changed nothing." +
+                "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged." +
                 (candidate.program === "token-2022"
                   ? " If this mint requires permissioned burning, is paused, or uses confidential burning, the burn can never succeed. Nothing was burned."
                   : ""),

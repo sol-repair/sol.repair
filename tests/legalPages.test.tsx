@@ -54,6 +54,21 @@ describe("terms page pins the fee and service claims", () => {
     ).toBeTruthy();
   });
 
+  it("qualifies the wallet-review claim with the SOL.REPAIR preview (B7b)", () => {
+    // Wallets differ in what they decode, so the terms no longer claim
+    // the wallet displays the full contents of every transaction.
+    render(<TermsPage />);
+    expect(
+      screen.queryByText(/displays the full contents of each transaction/i)
+    ).toBeNull();
+    expect(
+      screen.getByText(/wallets differ in what they decode/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/review the SOL\.REPAIR preview as well/i)
+    ).toBeTruthy();
+  });
+
   it("publishes that the fee address lives in the open-source repository", () => {
     render(<TermsPage />);
     expect(
@@ -93,6 +108,34 @@ describe("privacy page pins the data claims", () => {
     render(<PrivacyPage />);
     expect(screen.getByText(/We do not sell, rent, or share data/i)).toBeTruthy();
     expect(screen.getByText(/Vercel, which hosts this website/i)).toBeTruthy();
+  });
+
+  it("discloses the pasted-signature explainer and its read-only wallet listing", () => {
+    render(<PrivacyPage />);
+    expect(
+      screen.getByText(
+        /any transaction signature you paste into the explainer/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /reads the public transaction behind a signature you paste/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/That connection is read-only/i)
+    ).toBeTruthy();
+  });
+
+  it("states that the fee ledger reads the fee wallet, not yours", () => {
+    render(<PrivacyPage />);
+    expect(screen.getByText(/It reads the fee wallet, not your wallet/i)).toBeTruthy();
+  });
+
+  it("carries the read-only connection and simulation disclosures", () => {
+    render(<PrivacyPage />);
+    expect(screen.getByText(/While an action is running/i)).toBeTruthy();
+    expect(screen.getByText(/A pre-sign simulation, only when you choose to run it/i)).toBeTruthy();
   });
 });
 

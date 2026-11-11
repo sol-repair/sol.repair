@@ -86,7 +86,7 @@ export type WireInstruction = {
  *  instruction into meta.innerInstructions (the exact CPI wire shape). */
 export function buildLegacyRaw(
   instructions: TransactionInstruction[],
-  opts: { err?: unknown; inner?: WireInstruction[] } = {}
+  opts: { err?: unknown; inner?: WireInstruction[]; fee?: number | null } = {}
 ): { raw: RawTransaction; message: ReturnType<Transaction["compileMessage"]> } {
   const tx = new Transaction({
     feePayer: Keypair.generate().publicKey,
@@ -104,6 +104,7 @@ export function buildLegacyRaw(
       version: null,
       meta: {
         err: opts.err ?? null,
+        fee: opts.fee ?? null,
         innerInstructions: opts.inner
           ? [{ index: 0, instructions: opts.inner }]
           : [],

@@ -563,7 +563,7 @@ describe("terminal-outcome cards (§6.2 blocks 5-7, §10.4.5)", () => {
       status: "error",
       outcome: "on-chain-failure",
       error:
-        "The transaction was confirmed on-chain but failed. It changed nothing.",
+        "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged.",
       accountPresentAfterAction: true,
     });
     render(
@@ -577,7 +577,7 @@ describe("terminal-outcome cards (§6.2 blocks 5-7, §10.4.5)", () => {
     expect(screen.getByText("The unwrap did not go through")).toBeTruthy();
     expect(
       screen.getByText(
-        "The transaction was confirmed on-chain but failed. It changed nothing."
+        "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged."
       )
     ).toBeTruthy();
     expect(

@@ -385,3 +385,52 @@ describe("the redesigned scan rows carry labels and authority facts", () => {
     expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
   });
 });
+
+describe("the home token cards permanent delegate fact", () => {
+  const PERM_DELEGATE = Keypair.generate().publicKey.toBase58();
+
+  it("shows the permanent delegate on funded skip rows with the mint-level qualifier", async () => {
+    const { container } = await renderHomeWithScan(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: Keypair.generate().publicKey.toBase58(),
+            mint: MINT,
+            cause: "funded",
+            reason: "holds a token balance",
+            balance: "100",
+            decimals: 6,
+            lamports: 2039280,
+            permanentDelegate: PERM_DELEGATE,
+          }),
+        ],
+      })
+    );
+    expect(container.textContent).toContain("Permanent delegate: active");
+    expect(container.textContent).toContain(
+      "a mint-level authority the account owner cannot revoke"
+    );
+    expect(screen.getAllByTitle(PERM_DELEGATE).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows no permanent delegate line when the mint carried none", async () => {
+    const { container } = await renderHomeWithScan(
+      scan({
+        totalAccounts: 1,
+        skippedAccounts: [
+          skip({
+            pubkey: Keypair.generate().publicKey.toBase58(),
+            mint: MINT,
+            cause: "funded",
+            reason: "holds a token balance",
+            balance: "100",
+            decimals: 6,
+            lamports: 2039280,
+          }),
+        ],
+      })
+    );
+    expect(container.textContent).not.toContain("Permanent delegate");
+  });
+});

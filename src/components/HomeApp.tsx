@@ -1047,7 +1047,8 @@ function HomeAppInner() {
                         <AccountLink address={account.mint} />
                       </span>
                       {(account.mintAuthorityActive !== undefined ||
-                        account.freezeAuthorityActive !== undefined) && (
+                        account.freezeAuthorityActive !== undefined ||
+                        account.permanentDelegate !== undefined) && (
                         <span className="mt-1 block space-y-0.5">
                           {account.mintAuthorityActive !== undefined && (
                             <span className="block">
@@ -1081,6 +1082,23 @@ function HomeAppInner() {
                               ) : (
                                 <span className="text-zinc-500">none</span>
                               )}
+                            </span>
+                          )}
+                          {account.permanentDelegate !== undefined && (
+                            <span className="block">
+                              <span className="text-zinc-500">
+                                Permanent delegate:{" "}
+                              </span>
+                              <span className="font-semibold text-amber-400/90">
+                                active{" "}
+                                <AccountLink
+                                  address={account.permanentDelegate}
+                                />
+                              </span>{" "}
+                              <span className="text-zinc-500">
+                                (a mint-level authority the account owner
+                                cannot revoke)
+                              </span>
                             </span>
                           )}
                         </span>

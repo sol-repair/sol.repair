@@ -701,7 +701,7 @@ describe("on-chain failure (§8.9 row 6)", () => {
     });
     await flushUntil(result, (s) => s === "error");
     expect(result.current.outcome).toBe("on-chain-failure");
-    expect(result.current.error).toContain("changed nothing");
+    expect(result.current.error).toContain("Nothing changed except the network fee");
     expect(result.current.delegatePresentAtLastRead).toBe(true);
     expect(signWith).toHaveBeenCalledTimes(1);
   });
