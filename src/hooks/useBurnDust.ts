@@ -76,6 +76,7 @@ export type BurnOutcome =
   | "on-chain-failure"
   | "action-conflict"
   | "recreated-after-close"
+  | "state-changed-since-review"
   // unverified
   | "unresolved-outcome"
   | "confirmed-verification-unavailable";
@@ -115,6 +116,18 @@ const INITIAL_STATE: BurnState = {
 /** The read shape the corroboration judge and the verification reads
  *  narrow to. */
 type ReadAccount = Extract<NativeAccountRead, { kind: "read" }>;
+
+/** The burn-specific corroboration verdict: the shared base already
+ *  covers standard-met / resolved / account-gone / cannot-establish;
+ *  this one carries the evidence that the account left the reviewed
+ *  baseline (the gate's pre-send snapshot), which terminalizes
+ *  corroboration into an honest stop. */
+type BurnCorroboration =
+  | {
+      type: "state-changed-since-review";
+      observedBalance: string;
+      observedLamports: number;
+    };
 
 class FriendlyError extends Error {
   outcome: BurnOutcome;
@@ -177,7 +190,11 @@ export function useBurnDust() {
   }, []);
 
   const burn = useCallback(
-    async (candidate: BurnableDustAccount, feeReady: boolean) => {
+    async (
+      candidate: BurnableDustAccount,
+      feeReady: boolean,
+      reviewed?: { balance?: string; lamports?: number }
+    ) => {
       if (burnInFlight.current) return;
       burnInFlight.current = true;
 
@@ -277,11 +294,37 @@ export function useBurnDust() {
           });
           return;
         }
-        // Gate passed. Balance/lamports drift vs the scan is NOT an
-        // abort (Case B policy): the figures travel to the card and the
-        // user consents with current numbers. A delegate present is not
-        // an abort either: the owner can always burn their own balance,
-        // and the delegation ends with the close.
+        // Gate passed. Consent is with the REVIEWED figures: the
+        // review card's figures travel in as `reviewed`, and when the
+        // in-lock gate read differs from them, the flow stops before
+        // anything is built or signed and requires a fresh review
+        // click (the revised Case B policy: consent with reviewed
+        // figures, not current figures). Callers that omit the
+        // reviewed figures keep the drift-consent behavior.
+        if (
+          reviewed &&
+          ((reviewed.balance !== undefined &&
+            verdict.balanceBeforeAction !== reviewed.balance) ||
+            (reviewed.lamports !== undefined &&
+              verdict.lamportsBeforeAction !== reviewed.lamports))
+        ) {
+          setRunState({
+            status: "error",
+            outcome: "gate-state-changed",
+            error:
+              "The account no longer matches what you reviewed. The fresh read shows " +
+              `${verdict.balanceBeforeAction} base units and ` +
+              `${verdict.lamportsBeforeAction} lamports. Nothing was signed. ` +
+              "Start a fresh review to approve the current figures.",
+          });
+          return;
+        }
+        // Reviewed figures match (or none were passed). Balance and
+        // lamports drift vs the scan is NOT an abort (Case B policy):
+        // the figures travel to the card and the user consents with
+        // current numbers. A delegate present is not an abort either:
+        // the owner can always burn their own balance, and the
+        // delegation ends with the close.
         setRunState({
           balanceBeforeAction: verdict.balanceBeforeAction,
           lamportsBeforeAction: verdict.lamportsBeforeAction,
@@ -294,10 +337,14 @@ export function useBurnDust() {
         let lastResolutionNote: string | null = null;
 
         // The §8.5 corroboration policy for one read, with the burn
-        // substitutions: the token identity is judged on every read
-        // (confirmed non-native, not frozen), and the lamports figure
-        // on the second (prior !== null) — one inconsistent
-        // observation blocks the re-sign.
+        // substitutions: EVERY read is judged against the gate's
+        // pre-send snapshot (the reviewed baseline) — balance AND
+        // lamports — so a figure that moved since the review blocks
+        // the re-sign even when the reads agree with each other. The
+        // token identity is judged on every read (confirmed
+        // non-native, not frozen), and the lamports-identical
+        // between-reads check stays as the second layer — one
+        // inconsistent observation blocks the re-sign.
         const readOnce = async (): Promise<CorroborationRead<ReadAccount>> => {
           try {
             const read = await readNativeAccountState(
@@ -314,7 +361,17 @@ export function useBurnDust() {
         const judge = (
           read: ReadAccount,
           prior: ReadAccount | null
-        ): CorroborationVerdict | null => {
+        ): CorroborationVerdict<BurnCorroboration> | null => {
+          if (
+            read.amount !== verdict.balanceBeforeAction ||
+            read.lamports !== verdict.lamportsBeforeAction
+          ) {
+            return {
+              type: "state-changed-since-review",
+              observedBalance: read.amount,
+              observedLamports: read.lamports,
+            };
+          }
           if (read.nativeStatus !== "non-native" || read.state === "frozen") {
             return {
               type: "cannot-establish",
@@ -524,7 +581,7 @@ export function useBurnDust() {
               outcome: "on-chain-failure",
               accountPresentAfterAction: presentAfter,
               error:
-                "The transaction was confirmed on-chain but failed. It changed nothing." +
+                "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged." +
                 (candidate.program === "token-2022"
                   ? " If this mint requires permissioned burning, is paused, or uses confidential burning, the burn can never succeed. Nothing was burned."
                   : ""),
@@ -539,6 +596,24 @@ export function useBurnDust() {
               accountPresentAfterAction: false,
               error:
                 "The account is gone. Whether this app's transaction closed it could not be established.",
+            });
+            return;
+          }
+
+          if (resolution.type === "domain") {
+            // The corroboration reads left the reviewed baseline: the
+            // window is provably closed, so nothing can land, and no
+            // re-sign is attempted. The card reports the state as it
+            // reads now and requires a fresh review.
+            const changed = resolution.verdict;
+            setRunState({
+              status: "error",
+              outcome: "state-changed-since-review",
+              error:
+                "The transaction expired without landing, and the account changed since you reviewed it. " +
+                `When we checked, the balance was ${changed.observedBalance} base units and the account held ` +
+                `${changed.observedLamports} lamports. Nothing more will be sent automatically. ` +
+                "Start a fresh review to see the current state.",
             });
             return;
           }

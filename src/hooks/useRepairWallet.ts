@@ -188,7 +188,7 @@ async function confirmByPolling(
     const status = statuses.value[0];
     if (status?.err) {
       throw new OnChainFailureError(
-        "The transaction was confirmed on-chain but failed. Nothing was closed and nothing was lost - run the repair again."
+        "The transaction was confirmed on-chain but failed. Nothing was closed and only the network fee was spent - run the repair again."
       );
     }
     if (

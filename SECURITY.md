@@ -21,7 +21,30 @@ phrases. Every transaction is signed by the user in their own wallet.
 
 ## Dependency risk posture
 
-Reviewed 2026-10-23 (previous review 2026-10-16).
+Reviewed 2026-11-10 (previous review 2026-10-23).
+
+### Patched on 2026-11-10
+
+- `react` and `react-dom` 19.2.x -> 19.3.1, with `@types/react` moved
+  to ^19.3.0 in the same change (PR #57). The runtime pair and its
+  types ship together per the #48 precedent: a version mismatch
+  between `react` and `@types/react` is its own class of breakage, so
+  neither moves without the other.
+- `eslint` ^10.14.0 (PR #57), carrying the lint toolchain's own
+  patched line. Dev-only.
+- `minimatch` GHSA-g3hv-75wg-m249 (PR #58): surgical overrides force
+  `^11.0.6` under `eslint` and `@typescript-eslint/typescript-estree`
+  only, the two consumers the advisory is reachable from in the lint
+  chain. The three remaining consumers pin `^3` and stay on their
+  out-of-range 3.1.5: forcing the major bump there would break the
+  runtime Solana toolchain for no reachable path, and they remain
+  covered by the accepted-families posture below.
+
+The 2026-11-10 review re-ran `npm audit`: 16 advisories remain (4
+high, 12 moderate, 0 critical), all inside the two accepted families
+already described below (the runtime Solana toolchain's accepted set
+and dev-only build chains). No new family appeared on the audit or on
+the Dependabot board.
 
 ### Patched on 2026-10-22
 

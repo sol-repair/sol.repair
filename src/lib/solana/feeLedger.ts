@@ -170,6 +170,9 @@ export type RawTransaction = {
   version?: number | string | null;
   meta?: {
     err?: unknown;
+    /** The network fee the transaction charged, in lamports, as the RPC
+     *  reports it. Null when the response carries none. */
+    fee?: number | null;
     /** Lamports of each account before the transaction, indexed over the
      *  message account keys in wire order: static keys, then loaded
      *  writable, then loaded readonly. */

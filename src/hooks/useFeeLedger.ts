@@ -279,6 +279,10 @@ export function useFeeLedger() {
         unreadableSignatures: [...unreadableSeen.current],
       });
     } catch (e) {
+      // The same generation discipline as the success path: a stale
+      // run's error belongs to a view the user has already left, and
+      // must not paint the new view's error state.
+      if (generation.current !== gen) return;
       setError(errorMessage(e));
     } finally {
       setLoadingMore(false);

@@ -68,7 +68,10 @@ function feeRawTx(toWallet: string, lamports: number = 20_392): unknown {
   };
 }
 
-type Deferred = { resolve: (value: unknown) => void };
+type Deferred = {
+  resolve?: (value: unknown) => void;
+  reject?: (value: unknown) => void;
+};
 
 describe("useFeeLedger loadMore stale-response guard", () => {
   beforeEach(() => {
@@ -171,7 +174,7 @@ describe("useFeeLedger loadMore stale-response guard", () => {
     // contains a real fee row (m-99). It must be discarded, not
     // stamped into the devnet view.
     await act(async () => {
-      parked[0].resolve(
+      parked[0].resolve?.(
         jsonResponse([{ signature: "m-99", blockTime: 1_755_576_900 }])
       );
       await new Promise((r) => setTimeout(r, 300));
@@ -180,6 +183,91 @@ describe("useFeeLedger loadMore stale-response guard", () => {
     expect(result.current.rows.map((r) => r.signature)).toEqual(["d-1"]);
     expect(result.current.error).toBeNull();
     // The stale run must not leave the load-more button stuck.
+    expect(result.current.loadingMore).toBe(false);
+  });
+
+  it("discards a loadMore ERROR that lands after a cluster switch (B7a)", async () => {
+    // Same race as the stale-response test above, but the abandoned
+    // fetch REJECTS: a stale run's error must not paint the new
+    // cluster's view either.
+    const MAINNET_FEE = feeRawTx(MAINNET_WALLET);
+    const DEVNET_FEE = feeRawTx(DEVNET_WALLET);
+    const txFor: Record<string, unknown> = {
+      "m-1": MAINNET_FEE,
+      "d-1": DEVNET_FEE,
+    };
+    const parked: Deferred[] = [];
+
+    const jsonResponse = (result: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result }),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+          params: unknown[];
+        };
+        if (body.method === "getSignaturesForAddress") {
+          const wallet = body.params[0] as string;
+          const before = (body.params[1] as { before?: string } | undefined)
+            ?.before;
+          if (wallet === MAINNET_WALLET && before === "m-2") {
+            return new Promise((_resolve, reject) => {
+              parked.push({ reject: reject as (v: unknown) => void });
+            });
+          }
+          if (wallet === MAINNET_WALLET) {
+            return jsonResponse([
+              { signature: "m-1", blockTime: 1_755_577_001 },
+              { signature: "m-2", blockTime: 1_755_577_000 },
+            ]);
+          }
+          if (wallet === DEVNET_WALLET) {
+            return jsonResponse([
+              { signature: "d-1", blockTime: 1_755_577_001 },
+              { signature: "d-2", blockTime: 1_755_577_000 },
+            ]);
+          }
+          return jsonResponse([]);
+        }
+        const sig = body.params[0] as string;
+        return jsonResponse(txFor[sig] ?? null);
+      })
+    );
+
+    const { result } = renderHook(() => useFeeLedger());
+    await act(async () => {
+      result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(result.current.rows.map((r) => r.signature)).toEqual(["m-1"]);
+    });
+
+    await act(async () => {
+      void result.current.loadMore();
+    });
+    expect(parked).toHaveLength(1);
+
+    await act(async () => {
+      result.current.setCluster("devnet");
+    });
+    await waitFor(() => {
+      expect(result.current.rows.map((r) => r.signature)).toEqual(["d-1"]);
+    });
+
+    // The abandoned mainnet loadMore now FAILS. Its error belongs to a
+    // view the user has already left: the devnet view stays clean.
+    await act(async () => {
+      parked[0].reject?.(new TypeError("network down"));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    expect(result.current.rows.map((r) => r.signature)).toEqual(["d-1"]);
+    expect(result.current.error).toBeNull();
     expect(result.current.loadingMore).toBe(false);
   });
 });

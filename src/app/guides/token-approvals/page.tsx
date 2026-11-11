@@ -110,7 +110,12 @@ export default function TokenApprovalsGuide() {
               habit of revoking approvals they no longer need. A revoke is
               one small transaction: it clears the delegate and resets the
               delegated amount to zero. Closing the token account also ends
-              any delegation on it, because the whole record is deleted.
+              any delegation on it, because the whole record is deleted. Some
+              Token-2022 tokens carry a permanent delegate: a mint-level
+              spending authority over every account of that token, set by the
+              token&rsquo;s own authority. It is a different kind of approval
+              from the delegate on your account, and revoking your
+              account&rsquo;s delegate does not remove it.
             </p>
           </section>
 

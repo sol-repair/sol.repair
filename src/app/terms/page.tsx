@@ -55,9 +55,11 @@ export default function TermsPage() {
             </h2>
             <p>
               Before approving any transaction, review what it does. Your
-              wallet displays the full contents of each transaction. By
-              approving a transaction, you accept responsibility for its
-              effects. The tool proposes closing token accounts that hold
+              wallet displays the transaction as it decodes it, and wallets
+              differ in what they decode, so review the SOL.REPAIR preview
+              as well. By approving a transaction, you accept
+              responsibility for its effects. The tool proposes closing
+              token accounts that hold
               zero tokens; the related actions it can propose are revoking a
               delegate, unwrapping wrapped SOL, burning a dust balance so
               its account can close, and withdrawing excess lamports from a

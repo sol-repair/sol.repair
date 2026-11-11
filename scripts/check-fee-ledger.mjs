@@ -9,10 +9,23 @@
 // this script and the product page ever disagree, that disagreement is
 // itself a finding. Run from the repo root: node scripts/check-fee-ledger.mjs
 //
-// Exit 0 = all rows conform (or no rows). Exit 1 = ALARM, a row's
-// transferred lamports differ from the 1% rule, or this script's fee
-// wallet disagrees with the app's. Exit 2 = could not complete the check
-// (network/rpc) - no verdict, never an alarm.
+// The signature walk paginates with the before cursor until exhausted
+// (the pattern scripts/update-recovered-totals.mjs installed), so
+// history growth past any single page can never silently narrow the
+// audit. A null getTransaction response is an UNVERIFIABLE row, never a
+// pass, and the exit ladder is honest:
+//
+// Exit 0 = every repair-shaped row in the full history was actually
+//          verified against the 1% rule (or the history holds none).
+// Exit 1 = ALARM: a verified row's transferred lamports differ from the
+//          1% rule, or this script's fee wallet disagrees with the app's.
+// Exit 2 = the audit could not complete: rows remain unverifiable after
+//          bounded in-place retries, or the RPC could not be reached.
+//          No verdict, never an alarm. The bell job fails on this by
+//          nature (nonzero exit), which is the intended alarm semantics.
+//
+// Failed transactions and non-repair-shaped rows are not violations and
+// not unverifiable: they are classified, counted, and printed.
 
 import { readFileSync } from "node:fs";
 
@@ -49,7 +62,18 @@ const TOKEN_PROGRAMS = new Set([
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
 ]);
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
-const PAGE = 25;
+// Signatures per listing page; the walk repeats until a short page ends
+// the history. Transaction fetches pace at one every 400ms so the public
+// endpoint is not hammered.
+const SIGNATURES_PER_PAGE = 1000;
+const TX_PACING_MS = 400;
+// Bounded in-place retries for one getTransaction fetch that throws
+// (network/RPC failure). A retry SUCCEEDS with a null response is still
+// an unverifiable row: null is a definitive answer (pruned or
+// unreadable), not a failure.
+const TX_FETCH_ATTEMPTS = 3;
+
+const sleep = (ms) => new Promise((x) => setTimeout(x, ms));
 
 async function rpc(method, params, attempt = 1) {
   const r = await fetch(ENDPOINT, {
@@ -60,7 +84,7 @@ async function rpc(method, params, attempt = 1) {
   const j = await r.json();
   if (j.error) {
     if (attempt < 3 && String(j.error.message ?? "").match(/429|too many/i)) {
-      await new Promise((x) => setTimeout(x, 8000));
+      await sleep(8000);
       return rpc(method, params, attempt + 1);
     }
     throw new Error(JSON.stringify(j.error).slice(0, 120));
@@ -94,26 +118,86 @@ function inboundLamports(ix) {
   return Number.isSafeInteger(lamports) && lamports > 0 ? lamports : 0;
 }
 
-const sigs = await rpc("getSignaturesForAddress", [FEE_WALLET, { limit: PAGE }]);
+// The full signature history of the fee wallet, oldest page last, via
+// the before cursor. A short page (fewer than the asked-for limit) ends
+// the walk; the cursor prevents page overlap, and the dedupe below is
+// defense in depth against node-side pagination inconsistency.
+const seen = new Set();
+const sigs = [];
+let pages = 0;
+let before = null;
+for (;;) {
+  const options = { limit: SIGNATURES_PER_PAGE };
+  if (before) options.before = before;
+  let page;
+  try {
+    page = await rpc("getSignaturesForAddress", [FEE_WALLET, options]);
+  } catch (e) {
+    console.log(`ALARM-INCOMPLETE: the signature listing failed: ${e.message}`);
+    console.log("exit 2: the audit could not complete.");
+    process.exit(2);
+  }
+  pages += 1;
+  for (const s of page) {
+    if (!seen.has(s.signature)) {
+      seen.add(s.signature);
+      sigs.push(s);
+    }
+  }
+  if (page.length < SIGNATURES_PER_PAGE) break;
+  before = page[page.length - 1].signature;
+}
+
 let checked = 0;
 let fees = 0;
+let failedOnChain = 0;
+let notRepairShaped = 0;
 const violations = [];
 const noVerdict = [];
 
+async function fetchTransaction(signature) {
+  for (let attempt = 1; attempt <= TX_FETCH_ATTEMPTS; attempt++) {
+    try {
+      return await rpc("getTransaction", [
+        signature,
+        { maxSupportedTransactionVersion: 1, encoding: "json" },
+      ]);
+    } catch (e) {
+      if (attempt === TX_FETCH_ATTEMPTS) {
+        console.log(
+          `WARN could not fetch ${signature.slice(0, 12)} after ${TX_FETCH_ATTEMPTS} attempts: ${e.message}`
+        );
+        return undefined;
+      }
+      await sleep(2000 * attempt);
+    }
+  }
+  return undefined;
+}
+
 for (const entry of sigs) {
-  if (entry.err) continue;
-  let tx;
-  try {
-    tx = await rpc("getTransaction", [
-      entry.signature,
-      { maxSupportedTransactionVersion: 1, encoding: "json" },
-    ]);
-  } catch (e) {
-    console.log(`WARN could not fetch ${entry.signature.slice(0, 12)}: ${e.message}`);
+  if (entry.err) {
+    failedOnChain += 1;
+    continue;
+  }
+  const tx = await fetchTransaction(entry.signature);
+  if (tx === undefined) {
     noVerdict.push(entry.signature);
     continue;
   }
-  if (!tx || tx.meta?.err != null) continue;
+  if (tx === null) {
+    // A definitive null (pruned or otherwise unreadable): counted as
+    // unverifiable, never skipped silently.
+    console.log(
+      `WARN no transaction body returned for ${entry.signature.slice(0, 12)}; row is unverifiable`
+    );
+    noVerdict.push(entry.signature);
+    continue;
+  }
+  if (tx.meta?.err != null) {
+    failedOnChain += 1;
+    continue;
+  }
   const accountKeys = tx.transaction.message.accountKeys.map((k) =>
     typeof k === "string" ? k : k.pubkey
   );
@@ -134,9 +218,15 @@ for (const entry of sigs) {
       ix.data.length === 1 &&
       ix.data[0] === 9
   );
-  if (closes.length === 0) continue; // not repair-shaped
+  if (closes.length === 0) {
+    notRepairShaped += 1;
+    continue; // not repair-shaped
+  }
   const lamports = ixs.reduce((sum, ix) => sum + inboundLamports(ix), 0);
-  if (lamports <= 0) continue;
+  if (lamports <= 0) {
+    notRepairShaped += 1;
+    continue;
+  }
   checked += 1;
   fees += lamports;
   // Rent freed: each closed account's pre-tx balance.
@@ -159,12 +249,14 @@ for (const entry of sigs) {
   if (lamports !== expected) {
     violations.push({ signature: entry.signature, lamports, rent, expected });
   }
-  await new Promise((x) => setTimeout(x, 400));
+  await sleep(TX_PACING_MS);
 }
 
 console.log(
-  `fee ledger check: ${checked} repair fee(s) in the newest ${PAGE} signature(s), ` +
-    `${fees} lamports total, ${noVerdict.length} unverifiable, ${violations.length} violation(s)`
+  `fee ledger check: ${checked} repair fee(s) verified across ${sigs.length} signature(s) in ${pages} page(s), ` +
+    `${fees} lamports total, ${noVerdict.length} unverifiable, ` +
+    `${failedOnChain} failed on chain, ${notRepairShaped} not repair-shaped, ` +
+    `${violations.length} violation(s)`
 );
 if (violations.length > 0) {
   console.log("ALARM: conformance violations (transferred != floor(1% of rent)):");
@@ -175,4 +267,14 @@ if (violations.length > 0) {
   }
   process.exit(1);
 }
+if (noVerdict.length > 0) {
+  console.log(
+    "exit 2: the audit could not complete - rows remain unverifiable:"
+  );
+  for (const s of noVerdict) {
+    console.log(`  UNVERIFIABLE ${s}`);
+  }
+  process.exit(2);
+}
+console.log("exit 0: every relevant row was verified.");
 process.exit(0);

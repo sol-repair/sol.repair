@@ -563,7 +563,7 @@ describe("terminal-outcome cards (§6.2 blocks 5-7, §10.4.5)", () => {
       status: "error",
       outcome: "on-chain-failure",
       error:
-        "The transaction was confirmed on-chain but failed. It changed nothing.",
+        "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged.",
       accountPresentAfterAction: true,
     });
     render(
@@ -577,7 +577,7 @@ describe("terminal-outcome cards (§6.2 blocks 5-7, §10.4.5)", () => {
     expect(screen.getByText("The unwrap did not go through")).toBeTruthy();
     expect(
       screen.getByText(
-        "The transaction was confirmed on-chain but failed. It changed nothing."
+        "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged."
       )
     ).toBeTruthy();
     expect(
@@ -884,5 +884,144 @@ describe("the awaiting-signature hint (unwrap card)", () => {
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
     expect(text.includes("!")).toBe(false);
+  });
+});
+
+describe("NativeAccountsSection reviewed figures and the preview race", () => {
+  function parsedReadFor(entry: SkippedAccount, over: { lamports?: number } = {}) {
+    return {
+      value: {
+        lamports: over.lamports ?? entry.lamports,
+        owner: TOKEN_PROGRAM,
+        data: {
+          parsed: {
+            info: {
+              mint: entry.mint,
+              owner: OWNER.publicKey.toBase58(),
+              tokenAmount: {
+                amount: entry.balance ?? "250000000",
+                decimals: 9,
+                uiAmount: null,
+                uiAmountString: "0",
+              },
+              state: "initialized",
+              isNative: true,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  function fundedNative(over: Partial<SkippedAccount> = {}): SkippedAccount {
+    return {
+      pubkey: Keypair.generate().publicKey.toBase58(),
+      mint: T22_NATIVE_MINT_STR,
+      reason: "holds a token balance",
+      program: "token-2022",
+      cause: "funded",
+      balance: "250000000",
+      decimals: 9,
+      lamports: 2488440,
+      nativeStatus: "native",
+      ...over,
+    };
+  }
+
+  it("passes the reviewed figures into the hook on approve", async () => {
+    const entry = fundedNative();
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(parsedReadFor(entry));
+    const unwrapFn = vi.fn();
+    hookMock.mockReturnValue({
+      ...idleState(),
+      actionInFlight: false,
+      unwrap: unwrapFn,
+      reset,
+    });
+    render(
+      <NativeAccountsSection
+        scan={scanWith([entry])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+      />
+    );
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Unwrap and close" })[0]
+    );
+    await screen.findByText(/Review before you sign/);
+    await screen.findByText(/At the fresh read just now/);
+    const buttons = screen.getAllByRole("button", {
+      name: "Unwrap and close",
+    });
+    fireEvent.click(buttons[buttons.length - 1]);
+    expect(unwrapFn).toHaveBeenCalledWith(
+      expect.objectContaining({ pubkey: entry.pubkey }),
+      {
+        amount: "250000000",
+        lamports: 2488440,
+      }
+    );
+  });
+
+  it("ignores a stale preview reply from a previously reviewed candidate", async () => {
+    const entryA = fundedNative({ balance: "250000000" });
+    const entryB = fundedNative({
+      balance: "350000000",
+      lamports: 3500000,
+    });
+    let resolveA: (v: unknown) => void = () => {};
+    let resolveB: (v: unknown) => void = () => {};
+    mocks.conn.getParsedAccountInfo
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveA = res as (v: unknown) => void;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveB = res as (v: unknown) => void;
+          })
+      );
+    render(
+      <NativeAccountsSection
+        scan={scanWith([entryA, entryB])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+      />
+    );
+    const buttons = screen.getAllByRole("button", {
+      name: "Unwrap and close",
+    });
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    expect(await screen.findByText(/Review before you sign/)).toBeTruthy();
+    // A's slow reply lands after B's selection: ignored, the card
+    // stays in its reading state.
+    await act(async () => {
+      resolveA(parsedReadFor(entryA));
+    });
+    expect(
+      screen.queryByText(
+        /At the fresh read just now: 250,000,000 base units/
+      )
+    ).toBeNull();
+    // B's own reply populates the card with B's figures.
+    await act(async () => {
+      resolveB(parsedReadFor(entryB));
+    });
+    expect(
+      await screen.findByText(
+        /At the fresh read just now: 350,000,000 base units/
+      )
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        /At the fresh read just now: 250,000,000 base units/
+      )
+    ).toBeNull();
   });
 });

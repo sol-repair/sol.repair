@@ -91,6 +91,30 @@ function gateRead() {
   return readShape();
 }
 
+/** A read like the gate's, with the balance and lamports named
+ *  explicitly, for corroboration-drift fixtures. */
+function readWith(amount: string, lamports: number) {
+  return readShape({
+    lamports,
+    data: {
+      parsed: {
+        info: {
+          mint: MINT.toBase58(),
+          owner: OWNER.publicKey.toBase58(),
+          tokenAmount: {
+            amount,
+            decimals: 6,
+            uiAmount: null,
+            uiAmountString: "0",
+          },
+          state: "initialized",
+          isNative: false,
+        },
+      },
+    },
+  });
+}
+
 /** After the send, the verification read must show the account GONE:
  *  the gate consumed the first getParsedAccountInfo call. */
 function accountGoneAfterSend() {
@@ -307,6 +331,92 @@ describe("useBurnDust lifecycle", () => {
     await waitFor(() => expect(result.current.status).toBe("done"));
     expect(result.current.balanceBeforeAction).toBe("9000");
     expect(signedTxs[0].instructions[0].data.readBigUInt64LE(1)).toBe(9000n);
+  });
+
+  it("stops before building when the gate figures differ from the reviewed figures", async () => {
+    // The review card showed 5000 base units / 2039280 lamports; the
+    // in-lock gate read shows 9000. Consent is with the reviewed
+    // figures: stop before anything is built or signed, and require a
+    // fresh review click.
+    mocks.conn.getParsedAccountInfo.mockImplementation(async () => {
+      return readShape({
+        lamports: 2039280,
+        data: {
+          parsed: {
+            info: {
+              mint: MINT.toBase58(),
+              owner: OWNER.publicKey.toBase58(),
+              tokenAmount: {
+                amount: "9000",
+                decimals: 6,
+                uiAmount: 0.009,
+                uiAmountString: "0.009",
+              },
+              state: "initialized",
+              isNative: false,
+            },
+          },
+        },
+      });
+    });
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(CANDIDATE, false, {
+        balance: "5000",
+        lamports: 2039280,
+      });
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toContain(
+      "no longer matches what you reviewed"
+    );
+    expect(result.current.error).toContain("9000");
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+    expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
+    expect(heldAction()).toBeNull();
+  });
+
+  it("stops before building when only the reviewed lamports differ from the gate read", async () => {
+    // Balance matches the reviewed figure; lamports moved. Either
+    // reviewed figure mismatching is enough to stop.
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(
+      readWith("5000", 3000000)
+    );
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(CANDIDATE, false, {
+        balance: "5000",
+        lamports: 2039280,
+      });
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toContain(
+      "no longer matches what you reviewed"
+    );
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+    expect(heldAction()).toBeNull();
+  });
+
+  it("proceeds when the gate figures equal the reviewed figures", async () => {
+    accountGoneAfterSend();
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    const signedTxs: Array<{ instructions: unknown[] }> = [];
+    mocks.wallet.signTransaction = vi.fn(async (tx: unknown) => {
+      signedTxs.push(tx as { instructions: unknown[] });
+      return fakeSigned();
+    });
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burn(CANDIDATE, false, {
+        balance: "5000",
+        lamports: 2039280,
+      });
+    });
+    await waitFor(() => expect(result.current.status).toBe("done"));
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(signedTxs[0].instructions).toHaveLength(2);
   });
 
   it("reports unverified via the unresolved terminal and holds the lock until the dismissal", async () => {
@@ -530,7 +640,62 @@ describe("the §8.5 evidence standard, the wallet switch, and remaining terminal
     expect(heldAction()).toBeNull();
   });
 
-  it("lamports drift between the corroboration reads blocks the re-sign (asymmetric rule)", async () => {
+  it("a corroboration balance that differs from the reviewed baseline stops with no second signature", async () => {
+    // The gate (the reviewed state) showed 5000 base units. The first
+    // corroboration read shows 300 base units at the same lamports:
+    // the account moved since the review, so the judged state is not
+    // the reviewed one and the flow never re-signs against it.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(readWith("300", 2039280)); // read 1: balance drifted
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    expect(result.current.error).toContain("300");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("a corroboration lamports figure that differs from the reviewed baseline stops with no second signature", async () => {
+    // Same shape as above, on the lamports half: the balance figure is
+    // unchanged but the account's lamports moved since the review.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(gateRead()) // gate
+      .mockResolvedValueOnce(readWith("5000", 999999)); // read 1: lamports drifted
+    const { result } = renderBurn();
+    await act(async () => {
+      void result.current.burn(CANDIDATE, false);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    expect(result.current.error).toContain("999999");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("a second corroboration read that leaves the reviewed baseline routes to the changed-state stop", async () => {
+    // Read 1 matches the reviewed figures; read 2 moved. The baseline
+    // comparison (every read against the reviewed state) fires before
+    // the between-reads continuity check, and the honest terminal is
+    // the changed-state stop, not the unresolved hold: the window is
+    // provably closed here, so nothing can land anymore.
     mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
     mocks.conn.getBlockHeight
       .mockResolvedValueOnce(WINDOW + 1)
@@ -538,25 +703,17 @@ describe("the §8.5 evidence standard, the wallet switch, and remaining terminal
     mocks.conn.getParsedAccountInfo
       .mockResolvedValueOnce(gateRead()) // gate
       .mockResolvedValueOnce(gateRead()) // corroboration read 1
-      .mockResolvedValue(readShape({ lamports: 999999 })); // read 2: drift
+      .mockResolvedValue(readWith("5000", 999999)); // read 2: drift
     const { result } = renderBurn();
     await act(async () => {
       void result.current.burn(CANDIDATE, false);
       await vi.advanceTimersByTimeAsync(0);
     });
-    await flushUntil(result, (s) => s === "unverified");
-    expect(result.current.outcome).toBe("unresolved-outcome");
-    expect(result.current.errorDetail).toContain(
-      "lamports changed between the two corroboration reads"
-    );
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
     expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
-    expect(result.current.actionInFlight).toBe(true);
-    expect(heldAction()).toBe("burn");
-    // Dismissal is the only release from the unresolved terminal.
-    await act(async () => {
-      result.current.reset();
-    });
     expect(heldAction()).toBeNull();
   });
 

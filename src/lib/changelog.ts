@@ -18,6 +18,53 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-11",
+    title: "A failed excess-lamport scan now says so",
+    body:
+      "When the excess-lamport check cannot be read from the network, " +
+      "the section now shows an honest failed state with a scan-again " +
+      "button, instead of disappearing as if no account held excess " +
+      "lamports.",
+  },
+  {
+    date: "2026-11-11",
+    title:
+      "A retry now only happens when the account still matches your review",
+    body:
+      "When a transaction expires without landing, the burn, unwrap, " +
+      "withdraw, and revoke flows offer one retry. That retry now " +
+      "happens only when a fresh read shows the account exactly as it " +
+      "was when you reviewed it. If the balance or lamports moved, the " +
+      "tool stops, shows the current figures, and asks for a fresh " +
+      "review instead of re-asking your wallet. The review cards for " +
+      "those same flows also stop if the account changed between your " +
+      "review and your approval click. Your wallet still approves every " +
+      "transaction, and the transactions themselves are built exactly " +
+      "as before.",
+  },
+  {
+    date: "2026-11-11",
+    title: "The pages now say what a failed transaction costs",
+    body:
+      "A failed transaction still costs the network fee, and the pages " +
+      "say so now. The explainer states the exact fee a failed " +
+      "transaction charged and shows its attempted instructions labeled " +
+      "as attempted and rolled back, instead of hiding them. The action " +
+      "cards, the repair card, and the what-did-i-just-sign guide say " +
+      "the same thing in their own words: the effects were rolled back, " +
+      "and the network fee was still charged. The fee ledger's running " +
+      "total is labeled as covering the fees shown while more pages " +
+      "remain, the weekly recovered figure is labeled as mainnet, and " +
+      "the read-only pages now refuse to fetch when a deployment is " +
+      "configured for a network they cannot serve. Token-2022 mints " +
+      "that carry a permanent delegate show it beside the mint and " +
+      "freeze authorities, with a note that it is a mint-level " +
+      "authority the account owner cannot revoke. The privacy policy " +
+      "was refreshed to describe the explainer and the read-only " +
+      "transaction listing, and the terms and the transaction-size " +
+      "guide gained two honest qualifiers.",
+  },
+  {
     date: "2026-11-10",
     title: "The interface is changing, the transaction format is not",
     body:

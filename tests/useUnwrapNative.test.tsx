@@ -505,7 +505,62 @@ describe("the §8.5 non-landing evidence standard, native substitutions", () => 
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("10.3.8 — lamports drift between the corroboration reads blocks the re-sign (asymmetric rule)", async () => {
+  it("10.3.8 — a corroboration wrapped balance that differs from the reviewed baseline stops with no second signature", async () => {
+    // The gate (the reviewed state) showed 250000000 base units. The
+    // first corroboration read shows 300000000 at the same lamports:
+    // the account moved since the review, and the flow never re-signs
+    // against a state the user did not review.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(parsedAccount()) // gate
+      .mockResolvedValueOnce(
+        parsedAccount({ amount: "300000000", lamports: 2488440 })
+      ); // read 1: balance drifted
+    const { result } = renderUnwrap();
+    await act(async () => {
+      void result.current.unwrap(CANDIDATE);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    expect(result.current.error).toContain("300000000");
+    expect(signWith).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("10.3.8 — a corroboration lamports figure that differs from the reviewed baseline stops with no second signature", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(parsedAccount()) // gate
+      .mockResolvedValueOnce(
+        parsedAccount({ amount: "250000000", lamports: 999999 })
+      ); // read 1: lamports drifted
+    const { result } = renderUnwrap();
+    await act(async () => {
+      void result.current.unwrap(CANDIDATE);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    expect(result.current.error).toContain("999999");
+    expect(signWith).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("10.3.8 — a second corroboration read that leaves the reviewed baseline routes to the changed-state stop", async () => {
+    // Read 1 matches the reviewed figures; read 2 moved. The baseline
+    // comparison (every read against the reviewed state) fires before
+    // the between-reads continuity check, and the honest terminal is
+    // the changed-state stop, not the unresolved hold: the window is
+    // provably closed here, so nothing can land anymore.
     mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
     mocks.conn.getBlockHeight
       .mockResolvedValueOnce(WINDOW + 1)
@@ -519,13 +574,59 @@ describe("the §8.5 non-landing evidence standard, native substitutions", () => 
       void result.current.unwrap(CANDIDATE);
       await vi.advanceTimersByTimeAsync(0);
     });
-    await flushUntil(result, (s) => s === "unverified");
-    expect(result.current.outcome).toBe("unresolved-outcome");
-    expect(result.current.errorDetail).toContain(
-      "lamports changed between the two corroboration reads"
-    );
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
     expect(signWith).toHaveBeenCalledTimes(1);
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops before building when the gate figures differ from the reviewed figures", async () => {
+    // The review card showed 250000000 / 2488440; the in-lock gate
+    // read shows 300000000. Consent is with the reviewed figures:
+    // stop before anything is built or signed.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(CONFIRMED);
+    mocks.conn.getBlockHeight.mockResolvedValue(WINDOW - 10);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(
+        parsedAccount({ amount: "300000000", lamports: 2488440 })
+      ) // gate
+      .mockResolvedValueOnce({ value: null }); // verify (unreachable here)
+    const { result } = renderUnwrap();
+    await act(async () => {
+      void result.current.unwrap(CANDIDATE, {
+        amount: "250000000",
+        lamports: 2488440,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toContain(
+      "no longer matches what you reviewed"
+    );
+    expect(result.current.error).toContain("300000000");
+    expect(signWith).toHaveBeenCalledTimes(0);
+    expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the gate figures equal the reviewed figures", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(CONFIRMED);
+    mocks.conn.getBlockHeight.mockResolvedValue(WINDOW - 10);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(parsedAccount()) // gate
+      .mockResolvedValueOnce({ value: null }); // verify: gone
+    const { result } = renderUnwrap();
+    await act(async () => {
+      void result.current.unwrap(CANDIDATE, {
+        amount: "250000000",
+        lamports: 2488440,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("unwrap-verified");
+    expect(signWith).toHaveBeenCalledTimes(1);
   });
 
   it("10.3.8 — a status resolving mid-corroboration wins (row 4)", async () => {
@@ -638,7 +739,7 @@ describe("terminal outcomes after a confirmed status", () => {
     });
     await flushUntil(result, (s) => s === "error");
     expect(result.current.outcome).toBe("on-chain-failure");
-    expect(result.current.error).toContain("changed nothing");
+    expect(result.current.error).toContain("Nothing changed except the network fee");
     expect(result.current.accountPresentAfterAction).toBe(true);
     expect(signWith).toHaveBeenCalledTimes(1);
   });

@@ -195,8 +195,20 @@ export interface MintAuthorities {
 }
 
 /** A mint's read facts: the self-declared Token-2022 name and symbol
- *  where the mint carries them, plus the authority states. */
-export type MintFacts = MintNameSymbol & MintAuthorities;
+ *  where the mint carries them, plus the authority states and the
+ *  mint-level permanent delegate where the mint carries one. */
+export type MintFacts = MintNameSymbol &
+  MintAuthorities &
+  PermanentDelegateFacts;
+
+/** The Token-2022 PermanentDelegate extension's fact: the mint-level
+ *  spending authority that applies to every account of the token and
+ *  that an account owner cannot revoke. Present only when the mint
+ *  carries the extension; a classic mint can never carry it. */
+export interface PermanentDelegateFacts {
+  /** Base58 address of the mint's permanent delegate. */
+  permanentDelegate?: string;
+}
 
 /** The classic SPL mint account's exact data length: the 82-byte mint
  *  layout, option u32 little-endian then the key, the freeze fields at
@@ -272,6 +284,40 @@ export function decodeMintAuthorities(
   }
 }
 
+/**
+ * Decode a raw mint account's Token-2022 PermanentDelegate extension
+ * through the SDK path (unpackMint's TLV list, the extension id derived
+ * from the installed package, the same getExtensionData discipline as
+ * the close-blocker reads). Classic mints have no TLV and decode to
+ * null. Never throws: a vanished mint, a non-mint shape, or malformed
+ * bytes all decode to null. Fail toward showing nothing.
+ */
+export function decodePermanentDelegate(
+  mint: PublicKey,
+  info: { owner: PublicKey; data: Buffer } | null
+): string | null {
+  try {
+    if (info === null || !info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+      return null;
+    }
+    const decoded = unpackMint(
+      mint,
+      info as AccountInfo<Buffer>,
+      TOKEN_2022_PROGRAM_ID
+    );
+    const extension = getExtensionData(
+      ExtensionType.PermanentDelegate,
+      decoded.tlvData
+    );
+    if (extension === null || extension.length < 32) {
+      return null;
+    }
+    return new PublicKey(extension.subarray(0, 32)).toBase58();
+  } catch {
+    return null;
+  }
+}
+
 /** The one RPC boundary this module touches, as a minimal structural
  *  type (the real Connection satisfies it; tests mock exactly this). */
 interface MintReader {
@@ -288,8 +334,9 @@ const READ_CHUNK_SIZE = 100;
  * Read the distinct mints' facts in chunked batches (100 keys per
  * call, the same cap discipline as the existing reads): the
  * self-declared Token-2022 name and symbol from the unchanged v2 name
- * decode, plus the mint and freeze authority states, all from the same
- * response bytes. Dedupe happens here, so one mint behind many
+ * decode, plus the mint and freeze authority states and the Token-2022
+ * permanent delegate, all from the same response bytes. Dedupe happens
+ * here, so one mint behind many
  * accounts is read once. A chunk call that fails is a failed read: no
  * facts for that chunk, and no throw - facts are display evidence, and
  * the scan's decisions never depend on them. A mint that decodes to
@@ -318,9 +365,11 @@ export async function readMintFacts(
         continue;
       }
       const name = decodeMintNameSymbol(keys[j], info);
+      const permanentDelegate = decodePermanentDelegate(keys[j], info);
       facts.set(keys[j].toBase58(), {
         ...authorities,
         ...(name ?? {}),
+        ...(permanentDelegate !== null ? { permanentDelegate } : {}),
       });
     }
   }

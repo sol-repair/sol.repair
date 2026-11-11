@@ -78,6 +78,7 @@ interface AuthorityGroup {
     mintAuthority?: string;
     freezeAuthorityActive?: boolean;
     freezeAuthority?: string;
+    permanentDelegate?: string;
   }>;
 }
 
@@ -105,6 +106,7 @@ function groupByCloseAuthority(
         mintAuthority?: string;
         freezeAuthorityActive?: boolean;
         freezeAuthority?: string;
+        permanentDelegate?: string;
       }
     >
   >();
@@ -122,7 +124,8 @@ function groupByCloseAuthority(
       (entry.mintName ||
         entry.mintSymbol ||
         entry.mintAuthorityActive !== undefined ||
-        entry.freezeAuthorityActive !== undefined)
+        entry.freezeAuthorityActive !== undefined ||
+        entry.permanentDelegate !== undefined)
     ) {
       const perAuthority = mintMeta.get(authority) ?? new Map();
       perAuthority.set(entry.mint, {
@@ -136,6 +139,7 @@ function groupByCloseAuthority(
           ? { freezeAuthorityActive: entry.freezeAuthorityActive }
           : {}),
         ...(entry.freezeAuthority ? { freezeAuthority: entry.freezeAuthority } : {}),
+        ...(entry.permanentDelegate ? { permanentDelegate: entry.permanentDelegate } : {}),
       });
       mintMeta.set(authority, perAuthority);
     }
@@ -210,6 +214,15 @@ function MintLines({ group }: { group: AuthorityGroup }) {
               ) : (
                 "none"
               )}
+            </>
+          )}
+          {entry.permanentDelegate && (
+            <>
+              {" · permanent delegate: "}
+              <>
+                active <AccountLink address={entry.permanentDelegate} /> (a
+                mint-level authority the account owner cannot revoke)
+              </>
             </>
           )}
         </div>

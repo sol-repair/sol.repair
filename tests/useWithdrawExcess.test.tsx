@@ -319,7 +319,65 @@ describe("the §8.5 evidence standard, sign-stage budget, and remaining terminal
     expect(heldAction()).toBeNull();
   });
 
-  it("lamports drift between the corroboration reads blocks the re-sign (asymmetric rule)", async () => {
+  it("a corroboration lamports figure that differs from the reviewed baseline stops with no second signature", async () => {
+    // The gate (the reviewed state) showed 2000000 lamports. The first
+    // corroboration read shows 1999440: the account moved since the
+    // review, and the flow never re-signs against a state the user
+    // did not review.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getMultipleAccountsInfo
+      .mockResolvedValueOnce(gateRaw()) // gate
+      .mockResolvedValueOnce([accountRaw(1999440)]); // read 1: drifted
+    const { result } = renderExcess();
+    await act(async () => {
+      void result.current.withdraw(CANDIDATE);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    expect(result.current.error).toContain("1999440");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("a corroboration excess figure that differs from the reviewed baseline stops with no second signature", async () => {
+    // Same lamports as the reviewed state, but the rent reserve moved
+    // under the account, so the excess figure no longer matches what
+    // was reviewed. The excess half is judged too.
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getMinimumBalanceForRentExemption
+      .mockResolvedValueOnce(RESERVE) // gate
+      .mockResolvedValue(1200000); // corroboration reads: reserve moved
+    mocks.conn.getMultipleAccountsInfo
+      .mockResolvedValueOnce(gateRaw()) // gate
+      .mockResolvedValueOnce([accountRaw(2000000)]); // read 1: same lamports
+    const { result } = renderExcess();
+    await act(async () => {
+      void result.current.withdraw(CANDIDATE);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(heldAction()).toBeNull();
+  });
+
+  it("a second corroboration read that leaves the reviewed baseline routes to the changed-state stop", async () => {
+    // Read 1 matches the reviewed figures; read 2 moved. The baseline
+    // comparison (every read against the reviewed state) fires before
+    // the between-reads continuity check, and the honest terminal is
+    // the changed-state stop, not the unresolved hold: the window is
+    // provably closed here, so nothing can land anymore.
     mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
     mocks.conn.getBlockHeight
       .mockResolvedValueOnce(WINDOW + 1)
@@ -333,19 +391,63 @@ describe("the §8.5 evidence standard, sign-stage budget, and remaining terminal
       void result.current.withdraw(CANDIDATE);
       await vi.advanceTimersByTimeAsync(0);
     });
-    await flushUntil(result, (s) => s === "unverified");
-    expect(result.current.outcome).toBe("unresolved-outcome");
-    expect(result.current.errorDetail).toContain(
-      "lamports changed between the two corroboration reads"
-    );
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain("changed since you reviewed it");
     expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
-    expect(result.current.actionInFlight).toBe(true);
-    expect(heldAction()).toBe("excess");
-    // Dismissal is the only release from the unresolved terminal.
+    expect(heldAction()).toBeNull();
+  });
+
+  it("stops before building when the gate figures differ from the reviewed figures", async () => {
+    // The review card showed 511560 excess / 2000000 lamports; the
+    // in-lock gate read shows a different lamports figure. Consent is
+    // with the reviewed figures: stop before anything is built or
+    // signed.
+    mocks.conn.getMultipleAccountsInfo.mockResolvedValue([
+      accountRaw(2200000),
+    ]);
+    const { result } = renderExcess();
     await act(async () => {
-      result.current.reset();
+      await result.current.withdraw(CANDIDATE, {
+        excess: 511560,
+        lamports: 2000000,
+      });
     });
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toContain(
+      "no longer matches what you reviewed"
+    );
+    expect(result.current.error).toContain("2200000");
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+    expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
+    expect(heldAction()).toBeNull();
+  });
+
+  it("proceeds when the gate figures equal the reviewed figures", async () => {
+    let calls = 0;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(async () => {
+      calls += 1;
+      return calls === 1 ? gateRaw() : [accountRaw(RESERVE)];
+    });
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    const signedTxs: Array<{ instructions: unknown[] }> = [];
+    mocks.wallet.signTransaction = vi.fn(async (tx: unknown) => {
+      signedTxs.push(tx as { instructions: unknown[] });
+      return fakeSigned();
+    });
+    const { result } = renderExcess();
+    await act(async () => {
+      void result.current.withdraw(CANDIDATE, {
+        excess: 511560,
+        lamports: 2000000,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("withdraw-verified");
+    expect(signedTxs[0].instructions).toHaveLength(1);
     expect(heldAction()).toBeNull();
   });
 

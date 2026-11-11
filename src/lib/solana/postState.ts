@@ -356,12 +356,24 @@ export function analyzeLeftBehind(input: {
   /** True when the on-chain error field is set: a failed transaction
    *  changed nothing, and saying so beats analyzing what it tried. */
   failed: boolean;
+  /** The network fee the RPC reported (meta.fee), when it returned one.
+   *  A failed transaction still costs the network fee, and the honest
+   *  headline says so: the exact figure when known, the fact alone when
+   *  not. */
+  feeLamports?: number | null;
 }): LeftBehindAnalysis {
   if (input.failed) {
+    const fee =
+      typeof input.feeLamports === "number" && input.feeLamports >= 0
+        ? formatSol(BigInt(input.feeLamports))
+        : null;
     return {
       verdict: "failed",
       headline:
-        "This transaction failed on chain. It changed nothing: no balances moved and nothing was left behind.",
+        "This transaction failed on chain. Its instruction effects were rolled back, and the network fee " +
+        (fee === null
+          ? "was still charged."
+          : `of ${fee} SOL was still charged.`),
       effects: [],
     };
   }

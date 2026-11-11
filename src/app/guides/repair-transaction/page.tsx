@@ -191,12 +191,14 @@ export default function RepairTransactionGuide() {
               Why batches stop at {MAX_CLOSE_INSTRUCTIONS_PER_TX}
             </h2>
             <p>
-              A Solana transaction is limited to 1,232 bytes. A compiled
-              CloseAccount costs about 39 bytes, so about 28 of them fit in
-              one transaction. The tool caps batches at{" "}
+              A Solana transaction in the legacy format is limited to 1,232
+              bytes. A compiled CloseAccount costs about 39 bytes, so about
+              28 of them fit in one transaction. The tool caps batches at{" "}
               {MAX_CLOSE_INSTRUCTIONS_PER_TX} and leaves the remaining room
               for the wallet, which may append instructions of its own when
-              it signs.
+              it signs. The newer v1 transaction format supports larger
+              sizes; this tool builds legacy-format transactions and does
+              not build v1.
             </p>
             <p className="mt-2">
               A wallet with more eligible accounts than the cap gets more

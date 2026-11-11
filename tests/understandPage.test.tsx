@@ -124,7 +124,9 @@ describe("understand page renders its read-only promise", () => {
       )
     ).toBeTruthy();
     expect(
-      screen.getByText(/failed on chain is reported as changed nothing/i)
+      screen.getByText(
+        /failed on chain is reported as changed nothing except the network fee/i
+      )
     ).toBeTruthy();
   });
 });
@@ -182,7 +184,32 @@ describe("understand page outcomes", () => {
     ).toHaveLength(2);
   });
 
-  it("reports a failed transaction as having changed nothing", async () => {
+  it("reports a failed transaction with its charged fee and its attempted instructions", async () => {
+    // The RPC returned a fee figure: the headline states it exactly.
+    // The attempted instructions are no longer hidden: they render in
+    // an explicitly attempted-and-rolled-back section.
+    const { raw } = buildLegacyRaw([closeIx()], {
+      err: { InstructionError: [0, { Custom: 1 }] },
+      fee: 5000,
+    });
+    mockedFetch.mockResolvedValue(raw);
+    render(<UnderstandPage />);
+    submitSignature(VALID_SIGNATURE);
+    expect(
+      await screen.findByText(
+        /This transaction failed on chain\. Its instruction effects were rolled back, and the network fee of 0\.000005 SOL was still charged\./i
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/^Attempted instructions$/)).toBeTruthy();
+    expect(screen.getByText(/none of these took effect/i)).toBeTruthy();
+    // The attempted close is shown, framed as attempted and rolled back.
+    expect(screen.getByText(/Close the token account/i)).toBeTruthy();
+    // The failed verdict has no effects, so the left-behind close
+    // sentence appears nowhere.
+    expect(screen.queryByText(/was closed\. Any permissions on it ended/i)).toBeNull();
+  });
+
+  it("reports a failed transaction's fee without a figure when the RPC returned none", async () => {
     const { raw } = buildLegacyRaw([closeIx()], {
       err: { InstructionError: [0, { Custom: 1 }] },
     });
@@ -190,9 +217,11 @@ describe("understand page outcomes", () => {
     render(<UnderstandPage />);
     submitSignature(VALID_SIGNATURE);
     expect(
-      await screen.findByText(/This transaction failed on chain/i)
+      await screen.findByText(
+        /Its instruction effects were rolled back, and the network fee was still charged\./i
+      )
     ).toBeTruthy();
-    expect(screen.queryByText(/was closed/i)).toBeNull();
+    expect(screen.queryByText(/network fee of/)).toBeNull();
   });
 
   it("warns through the panel when an approve granted a spending permission", async () => {

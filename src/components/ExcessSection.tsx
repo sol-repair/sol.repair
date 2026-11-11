@@ -97,7 +97,7 @@ function ExcessSpinner({ amber = false }: { amber?: boolean }) {
 
 type GatePreview =
   | { state: "idle" }
-  | { state: "reading" }
+  | { state: "reading"; pubkey: string }
   | { state: "pass"; excessBeforeAction: number; lamportsBeforeAction: number }
   | { state: "already-withdrawn" }
   | { state: "already-gone" }
@@ -139,29 +139,35 @@ export function ExcessSection({
 
   const keys = useMemo(() => collectToken2022Keys(scan), [scan]);
 
-  const [detected, setDetected] = useState<{
-    keys: ReturnType<typeof collectToken2022Keys>;
-    candidates: ExcessCandidate[];
-  } | null>(null);
+  // Detection carries an explicit state (B2): a failed detection must
+  // never be indistinguishable from a scan that found nothing.
+  type DetectionState =
+    | { keys: typeof keys; status: "done"; candidates: ExcessCandidate[] }
+    | { keys: typeof keys; status: "failed" };
+  const [detected, setDetected] = useState<DetectionState | null>(null);
+  // The retry affordance re-runs detection in place; a rescan already
+  // re-runs it via the keys identity.
+  const [retryNonce, setRetryNonce] = useState(0);
 
-  // Detection: chunked batched reads on mount and on every fresh scan. A
-  // failed detection renders nothing this round; a rescan retries it.
-  // Stale results are discarded during render (the page's
-  // reset-state-on-data-change pattern), so no synchronous setState
-  // lives in this effect.
+  // Detection: chunked batched reads on mount, on every fresh scan, and
+  // on an explicit retry. A failed detection renders an honest failed
+  // state with a retry affordance; it is never rendered as
+  // absence-of-section. Stale results are discarded during render (the
+  // page's reset-state-on-data-change pattern), so no synchronous
+  // setState lives in this effect.
   useEffect(() => {
     let cancelled = false;
     detectExcessCandidates(connection, keys)
       .then((found) => {
-        if (!cancelled) setDetected({ keys, candidates: found });
+        if (!cancelled) setDetected({ keys, status: "done", candidates: found });
       })
       .catch(() => {
-        if (!cancelled) setDetected({ keys, candidates: [] });
+        if (!cancelled) setDetected({ keys, status: "failed" });
       });
     return () => {
       cancelled = true;
     };
-  }, [connection, keys]);
+  }, [connection, keys, retryNonce]);
 
   // Report the in-flight signal upward (the affordance half; the
   // mutex is the guarantee).
@@ -183,12 +189,21 @@ export function ExcessSection({
   const beginReview = useCallback(
     (c: ExcessCandidate) => {
       setReviewing(c);
-      setGatePreview({ state: "reading" });
+      // The candidate's pubkey rides on the reading state so a stale
+      // reply for a PREVIOUSLY reviewed candidate cannot populate this
+      // one's card (the reply guard checks it below).
+      setGatePreview({ state: "reading", pubkey: c.pubkey });
       setSim({ state: "idle" });
       readExcessState(connection, c.pubkey)
         .then((read: ExcessRead) => {
           setGatePreview((prev) => {
-            if (prev.state !== "reading" || !publicKey) return prev;
+            if (
+              prev.state !== "reading" ||
+              prev.pubkey !== c.pubkey ||
+              !publicKey
+            ) {
+              return prev;
+            }
             const verdict = evaluateExcessGate(
               read,
               publicKey.toBase58()
@@ -211,7 +226,7 @@ export function ExcessSection({
         })
         .catch(() => {
           setGatePreview((prev) =>
-            prev.state === "reading"
+            prev.state === "reading" && prev.pubkey === c.pubkey
               ? {
                   state: "abort",
                   sentence:
@@ -278,7 +293,34 @@ export function ExcessSection({
   }, [reviewing, publicKey]);
 
   const detectionCurrent = detected !== null && detected.keys === keys;
-  const candidates = detectionCurrent ? detected.candidates : [];
+  if (detectionCurrent && detected.status === "failed") {
+    // A failed scan renders its own honest state, never
+    // absence-of-section: a user cannot tell "no excess" from "the
+    // check never ran" if the section silently disappears.
+    return (
+      <div
+        data-testid="excess-section"
+        className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
+      >
+        <p className="text-sm text-zinc-300">Excess lamports</p>
+        <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
+          The excess-lamport check could not be read from the network.
+          Nothing was checked this round, so an account holding excess
+          lamports may be missing from this list.
+        </p>
+        <button
+          onClick={() => setRetryNonce((n) => n + 1)}
+          className="mt-3 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+        >
+          Scan again
+        </button>
+      </div>
+    );
+  }
+  const candidates =
+    detectionCurrent && detected.status === "done"
+      ? detected.candidates
+      : [];
   if (candidates.length === 0) {
     return null;
   }
@@ -493,7 +535,10 @@ export function ExcessSection({
               <div className="mt-3 flex gap-3">
                 <button
                   onClick={() => {
-                    void withdraw(reviewing);
+                    void withdraw(reviewing, {
+                      excess: gatePreview.excessBeforeAction,
+                      lamports: gatePreview.lamportsBeforeAction,
+                    });
                   }}
                   className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584]"
                 >

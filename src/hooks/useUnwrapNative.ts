@@ -96,6 +96,7 @@ export type UnwrapOutcome =
   | "on-chain-failure"
   | "action-conflict"
   | "recreated-after-close"
+  | "state-changed-since-review"
   // unverified
   | "unresolved-outcome"
   | "confirmed-verification-unavailable";
@@ -141,6 +142,18 @@ const INITIAL_STATE: UnwrapState = {
 /** The read shape the corroboration judge and the verification reads
  *  narrow to. */
 type ReadAccount = Extract<NativeAccountRead, { kind: "read" }>;
+
+/** The unwrap-specific corroboration verdict: the shared base already
+ *  covers standard-met / resolved / account-gone / cannot-establish;
+ *  this one carries the evidence that the account left the reviewed
+ *  baseline (the gate's pre-send snapshot), which terminalizes
+ *  corroboration into an honest stop. */
+type UnwrapCorroboration =
+  | {
+      type: "state-changed-since-review";
+      observedAmount: string;
+      observedLamports: number;
+    };
 
 /** An error whose message is ALREADY user-facing copy (house pattern).
  *  Carries the terminal outcome it maps to, so the catch cannot
@@ -213,7 +226,10 @@ export function useUnwrapNative() {
   }, []);
 
   const unwrap = useCallback(
-    async (candidate: UnwrappableNativeAccount) => {
+    async (
+      candidate: UnwrappableNativeAccount,
+      reviewed?: { amount?: string; lamports?: number }
+    ) => {
       if (unwrapInFlight.current) return;
       unwrapInFlight.current = true;
 
@@ -307,12 +323,38 @@ export function useUnwrapNative() {
           });
           return;
         }
-        // Gate passed. Amount/lamports drift vs the scan is NOT an
-        // abort (review-confirmed Case B policy): both figures travel
-        // to the card and the user consents with current numbers. A
-        // live delegate is NOT an abort either (§7.6): the pair
-        // builder handles it and the card names it — the live read
-        // replaces any stale scan evidence.
+        // Gate passed. Consent is with the REVIEWED figures: the
+        // review card's figures travel in as `reviewed`, and when the
+        // in-lock gate read differs from them, the flow stops before
+        // anything is built or signed and requires a fresh review
+        // click (the revised Case B policy: consent with reviewed
+        // figures, not current figures). Callers that omit the
+        // reviewed figures keep the drift-consent behavior.
+        if (
+          reviewed &&
+          ((reviewed.amount !== undefined &&
+            verdict.amountBeforeAction !== reviewed.amount) ||
+            (reviewed.lamports !== undefined &&
+              verdict.lamportsBeforeAction !== reviewed.lamports))
+        ) {
+          setRunState({
+            status: "error",
+            outcome: "gate-state-changed",
+            error:
+              "The account no longer matches what you reviewed. The fresh read shows a wrapped balance of " +
+              `${verdict.amountBeforeAction} base units and ` +
+              `${verdict.lamportsBeforeAction} lamports. Nothing was signed. ` +
+              "Start a fresh review to approve the current figures.",
+          });
+          return;
+        }
+        // Reviewed figures match (or none were passed). Amount and
+        // lamports drift vs the scan is NOT an abort
+        // (review-confirmed Case B policy): both figures travel to the
+        // card and the user consents with current numbers. A live
+        // delegate is NOT an abort either (§7.6): the pair builder
+        // handles it and the card names it — the live read replaces
+        // any stale scan evidence.
         const buildCandidate: UnwrappableNativeAccount = { ...candidate };
         if (verdict.delegate) {
           buildCandidate.delegate = verdict.delegate;
@@ -330,22 +372,26 @@ export function useUnwrapNative() {
         let refusalRetryUsed = false;
         let lastResolutionNote: string | null = null;
 
-        // The §8.5 corroboration policy for one read: the native
-        // identity is judged on every read, and the lamports figure on
-        // the second (prior !== null). The lamports-identical
-        // requirement is deliberate conservatism for the re-sign
-        // standard (spec §8.5, Revision 2 F3): in the ordinary case a
-        // landed close DELETES the account, so account-present by
-        // itself already establishes non-landing. It guards the exotic
-        // edge where the account at this address was closed and then
-        // RECREATED before the corroboration reads — possible at a
-        // deterministic ATA address without the owner's key — and
-        // indistinguishable from a never-landed original precisely
-        // when the original held approximately a fresh rent reserve.
-        // Any lamports drift between the two reads is evidence the
-        // account's continuity is not established, and routes to S6:
-        // the flow never re-signs against an account it cannot vouch
-        // for.
+        // The §8.5 corroboration policy for one read: EVERY read is
+        // judged against the gate's pre-send snapshot (the reviewed
+        // baseline) — the wrapped balance AND lamports — so a figure
+        // that moved since the review blocks the re-sign even when the
+        // reads agree with each other. The native identity is judged
+        // on every read, and the lamports figure across the two reads
+        // (prior !== null) stays as the second layer. The
+        // lamports-identical requirement is deliberate conservatism
+        // for the re-sign standard (spec §8.5, Revision 2 F3): in the
+        // ordinary case a landed close DELETES the account, so
+        // account-present by itself already establishes non-landing.
+        // It guards the exotic edge where the account at this address
+        // was closed and then RECREATED before the corroboration reads
+        // — possible at a deterministic ATA address without the
+        // owner's key — and indistinguishable from a never-landed
+        // original precisely when the original held approximately a
+        // fresh rent reserve. Any lamports drift between the two reads
+        // is evidence the account's continuity is not established, and
+        // routes to S6: the flow never re-signs against an account it
+        // cannot vouch for.
         const readOnce = async (): Promise<CorroborationRead<ReadAccount>> => {
           try {
             const read = await readNativeAccountState(
@@ -362,7 +408,19 @@ export function useUnwrapNative() {
         const judge = (
           read: ReadAccount,
           prior: ReadAccount | null
-        ): CorroborationVerdict | null => {
+        ): CorroborationVerdict<UnwrapCorroboration> | null => {
+          // The reviewed-baseline half of the standard for ONE read:
+          // the account must still hold the figures the user reviewed.
+          if (
+            read.amount !== verdict.amountBeforeAction ||
+            read.lamports !== verdict.lamportsBeforeAction
+          ) {
+            return {
+              type: "state-changed-since-review",
+              observedAmount: read.amount,
+              observedLamports: read.lamports,
+            };
+          }
           // The account-identity half of the standard for ONE read:
           // present, token-owned (the read's own discipline),
           // confirmed native, and not a frozen (impossible)
@@ -579,7 +637,7 @@ export function useUnwrapNative() {
               outcome: "on-chain-failure",
               accountPresentAfterAction: presentAfter,
               error:
-                "The transaction was confirmed on-chain but failed. It changed nothing.",
+                "The transaction was confirmed on-chain but failed. Nothing changed except the network fee, which was still charged.",
             });
             return;
           }
@@ -594,6 +652,24 @@ export function useUnwrapNative() {
               accountPresentAfterAction: false,
               error:
                 "The account is gone. Whether this app's transaction closed it could not be established.",
+            });
+            return;
+          }
+
+          if (resolution.type === "domain") {
+            // The corroboration reads left the reviewed baseline: the
+            // window is provably closed, so nothing can land, and no
+            // re-sign is attempted. The card reports the state as it
+            // reads now and requires a fresh review.
+            const changed = resolution.verdict;
+            setRunState({
+              status: "error",
+              outcome: "state-changed-since-review",
+              error:
+                "The transaction expired without landing, and the account changed since you reviewed it. " +
+                `When we checked, the wrapped balance was ${changed.observedAmount} base units and the account held ` +
+                `${changed.observedLamports} lamports. Nothing more will be sent automatically. ` +
+                "Start a fresh review to see the current state.",
             });
             return;
           }
