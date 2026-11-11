@@ -146,7 +146,7 @@ function BurnSpinner({ amber = false }: { amber?: boolean }) {
 
 type GatePreview =
   | { state: "idle" }
-  | { state: "reading" }
+  | { state: "reading"; pubkey: string }
   | {
       state: "pass";
       balanceBeforeAction: string;
@@ -253,7 +253,10 @@ export function BurnDustSection({
   const beginReview = useCallback(
     (c: BurnableDustAccount) => {
       setReviewing(c);
-      setGatePreview({ state: "reading" });
+      // The candidate's pubkey rides on the reading state so a stale
+      // reply for a PREVIOUSLY reviewed candidate cannot populate this
+      // one's card (the reply guard checks it below).
+      setGatePreview({ state: "reading", pubkey: c.pubkey });
       setSim(NO_SIM);
       // Presentation-only pre-card read; the hook re-runs the gate as
       // its authoritative in-lock first step. Token-2022 candidates
@@ -266,7 +269,13 @@ export function BurnDustSection({
               ? await readMintBurnBlockers(connection, c.mint)
               : undefined;
           setGatePreview((prev) => {
-            if (prev.state !== "reading" || !publicKey) return prev;
+            if (
+              prev.state !== "reading" ||
+              prev.pubkey !== c.pubkey ||
+              !publicKey
+            ) {
+              return prev;
+            }
             const verdict = evaluateBurnGate(
               read,
               c.mint,
@@ -295,7 +304,7 @@ export function BurnDustSection({
         })
         .catch(() => {
           setGatePreview((prev) =>
-            prev.state === "reading"
+            prev.state === "reading" && prev.pubkey === c.pubkey
               ? {
                   state: "abort",
                   sentence:
@@ -712,7 +721,10 @@ export function BurnDustSection({
               <div className="mt-3 flex gap-3">
                 <button
                   onClick={() => {
-                    void burn(reviewing, feeReady);
+                    void burn(reviewing, feeReady, {
+                      balance: gatePreview.balanceBeforeAction,
+                      lamports: gatePreview.lamportsBeforeAction,
+                    });
                   }}
                   className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584]"
                 >

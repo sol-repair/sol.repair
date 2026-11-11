@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
 import {
@@ -595,7 +595,7 @@ describe("affordances (§8.12, §10.4.9)", () => {
     ).toBeTruthy();
   });
 
-  it("invokes revoke with the reviewed delegation on approval", async () => {
+  it("invokes revoke with the reviewed delegation and the reviewed balance on approval", async () => {
     await openReviewCard();
     // The card's approval button is the LAST "Revoke delegate" button
     // (the first is the row's entry button).
@@ -603,7 +603,110 @@ describe("affordances (§8.12, §10.4.9)", () => {
     fireEvent.click(buttons[buttons.length - 1]);
     expect(revoke).toHaveBeenCalledTimes(1);
     expect(revoke).toHaveBeenCalledWith(
-      expect.objectContaining({ pubkey: eligibleEntry.pubkey })
+      expect.objectContaining({ pubkey: eligibleEntry.pubkey }),
+      { balance: "1000000" }
     );
+  });
+});
+
+describe("DelegationSection preview race", () => {
+  function parsedReadFor(entry: SkippedAccount) {
+    return {
+      value: {
+        lamports: entry.lamports,
+        owner: TOKEN_PROGRAM,
+        data: {
+          parsed: {
+            info: {
+              mint: entry.mint,
+              owner: OWNER.publicKey.toBase58(),
+              tokenAmount: {
+                amount: entry.balance ?? "1000000",
+                decimals: 6,
+                uiAmount: null,
+                uiAmountString: "0",
+              },
+              delegate: DELEGATE,
+              state: "initialized",
+              isNative: false,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  function delegatedEntry(over: Partial<SkippedAccount> = {}): SkippedAccount {
+    return {
+      pubkey: Keypair.generate().publicKey.toBase58(),
+      mint: Keypair.generate().publicKey.toBase58(),
+      reason: "holds a token balance",
+      program: "spl",
+      cause: "funded",
+      balance: "1000000",
+      decimals: 6,
+      lamports: 2039280,
+      delegated: true,
+      delegate: DELEGATE,
+      nativeStatus: "non-native",
+      ...over,
+    };
+  }
+
+  it("ignores a stale preview reply from a previously reviewed candidate", async () => {
+    const entryA = delegatedEntry();
+    const entryB = delegatedEntry({ balance: "2000000" });
+    let resolveA: (v: unknown) => void = () => {};
+    let resolveB: (v: unknown) => void = () => {};
+    mocks.conn.getParsedAccountInfo
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveA = res as (v: unknown) => void;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveB = res as (v: unknown) => void;
+          })
+      );
+    render(
+      <DelegationSection
+        scan={scanWith([entryA, entryB])}
+        rescan={() => {}}
+        repairInFlight={false}
+      />
+    );
+    const buttons = screen.getAllByRole("button", {
+      name: "Revoke delegate",
+    });
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    expect(await screen.findByText(/Review before you sign/)).toBeTruthy();
+    // A's slow reply lands after B's selection: ignored, the card
+    // stays in its reading state.
+    await act(async () => {
+      resolveA(parsedReadFor(entryA));
+    });
+    expect(
+      screen.queryByText(
+        /Balance at the fresh read just now: 1,000,000 base units/
+      )
+    ).toBeNull();
+    // B's own reply populates the card with B's figures.
+    await act(async () => {
+      resolveB(parsedReadFor(entryB));
+    });
+    expect(
+      await screen.findByText(
+        /Balance at the fresh read just now: 2,000,000 base units/
+      )
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        /Balance at the fresh read just now: 1,000,000 base units/
+      )
+    ).toBeNull();
   });
 });

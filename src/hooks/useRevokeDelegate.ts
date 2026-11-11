@@ -204,7 +204,10 @@ export function useRevokeDelegate() {
   }, []);
 
   const revoke = useCallback(
-    async (delegation: RevocableDelegation) => {
+    async (
+      delegation: RevocableDelegation,
+      reviewed?: { balance?: string }
+    ) => {
       if (revokeInFlight.current) return;
       revokeInFlight.current = true;
 
@@ -299,9 +302,32 @@ export function useRevokeDelegate() {
           });
           return;
         }
-        // Gate passed. A balance drift vs the scan is NOT an abort
-        // (review-confirmed Case B): it travels to the card and the
-        // user consents with current numbers.
+        // Gate passed. Consent is with the REVIEWED figures: the
+        // review card's balance travels in as `reviewed`, and when the
+        // in-lock gate read differs from it, the flow stops before
+        // anything is built or signed and requires a fresh review
+        // click (the revised Case B policy: consent with reviewed
+        // figures, not current figures). Callers that omit the
+        // reviewed balance keep the drift-consent behavior.
+        if (
+          reviewed &&
+          reviewed.balance !== undefined &&
+          verdict.balanceBeforeAction !== reviewed.balance
+        ) {
+          setRunState({
+            status: "error",
+            outcome: "gate-state-changed",
+            error:
+              "The account no longer matches what you reviewed. The fresh read shows a balance of " +
+              `${verdict.balanceBeforeAction} base units. Nothing was signed. ` +
+              "Start a fresh review to approve the current figures.",
+          });
+          return;
+        }
+        // Reviewed figures match (or none were passed). A balance
+        // drift vs the scan is NOT an abort (review-confirmed Case B):
+        // it travels to the card and the user consents with current
+        // numbers.
         const balanceBeforeAction = verdict.balanceBeforeAction;
         setRunState({ balanceBeforeAction });
 

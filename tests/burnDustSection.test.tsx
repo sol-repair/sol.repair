@@ -25,7 +25,10 @@ import {
   AWAITING_SIGNATURE_HINT,
 } from "../src/components/AwaitingSignatureHint";
 import type { BurnState } from "../src/hooks/useBurnDust";
-import type { ScanResult, SkippedAccount } from "../src/lib/solana/tokenAccounts";
+import type {
+  ScanResult,
+  SkippedAccount,
+} from "../src/lib/solana/tokenAccounts";
 
 const mocks = vi.hoisted(() => ({
   holder: { publicKey: null as PublicKey | null },
@@ -536,5 +539,118 @@ describe("BurnDustSection authority facts (the approved redesign)", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("Mint authority: revoked");
     expect(text).toContain("Freeze authority: none");
+  });
+});
+
+describe("BurnDustSection reviewed figures and the preview race", () => {
+  function parsedReadFor(entry: SkippedAccount) {
+    return {
+      value: {
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        lamports: entry.lamports,
+        data: {
+          parsed: {
+            info: {
+              mint: entry.mint,
+              owner: OWNER.publicKey.toBase58(),
+              tokenAmount: {
+                amount: entry.balance ?? "5000",
+                decimals: entry.decimals ?? 6,
+                uiAmount: null,
+                uiAmountString: "0",
+              },
+              state: "initialized",
+              isNative: false,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  function renderSection(entries: SkippedAccount[], feeReady = false) {
+    return render(
+      <BurnDustSection
+        scan={scanWith(entries)}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={feeReady}
+      />
+    );
+  }
+
+  it("passes the reviewed figures into the hook on approve", async () => {
+    const entry = dustEntry();
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(parsedReadFor(entry));
+    const burnFn = vi.fn();
+    hookMock.mockReturnValue({
+      ...idleState(),
+      actionInFlight: false,
+      burn: burnFn,
+      reset,
+    });
+    renderSection([entry]);
+    fireEvent.click(screen.getByRole("button", { name: "Burn and close" }));
+    await screen.findByText(/Review before you sign/);
+    await screen.findByText(/At the fresh read just now/);
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Burn" }));
+    expect(burnFn).toHaveBeenCalledWith(
+      expect.objectContaining({ pubkey: entry.pubkey }),
+      false,
+      {
+        balance: "5000",
+        lamports: 2039280,
+      }
+    );
+  });
+
+  it("ignores a stale preview reply from a previously reviewed candidate", async () => {
+    const entryA = dustEntry({ balance: "5000" });
+    const entryB = dustEntry({ balance: "7000", lamports: 3049800 });
+    let resolveA: (v: unknown) => void = () => {};
+    let resolveB: (v: unknown) => void = () => {};
+    mocks.conn.getParsedAccountInfo
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveA = res as (v: unknown) => void;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveB = res as (v: unknown) => void;
+          })
+      );
+    renderSection([entryA, entryB]);
+    const buttons = screen.getAllByRole("button", {
+      name: "Burn and close",
+    });
+    // Open the review for A, then immediately for B: B's read is now
+    // the one the card is waiting for.
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    expect(await screen.findByText(/Review before you sign/)).toBeTruthy();
+    // A's slow reply lands after B's selection. It must be ignored:
+    // the card stays in its reading state instead of showing A's
+    // figures on B's review.
+    await act(async () => {
+      resolveA(parsedReadFor(entryA));
+    });
+    expect(
+      screen.queryByText(/At the fresh read just now: 5,000 base units/)
+    ).toBeNull();
+    // B's own reply populates the card with B's figures.
+    await act(async () => {
+      resolveB(parsedReadFor(entryB));
+    });
+    expect(
+      await screen.findByText(/At the fresh read just now: 7,000 base units/)
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/At the fresh read just now: 5,000 base units/)
+    ).toBeNull();
   });
 });

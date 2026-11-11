@@ -66,6 +66,7 @@ export type ExcessOutcome =
   | "expired"
   | "on-chain-failure"
   | "action-conflict"
+  | "state-changed-since-review"
   // unverified
   | "unresolved-outcome"
   | "confirmed-verification-unavailable";
@@ -102,6 +103,18 @@ const INITIAL_STATE: ExcessState = {
 
 /** The read shape the corroboration judge narrows to. */
 type ExcessReadAccount = Extract<ExcessRead, { kind: "read" }>;
+
+/** The withdrawal-specific corroboration verdict: the shared base
+ *  already covers standard-met / resolved / account-gone /
+ *  cannot-establish; this one carries the evidence that the account
+ *  left the reviewed baseline (the gate's pre-send snapshot), which
+ *  terminalizes corroboration into an honest stop. */
+type ExcessCorroboration =
+  | {
+      type: "state-changed-since-review";
+      observedExcess: number;
+      observedLamports: number;
+    };
 
 class FriendlyError extends Error {
   outcome: ExcessOutcome;
@@ -163,7 +176,10 @@ export function useWithdrawExcess() {
   }, []);
 
   const withdraw = useCallback(
-    async (candidate: ExcessCandidate) => {
+    async (
+      candidate: ExcessCandidate,
+      reviewed?: { excess?: number; lamports?: number }
+    ) => {
       if (withdrawInFlight.current) return;
       withdrawInFlight.current = true;
 
@@ -256,9 +272,35 @@ export function useWithdrawExcess() {
           });
           return;
         }
-        // Excess drift vs the detection figure is NOT an abort (Case B):
-        // the instruction drains whatever excess exists at land time,
-        // and the card shows the current figure.
+        // Gate passed. Consent is with the REVIEWED figures: the
+        // review card's figures travel in as `reviewed`, and when the
+        // in-lock gate read differs from them, the flow stops before
+        // anything is built or signed and requires a fresh review
+        // click (the revised Case B policy: consent with reviewed
+        // figures, not current figures). Callers that omit the
+        // reviewed figures keep the drift-consent behavior.
+        if (
+          reviewed &&
+          ((reviewed.excess !== undefined &&
+            verdict.excessBeforeAction !== reviewed.excess) ||
+            (reviewed.lamports !== undefined &&
+              verdict.lamportsBeforeAction !== reviewed.lamports))
+        ) {
+          setRunState({
+            status: "error",
+            outcome: "gate-state-changed",
+            error:
+              "The account no longer matches what you reviewed. The fresh read shows " +
+              `${verdict.lamportsBeforeAction} lamports with ` +
+              `${verdict.excessBeforeAction} excess lamports. Nothing was signed. ` +
+              "Start a fresh review to approve the current figures.",
+          });
+          return;
+        }
+        // Reviewed figures match (or none were passed). Excess drift
+        // vs the detection figure is NOT an abort (Case B): the
+        // instruction drains whatever excess exists at land time, and
+        // the card shows the current figure.
         setRunState({
           excessBeforeAction: verdict.excessBeforeAction,
           lamportsBeforeAction: verdict.lamportsBeforeAction,
@@ -271,9 +313,12 @@ export function useWithdrawExcess() {
 
         // The §8.5 corroboration policy for one read, with the
         // withdrawal substitution: the account is EXPECTED to remain,
-        // so presence alone is not evidence of non-landing — the
-        // lamports AND excess figures must be identical across the two
-        // spaced reads (a landed withdrawal changes them).
+        // so presence alone is not evidence of non-landing. EVERY read
+        // is judged against the gate's pre-send snapshot (the reviewed
+        // baseline) — lamports AND excess — so a figure that moved
+        // since the review blocks the re-sign even when the reads
+        // agree with each other. The between-reads identity of both
+        // figures stays as the second layer.
         const readOnce = async (): Promise<
           CorroborationRead<ExcessReadAccount>
         > => {
@@ -289,7 +334,17 @@ export function useWithdrawExcess() {
         const judge = (
           read: ExcessReadAccount,
           prior: ExcessReadAccount | null
-        ): CorroborationVerdict | null => {
+        ): CorroborationVerdict<ExcessCorroboration> | null => {
+          if (
+            read.lamports !== verdict.lamportsBeforeAction ||
+            read.excess !== verdict.excessBeforeAction
+          ) {
+            return {
+              type: "state-changed-since-review",
+              observedExcess: read.excess,
+              observedLamports: read.lamports,
+            };
+          }
           if (
             prior &&
             (prior.lamports !== read.lamports || prior.excess !== read.excess)
@@ -516,6 +571,24 @@ export function useWithdrawExcess() {
               lamportsAfterAction: null,
               error:
                 "The account is gone. Whether this app's transaction was involved could not be established.",
+            });
+            return;
+          }
+
+          if (resolution.type === "domain") {
+            // The corroboration reads left the reviewed baseline: the
+            // window is provably closed, so nothing can land, and no
+            // re-sign is attempted. The card reports the state as it
+            // reads now and requires a fresh review.
+            const changed = resolution.verdict;
+            setRunState({
+              status: "error",
+              outcome: "state-changed-since-review",
+              error:
+                "The transaction expired without landing, and the account changed since you reviewed it. " +
+                `When we checked, the account held ${changed.observedLamports} lamports with ` +
+                `${changed.observedExcess} excess lamports. Nothing more will be sent automatically. ` +
+                "Start a fresh review to see the current state.",
             });
             return;
           }

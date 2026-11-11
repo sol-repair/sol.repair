@@ -389,6 +389,44 @@ describe("the refresh gate (§8.3)", () => {
     );
     expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
   });
+
+  it("stops before building when the gate balance differs from the reviewed balance", async () => {
+    // The review card showed 1000000 base units; the in-lock gate read
+    // shows 2000000. Consent is with the reviewed figures: stop
+    // before anything is built or signed.
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(
+      parsedAccount({ amount: "2000000" })
+    );
+    const { result } = renderRevoke();
+    await act(async () => {
+      void result.current.revoke(DELEGATION, { balance: "1000000" });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toContain(
+      "no longer matches what you reviewed"
+    );
+    expect(result.current.error).toContain("2000000");
+    expect(signWith).not.toHaveBeenCalled();
+    expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the gate balance equals the reviewed balance", async () => {
+    mocks.conn.getSignatureStatuses.mockResolvedValue(CONFIRMED);
+    mocks.conn.getBlockHeight.mockResolvedValue(WINDOW - 10);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(parsedAccount()) // gate
+      .mockResolvedValueOnce(parsedAccount({ delegate: null })); // verify
+    const { result } = renderRevoke();
+    await act(async () => {
+      void result.current.revoke(DELEGATION, { balance: "1000000" });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "done");
+    expect(result.current.outcome).toBe("revoked-verified");
+    expect(signWith).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("signing stages (§8.5 message shapes, the one allowed place)", () => {
@@ -506,6 +544,32 @@ describe("the §8.5 non-landing evidence standard", () => {
     await flushUntil(result, (s) => s === "done");
     expect(result.current.outcome).toBe("delegate-absent-unattributed");
     expect(result.current.error).toMatch(/could not be established/);
+    expect(signWith).toHaveBeenCalledTimes(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks the re-sign when a corroboration read shows a different delegate than the reviewed one", async () => {
+    // The judge compares every corroboration read to the REVIEWED
+    // delegate (the asymmetric rule): a delegate that changed between
+    // the review and the corroboration reads is one inconsistent
+    // observation, and it blocks the re-sign.
+    const newDelegate = Keypair.generate().publicKey.toBase58();
+    mocks.conn.getSignatureStatuses.mockResolvedValue(UNOBSERVED);
+    mocks.conn.getBlockHeight
+      .mockResolvedValueOnce(WINDOW + 1)
+      .mockResolvedValueOnce(WINDOW + 2);
+    mocks.conn.getParsedAccountInfo
+      .mockResolvedValueOnce(parsedAccount()) // gate
+      .mockResolvedValueOnce(parsedAccount({ delegate: newDelegate })); // read 1
+    const { result } = renderRevoke();
+    await act(async () => {
+      void result.current.revoke(DELEGATION);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await flushUntil(result, (s) => s === "error");
+    expect(result.current.outcome).toBe("gate-state-changed");
+    expect(result.current.error).toContain(newDelegate);
+    expect(result.current.error).toContain("out of date");
     expect(signWith).toHaveBeenCalledTimes(1);
     expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
   });
