@@ -11,6 +11,13 @@ import {
 } from "@/lib/solana/transactions";
 import { FEE_PERCENT, feeAmountLamports } from "@/lib/solana/fees";
 import { WITHDRAW_EXCESS_LAMPORTS_TAG } from "@/lib/solana/excessLamports";
+import {
+  BURN_NFT_TAG,
+  EDITION_KEY_V1,
+  MASTER_EDITION_KEY_V1,
+  MASTER_EDITION_KEY_V2,
+  METAPLEX_TOKEN_METADATA_PROGRAM_ID,
+} from "@/lib/solana/nftBurn";
 import { TOKEN_ACCOUNT_RENT_LAMPORTS_CURRENT } from "@/lib/rent";
 import type { ClosableAccount } from "@/lib/solana/tokenAccounts";
 
@@ -26,7 +33,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/repair-transaction",
   datePublished: "2026-10-28",
-  dateModified: "2026-10-28",
+  dateModified: "2026-11-13",
 });
 
 // The numbers below are not typed by hand. They are computed from the
@@ -75,6 +82,7 @@ export default function RepairTransactionGuide() {
             { href: "#clearing-a-delegate-without-closing", label: "Clearing a delegate without closing" },
             { href: "#wrapped-sol-the-unwrap", label: "Wrapped SOL: the unwrap" },
             { href: "#dust-tokens-burn-then-close", label: "Dust tokens: burn, then close" },
+            { href: "#dead-nfts-the-metaplex-burn", label: "Dead NFTs: the Metaplex burn" },
             { href: "#token-2022-extensions-that-block-a-close", label: "Token-2022 extensions that block a close" },
             { href: "#excess-lamports-on-token-2022", label: "Excess lamports on Token-2022" },
             { href: "#check-it-yourself", label: "Check it yourself" },
@@ -323,6 +331,60 @@ export default function RepairTransactionGuide() {
               This action does carry the service fee: {FEE_PERCENT} percent
               of the lamports the account holds, transferred after the
               close, same rule as the repair.
+            </p>
+          </section>
+
+          <section>
+            <h2 id="dead-nfts-the-metaplex-burn" className="mb-2 text-lg font-semibold text-zinc-50">
+              Dead NFTs: the Metaplex burn
+            </h2>
+            <p>
+              A dead NFT is a one-of-one token whose mint, metadata, and
+              master edition accounts are all that is left of it. Burning
+              it through the dust flow above closes only the token account
+              and strands the metadata and edition deposits forever: no
+              instruction can reach them once the token is gone. So for
+              exactly this class the tool builds a different wire: one
+              hand-built Metaplex BurnNft instruction, instruction{" "}
+              {BURN_NFT_TAG} on the Metaplex Token Metadata program (
+              {METAPLEX_TOKEN_METADATA_PROGRAM_ID.toBase58()}). The
+              instruction data is the single tag byte, {BURN_NFT_TAG}.
+            </p>
+            <p className="mt-2">
+              The keys, in order: the metadata PDA, writable; your wallet,
+              writable, the only signer; the mint, writable; the token
+              account, writable; the master edition PDA, writable; the SPL
+              Token Program, readonly; and, when the metadata names a
+              verified collection, the collection&rsquo;s metadata PDA,
+              writable, derived from the collection key the metadata
+              account records. An empty or burned collection account at
+              that correct PDA is accepted by the program, so the
+              collection key is always derived, never guessed.
+            </p>
+            <p className="mt-2">
+              On chain the instruction burns the token through the token
+              program, then closes the token account, the metadata
+              account, and the master edition account, with every deposit
+              going to your wallet, and decrements a sized verified
+              collection. The tool pre-checks every assertion the program
+              enforces before anything is signed: the token account
+              belongs to the wallet, is not frozen, and holds exactly one
+              unit; the mint matches; the account at the edition address
+              is a master edition; and its supply is zero, because a
+              master edition with prints outstanding makes the network
+              refuse the burn.
+            </p>
+            <p className="mt-2">
+              This action carries the service fee: {FEE_PERCENT} percent
+              of the rent all three closes return, floored to whole
+              lamports, transferred after the burn, same rule as the
+              repair. The wire covers classic-program NFTs whose edition
+              address holds a master edition, key byte{" "}
+              {MASTER_EDITION_KEY_V2}. A print edition, key byte{" "}
+              {EDITION_KEY_V1}, a MasterEditionV1, key byte{" "}
+              {MASTER_EDITION_KEY_V1}, and a Token-2022 NFT are disclosed
+              in the scan with an honest note and no offer: the burn
+              instruction above does not cover them.
             </p>
           </section>
 

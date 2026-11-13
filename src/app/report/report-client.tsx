@@ -72,6 +72,14 @@ export default function ReportPage() {
                 For each token you hold, its public mint account: who can
                 mint more, and who can freeze.
               </li>
+              <li>
+                Which accounts hold exactly one unit of a zero-decimal
+                token. The home page reads the public metadata and master
+                edition accounts behind those mints, so it can offer the
+                NFT burn that closes the token, metadata, and edition
+                accounts together. This page itself never reads those
+                accounts.
+              </li>
             </ul>
             <p className="mt-3 text-xs leading-relaxed text-zinc-400">
               It does not read your SOL balance, stake accounts, or

@@ -18,6 +18,36 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-13",
+    title:
+      "Dead NFTs can now burn and close all three of their accounts at once",
+    body:
+      "The scan now lists dead NFTs and offers a burn that closes their " +
+      "token account, their metadata account, and their master edition " +
+      "account in one transaction. For each offered NFT the page sends " +
+      "exactly one instruction, Metaplex BurnNft: it burns the single " +
+      "token permanently, then closes all three accounts, so the " +
+      "metadata and edition rent comes back together with the token " +
+      "account deposit. This is the only way that rent ever comes back: " +
+      "burning an NFT through the plain dust burn instead strands the " +
+      "metadata and edition deposits forever, unreachable by anyone, " +
+      "which is why the dust flow now hands these accounts to the NFT " +
+      "flow. The fee is the same 1% rule as every other close: 1 " +
+      "percent of the SOL all three closes return, floored to whole " +
+      "lamports, one plain transfer in the same transaction, visible " +
+      "before approval, charged only if the transaction succeeds. The " +
+      "fee ledger and the weekly recovered counter now recognize this " +
+      "transaction shape, so an NFT fee appears in the same public " +
+      "ledger as every other fee. This version burns classic-program " +
+      "NFTs whose master edition has no prints outstanding. NFTs with " +
+      "print editions outstanding, Token-2022 NFTs, print editions, " +
+      "and NFTs with no edition account at all are listed with an " +
+      "honest note and no offer. Nothing is selected by default, each " +
+      "NFT is one wallet approval, and the cards show name, " +
+      "collection, and mint as text read from the metadata accounts " +
+      "through the same RPC provider; no images are fetched.",
+  },
+  {
     date: "2026-11-11",
     title: "A failed excess-lamport scan now says so",
     body:

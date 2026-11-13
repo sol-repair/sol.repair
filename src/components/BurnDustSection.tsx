@@ -166,8 +166,18 @@ export function BurnDustSection({
   revokeInFlight,
   unwrapInFlight,
   excessInFlight,
+  nftInFlight,
   feeReady,
   onActionInFlightChange,
+  /** Token-account pubkeys the NFT flow now owns (routed): they
+   *  never render as dust cards - the NFT card replaces the plain
+   *  [Burn, CloseAccount] pair for them, per the routing rule. */
+  excludePubkeys,
+  /** Token-account pubkeys whose NFT classification has not landed
+   *  yet (pending): held back from the dust flow until the NFT
+   *  section classifies them, so a decimals-0 account can never burn
+   *  the plain way before its classification is known. */
+  pendingPubkeys,
 }: {
   scan: ScanResult;
   rescan: () => void;
@@ -176,8 +186,14 @@ export function BurnDustSection({
   unwrapInFlight: boolean;
   /** The G.4 excess-withdrawal action's in-flight signal. */
   excessInFlight?: boolean;
+  /** The dead-NFT burn action's in-flight signal. */
+  nftInFlight?: boolean;
   feeReady: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
+  /** Routed NFT token-account pubkeys (see the prop comment). */
+  excludePubkeys?: ReadonlySet<string>;
+  /** Pending NFT-classification token-account pubkeys. */
+  pendingPubkeys?: ReadonlySet<string>;
 }) {
   const connection = useRpcConnection();
   const { publicKey } = useWallet();
@@ -197,8 +213,13 @@ export function BurnDustSection({
   } = useBurnDust();
 
   const dust = useMemo(
-    () => selectBurnableDustAccounts(scan),
-    [scan]
+    () =>
+      selectBurnableDustAccounts(scan).filter(
+        (c) =>
+          !excludePubkeys?.has(c.pubkey) &&
+          !pendingPubkeys?.has(c.pubkey)
+      ),
+    [scan, excludePubkeys, pendingPubkeys]
   );
 
   // Per-mint authority facts from the scan evidence.
@@ -439,7 +460,8 @@ export function BurnDustSection({
     repairInFlight ||
     revokeInFlight ||
     unwrapInFlight ||
-    excessInFlight === true;
+    excessInFlight === true ||
+    nftInFlight === true;
 
   return (
     <div

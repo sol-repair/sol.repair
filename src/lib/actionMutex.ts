@@ -1,8 +1,9 @@
 /**
- * Synchronous, app-wide mutual exclusion between the five wallet action
+ * Synchronous, app-wide mutual exclusion between the six wallet action
  * flows — the empty-account repair, the G.2 delegate revocation, the
- * G.3 wrapped-SOL unwrap+close, the dust burn-and-close, and the G.4
- * excess-lamport withdrawal (spec §8.12; G.3 spec §8.11).
+ * G.3 wrapped-SOL unwrap+close, the dust burn-and-close, the G.4
+ * excess-lamport withdrawal, and the dead-NFT burn-and-close (spec
+ * §8.12; G.3 spec §8.11).
  *
  * Why a module-scoped lock and not per-hook state: each action hook
  * already guards its own re-entry with a synchronous ref (set before
@@ -45,7 +46,13 @@
  * not Solana-specific and must be trivially unit-testable.
  */
 
-export type ActionKind = "repair" | "revoke" | "unwrap" | "burn" | "excess";
+export type ActionKind =
+  | "repair"
+  | "revoke"
+  | "unwrap"
+  | "burn"
+  | "excess"
+  | "nft";
 
 let held: ActionKind | null = null;
 

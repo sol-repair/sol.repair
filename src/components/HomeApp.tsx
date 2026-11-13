@@ -29,6 +29,7 @@ import { AwaitingSignatureHint } from "@/components/AwaitingSignatureHint";
 import { DelegationSection } from "@/components/DelegationSection";
 import { NativeAccountsSection } from "@/components/NativeAccountsSection";
 import { BurnDustSection } from "@/components/BurnDustSection";
+import { NftBurnSection } from "@/components/NftBurnSection";
 import { ExcessSection } from "@/components/ExcessSection";
 import { useWalletScan } from "@/hooks/useWalletScan";
 import { useRpcConnection } from "@/hooks/useRpcConnection";
@@ -41,6 +42,7 @@ import {
   selectBurnableDustAccounts,
   type BurnableDustAccount,
 } from "@/lib/solana/burnDust";
+import { selectNftScanCandidates } from "@/lib/solana/nftBurn";
 import {
   TOKEN_2022_PROGRAM_ID,
   lamportsToSol,
@@ -284,6 +286,7 @@ function HomeAppInner() {
   const [unwrapInFlight, setUnwrapInFlight] = useState(false);
   const [burnInFlight, setBurnInFlight] = useState(false);
   const [excessInFlight, setExcessInFlight] = useState(false);
+  const [nftInFlight, setNftInFlight] = useState(false);
   const REPAIR_IN_FLIGHT_STATUSES = [
     "building",
     "awaiting-signature",
@@ -451,12 +454,49 @@ function HomeAppInner() {
     void repair(eligible, ready);
   }, [result, publicKey, checkingFee, connection, repair]);
 
+  // --- Dead-NFT routing (docs/dead-nft-scope-memo-2026-11.md §3.2) ---
+  // The NFT section classifies the scan's decimals-0 candidates and
+  // reports the routing here: `routed` = burnable NFTs the NFT flow
+  // now owns; `pending` = candidates whose classification has not
+  // landed yet. Both sets are held back from the dust flow and the
+  // pass - while classification is unread, a decimals-0 account can
+  // never be burned the incomplete way (the stranding hazard the
+  // feature exists to close). Routing resets on a fresh scan during
+  // render (the same reset-on-data-change pattern as the fee
+  // decision), with pending seeded synchronously from the new scan's
+  // decimals-0 candidates so the hold-back is seamless until the NFT
+  // section's detection lands.
+  const [nftRouting, setNftRouting] = useState<{
+    routed: ReadonlySet<string>;
+    pending: ReadonlySet<string>;
+  }>({ routed: new Set(), pending: new Set() });
+  const [nftRoutingScan, setNftRoutingScan] = useState(result);
+  if (result !== nftRoutingScan) {
+    setNftRoutingScan(result);
+    setNftRouting({
+      routed: new Set(),
+      pending: new Set(
+        result
+          ? selectNftScanCandidates(result).map((c) => c.pubkey)
+          : []
+      ),
+    });
+  }
+
   // The dust candidates the pass's stage 2 would cover, derived from
   // the scan the page already holds (the same selector the per-card
-  // dust section uses). Pure aggregation; no new RPC anywhere.
+  // dust section uses), minus the accounts the NFT flow owns or is
+  // still classifying. Pure aggregation; no new RPC anywhere.
   const dustCandidates = useMemo(
-    () => (result ? selectBurnableDustAccounts(result) : []),
-    [result]
+    () =>
+      result
+        ? selectBurnableDustAccounts(result).filter(
+            (c) =>
+              !nftRouting.routed.has(c.pubkey) &&
+              !nftRouting.pending.has(c.pubkey)
+          )
+        : [],
+    [result, nftRouting]
   );
 
   // --- "Repair everything found" (docs/repair-everything-spec-draft.md).
@@ -528,7 +568,11 @@ function HomeAppInner() {
   const launchPass = useCallback(() => {
     if (!result || !publicKey) return;
     const eligible = result.eligibleAccounts;
-    const dust = selectBurnableDustAccounts(result);
+    const dust = selectBurnableDustAccounts(result).filter(
+      (c) =>
+        !nftRouting.routed.has(c.pubkey) &&
+        !nftRouting.pending.has(c.pubkey)
+    );
     if (eligible.length === 0 && dust.length === 0) return;
     passLaunchedIndex.current = -1;
     setPassCandidates(dust);
@@ -553,6 +597,7 @@ function HomeAppInner() {
     passBurnReset,
     repair,
     feeReady,
+    nftRouting,
   ]);
 
   // Stage 1 ends when the repair hook reaches a terminal. Done moves on
@@ -1171,7 +1216,8 @@ function HomeAppInner() {
                   revokeInFlight ||
                   unwrapInFlight ||
                   burnInFlight ||
-                  excessInFlight
+                  excessInFlight ||
+                  nftInFlight
                 }
                 className="mt-3 w-full rounded-lg border border-[#14F195] px-4 py-3 font-medium text-[#14F195] transition-colors hover:bg-[#14F195]/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -1434,7 +1480,8 @@ function HomeAppInner() {
                     revokeInFlight ||
                     unwrapInFlight ||
                     burnInFlight ||
-                    excessInFlight
+                    excessInFlight ||
+                    nftInFlight
                   }
                   className="mt-3 w-full rounded-lg bg-[#14F195] px-4 py-3 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -1458,7 +1505,8 @@ function HomeAppInner() {
                   revokeInFlight ||
                   unwrapInFlight ||
                   burnInFlight ||
-                  excessInFlight
+                  excessInFlight ||
+                  nftInFlight
                 }
                 className="w-full rounded-lg bg-[#14F195] px-4 py-3 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -1472,7 +1520,8 @@ function HomeAppInner() {
               {(revokeInFlight ||
                 unwrapInFlight ||
                 burnInFlight ||
-                excessInFlight) && (
+                excessInFlight ||
+                nftInFlight) && (
                 <p className="text-xs text-zinc-400">
                   Another wallet action is underway. Wait for it to finish.
                 </p>
@@ -1788,6 +1837,7 @@ function HomeAppInner() {
             unwrapInFlight={unwrapInFlight}
             burnInFlight={burnInFlight}
             excessInFlight={excessInFlight}
+            nftInFlight={nftInFlight}
             onActionInFlightChange={setRevokeInFlight}
           />
 
@@ -1801,6 +1851,7 @@ function HomeAppInner() {
             revokeInFlight={revokeInFlight}
             burnInFlight={burnInFlight}
             excessInFlight={excessInFlight}
+            nftInFlight={nftInFlight}
             onActionInFlightChange={setUnwrapInFlight}
           />
 
@@ -1810,7 +1861,10 @@ function HomeAppInner() {
               working the wallet, this section stands down: its cards
               are exactly the accounts the pass's stage 2 is driving,
               and the mutex would only turn a mid-pass click into an
-              action-conflict stop. */}
+              action-conflict stop. The NFT routing sets hold back the
+              decimals-0 accounts the NFT flow owns (routed) or is
+              still classifying (pending) - the memo's routing rule:
+              master-edition-backed NFTs never burn the plain way. */}
           {!passActive && (
             <BurnDustSection
               scan={result}
@@ -1819,10 +1873,33 @@ function HomeAppInner() {
               revokeInFlight={revokeInFlight}
               unwrapInFlight={unwrapInFlight}
               excessInFlight={excessInFlight}
+              nftInFlight={nftInFlight}
               feeReady={feeReady}
               onActionInFlightChange={setBurnInFlight}
+              excludePubkeys={nftRouting.routed}
+              pendingPubkeys={nftRouting.pending}
             />
           )}
+
+          {/* Dead-NFT burn-and-close (per-item consent, one NFT per
+              transaction, the 2026-11-13 v1 slice). Renders nothing
+              when the scan has no decimals-0 candidates. Detects on
+              mount (the memo's 2-3 batched reads), reports the routing
+              upward so the dust flow and the pass hold back the
+              accounts this section owns, and shows the honest
+              non-offered rows for the classes v1 does not burn. */}
+          <NftBurnSection
+            scan={result}
+            rescan={rescan}
+            repairInFlight={repairInFlight}
+            revokeInFlight={revokeInFlight}
+            unwrapInFlight={unwrapInFlight}
+            burnInFlight={burnInFlight}
+            excessInFlight={excessInFlight}
+            feeReady={feeReady}
+            onActionInFlightChange={setNftInFlight}
+            onRoutingChange={setNftRouting}
+          />
 
           {/* G.4: excess-lamport withdrawal (per-item consent, one
               account per action, approved 2026-09-26). Detects
@@ -1834,6 +1911,7 @@ function HomeAppInner() {
             revokeInFlight={revokeInFlight}
             unwrapInFlight={unwrapInFlight}
             burnInFlight={burnInFlight}
+            nftInFlight={nftInFlight}
             onActionInFlightChange={setExcessInFlight}
           />
         </div>

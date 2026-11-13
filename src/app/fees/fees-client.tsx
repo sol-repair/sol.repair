@@ -152,6 +152,18 @@ export default function FeesPage() {
             undoable.
           </p>
           <p className="mt-2">
+            <span className="text-zinc-300">NFT burn-and-close</span>{" "}
+            (NFTs whose master edition has no prints outstanding): the
+            same 1% fee on the rent the burn recovers. One instruction
+            closes the NFT&rsquo;s token account, its metadata account,
+            and its master edition account, and the fee is 1 percent of
+            the rent all three return. The burn destroys the NFT
+            permanently and is charged nothing by itself. Closing this
+            way is the only way that rent comes back: once the token is
+            burned without it, the metadata and edition deposits are
+            unreachable by anyone, including this tool.
+          </p>
+          <p className="mt-2">
             Why the two rules differ, and why they are stated together:
             the fee exists for unlocking rent a user cannot reach
             themselves, never for returning the user&rsquo;s own

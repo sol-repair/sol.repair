@@ -110,6 +110,7 @@ export function ExcessSection({
   revokeInFlight,
   unwrapInFlight,
   burnInFlight,
+  nftInFlight,
   onActionInFlightChange,
 }: {
   scan: ScanResult;
@@ -118,6 +119,8 @@ export function ExcessSection({
   revokeInFlight: boolean;
   unwrapInFlight: boolean;
   burnInFlight: boolean;
+  /** The dead-NFT burn action in-flight signal. */
+  nftInFlight?: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
 }) {
   const connection = useRpcConnection();
@@ -327,7 +330,11 @@ export function ExcessSection({
 
   const busy = actionInFlight;
   const otherActionInFlight =
-    repairInFlight || revokeInFlight || unwrapInFlight || burnInFlight;
+    repairInFlight ||
+    revokeInFlight ||
+    unwrapInFlight ||
+    burnInFlight ||
+    nftInFlight === true;
 
   return (
     <div

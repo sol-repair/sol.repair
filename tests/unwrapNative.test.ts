@@ -705,7 +705,7 @@ describe("import boundary (§10.2.9)", () => {
     );
   });
 
-  it("exactly the five action hooks import the action mutex", () => {
+  it("exactly the six action hooks import the action mutex", () => {
     const hooks = readdirSync("src/hooks").filter((f) => f.endsWith(".ts"));
     const importers = hooks.filter((f) =>
       importStatements(readFileSync(`src/hooks/${f}`, "utf8")).some((line) =>
@@ -713,7 +713,7 @@ describe("import boundary (§10.2.9)", () => {
       )
     );
     expect(importers.sort()).toEqual(
-      ["useBurnDust.ts", "useRepairWallet.ts", "useRevokeDelegate.ts", "useUnwrapNative.ts", "useWithdrawExcess.ts"].sort()
+      ["useBurnDust.ts", "useNftBurn.ts", "useRepairWallet.ts", "useRevokeDelegate.ts", "useUnwrapNative.ts", "useWithdrawExcess.ts"].sort()
     );
   });
 });
