@@ -6,9 +6,13 @@
 // until exhausted, so history growth past any single page can never
 // silently truncate the counter's input. The classification mirrors the
 // shipped ledger exactly: a row is a repair row when the transaction
-// contains at least one token-program closeAccount AND a System
-// transfer INTO the fee wallet; the fee must equal exactly floor(1%)
-// of the rent the closes freed. Known operator-test signatures and the
+// contains at least one token-program closeAccount or one Metaplex
+// BurnNft instruction (tag 29; the dead-NFT burn whose metadata, token,
+// and master edition closes ride as CPI inner instructions) AND a
+// System transfer INTO the fee wallet; the fee must equal exactly
+// floor(1%) of the rent the closes freed (for a BurnNft: the
+// preBalances of its account keys 0, 3, 4). Known operator-test
+// signatures and the
 // wallet's own funding transfer are excluded, every exclusion is
 // printed with its signature, and nothing is ever silently skipped: a
 // row that cannot be read aborts the run, and if any organic row fails
@@ -32,6 +36,16 @@ import { Connection, PublicKey } from "@solana/web3.js";
 
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 const SYSTEM_PROGRAM = "1".repeat(32);
+// The Metaplex Token Metadata program and its BurnNft instruction tag
+// (29, one data byte): the dead-NFT burn-and-close whose three closes
+// (metadata PDA, token account, master edition PDA - the instruction's
+// account keys 0, 3, 4) ride as CPI inner instructions, so the
+// transaction carries no outer closeAccount. Recognized 2026-11-13 per
+// the dead-NFT scope memo §1.4; the fee is 1% of those three
+// preBalances, the same rule the app's feeLedger decode mirrors.
+const MPL_TOKEN_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
+const MPL_BURN_NFT_TAG = 29;
+const MPL_BURN_NFT_CLOSED_KEYS = [0, 3, 4];
 const OUT_FILE = new URL("../src/lib/recoveredTotals.ts", import.meta.url);
 const FEES_TS = new URL("../src/lib/solana/fees.ts", import.meta.url);
 
@@ -156,13 +170,21 @@ for (const s of uniqueSigs) {
   if (t.meta?.err) { failed.push(s.signature); continue; }
   const ix = t.transaction.message.instructions || [];
   const closesIx = ix.filter((i) => i.parsed?.type === "closeAccount");
+  // Metaplex BurnNft (tag 29): an unparsed instruction whose data is
+  // exactly the tag byte. Its three closed accounts are keys 0, 3, 4.
+  const mplBurns = ix.filter((i) => {
+    if (String(i.programId) !== MPL_TOKEN_METADATA_PROGRAM) return false;
+    let bytes = null;
+    try { bytes = bs58.decode(i.data ?? ""); } catch { return false; }
+    return bytes.length === 1 && bytes[0] === MPL_BURN_NFT_TAG;
+  });
   const feeXfers = ix.filter(
     (i) => String(i.programId) === SYSTEM_PROGRAM && i.parsed?.type === "transfer" && i.parsed?.info?.destination === FEE_WALLET
   );
-  if (closesIx.length === 0 || feeXfers.length === 0) {
+  if (closesIx.length + mplBurns.length === 0 || feeXfers.length === 0) {
     nonFee.push({
       signature: s.signature,
-      reason: `${closesIx.length} closeAccount, ${feeXfers.length} fee transfer`,
+      reason: `${closesIx.length} closeAccount, ${mplBurns.length} mpl BurnNft, ${feeXfers.length} fee transfer`,
     });
     continue;
   }
@@ -175,6 +197,13 @@ for (const s of uniqueSigs) {
     const idx = keys.indexOf(src);
     if (idx >= 0) freed += BigInt(t.meta.preBalances[idx]);
   }
+  for (const burn of mplBurns) {
+    for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
+      const src = burn.accounts?.[key];
+      const idx = src === undefined ? -1 : keys.indexOf(src);
+      if (idx >= 0) freed += BigInt(t.meta.preBalances[idx]);
+    }
+  }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
   organicRows++;
   if (feeAmt !== freed / 100n) {
@@ -184,7 +213,10 @@ for (const s of uniqueSigs) {
   }
   const signer = t.transaction.message.accountKeys.find((k) => k.signer);
   if (signer) wallets.add(typeof signer === "string" ? signer : String(signer.pubkey));
-  closes += closesIx.length;
+  // A BurnNft closes one token account (key 3) plus its metadata and
+  // master edition PDAs; the closes counter counts token accounts, so
+  // one NFT burn contributes one.
+  closes += closesIx.length + mplBurns.length;
   freedTotal += freed;
 }
 

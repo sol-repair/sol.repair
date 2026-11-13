@@ -312,6 +312,245 @@ describe("feeRowsFromRawTransactions 1% conformance (onePercentMatch)", () => {
   });
 });
 
+describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () => {
+  // The ledger-rule extension (dead-NFT scope memo 2026-11-13, §1.4): a
+  // BurnNft transaction contains ZERO outer closeAccount instructions -
+  // the token, metadata, and master edition closes happen as CPI inner
+  // instructions inside the metadata program. Under the close-only rule
+  // such a fee row was invisible to the ledger; the extended rule
+  // recognizes the mpl-token-metadata instruction whose data is exactly
+  // the tag byte 29 and counts the preBalances of its account keys 0, 3,
+  // 4 (metadata, token, master edition).
+  const METAPLEX_TOKEN_METADATA_PROGRAM = new PublicKey(
+    "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+  );
+
+  /** The canonical BurnNft account order (memo §3.1): metadata PDA,
+   *  owner (the only signer), mint, token account, master edition PDA,
+   *  SPL token program; the collection metadata PDA is optional and
+   *  rides seventh when present. Returns the instruction plus the three
+   *  accounts whose preBalances the rule counts. */
+  function burnNftIx(opts: { data?: Buffer } = {}): {
+    ix: TransactionInstruction;
+    metadata: PublicKey;
+    token: PublicKey;
+    edition: PublicKey;
+  } {
+    const metadata = Keypair.generate().publicKey;
+    const token = Keypair.generate().publicKey;
+    const edition = Keypair.generate().publicKey;
+    const ix = new TransactionInstruction({
+      keys: [
+        { pubkey: metadata, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: token, isSigner: false, isWritable: true },
+        { pubkey: edition, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      ],
+      programId: METAPLEX_TOKEN_METADATA_PROGRAM,
+      data: opts.data ?? Buffer.from([29]),
+    });
+    return { ix, metadata, token, edition };
+  }
+
+  /** The receipt-verified per-NFT shape from the memo (§2.2): token
+   *  2,039,280 + metadata 3,733,800 + master edition 1,030,080 =
+   *  6,803,160; floor(1%) is 68,031. */
+  const NFT_RENTS = { metadata: 3_733_800, token: 2_039_280, edition: 1_030_080 };
+  const NFT_FEE = 68_031;
+
+  function preBalancesFor(
+    message: Message,
+    burn: { metadata: PublicKey; token: PublicKey; edition: PublicKey }
+  ): number[] {
+    return message.accountKeys.map((k) =>
+      k.equals(burn.metadata)
+        ? NFT_RENTS.metadata
+        : k.equals(burn.token)
+          ? NFT_RENTS.token
+          : k.equals(burn.edition)
+            ? NFT_RENTS.edition
+            : 1
+    );
+  }
+
+  it("extracts a fee row from a BurnNft transaction that has no outer closeAccount", () => {
+    // The load-bearing case: under the close-only rule this returned no
+    // row, making the feature's own fees invisible to the site's central
+    // honesty claim (memo §1.4).
+    const { ix } = burnNftIx();
+    const { raw } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+    ]);
+    const rows = feeRowsFromRawTransactions([{ signature: "nftburn", raw }], FEE_WALLET);
+    expect(rows).toEqual([
+      { signature: "nftburn", blockTime: BLOCK_TIME, lamports: NFT_FEE, onePercentMatch: null },
+    ]);
+  });
+
+  it("marks a BurnNft fee conforming when it equals floor(1%) of the three accounts' preBalances", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+    ]);
+    raw.meta!.preBalances = preBalancesFor(message, { metadata, token, edition });
+    const rows = feeRowsFromRawTransactions([{ signature: "nftconform", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("marks a BurnNft fee one lamport off the rule non-conforming", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE + 1),
+    ]);
+    raw.meta!.preBalances = preBalancesFor(message, { metadata, token, edition });
+    const rows = feeRowsFromRawTransactions([{ signature: "nftoff", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("does not judge when a BurnNft account cannot be mapped into preBalances", () => {
+    const { ix } = burnNftIx();
+    const { raw } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+    ]);
+    // truncated preBalances: no verdict, never a guess
+    raw.meta!.preBalances = [1];
+    const rows = feeRowsFromRawTransactions([{ signature: "nftnoverdict", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBeNull();
+  });
+
+  it("requires the burn data to be exactly the tag byte 29", () => {
+    // A two-byte payload is not the wire shape; BurnEditionNft (37) and
+    // Burn (41) are different instructions the v1 slice does not charge.
+    for (const data of [
+      Buffer.from([29, 0]),
+      Buffer.from([37]),
+      Buffer.from([41]),
+    ]) {
+      const { ix } = burnNftIx({ data });
+      const { raw } = buildLegacyRaw([
+        ix,
+        systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+      ]);
+      expect(
+        feeRowsFromRawTransactions([{ signature: "notburnnft", raw }], FEE_WALLET)
+      ).toEqual([]);
+    }
+  });
+
+  it("requires the Metaplex metadata program", () => {
+    const stranger = new TransactionInstruction({
+      keys: [
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      ],
+      programId: SystemProgram.programId,
+      data: Buffer.from([29]),
+    });
+    const { raw } = buildLegacyRaw([
+      stranger,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+    ]);
+    expect(
+      feeRowsFromRawTransactions([{ signature: "notmetaplex", raw }], FEE_WALLET)
+    ).toEqual([]);
+  });
+
+  it("recognizes a BurnNft that arrived as a CPI inner instruction", () => {
+    // The memo's wire reading: the BurnNft instruction itself is
+    // top-level, but the decoder treats inner (CPI) instructions the
+    // same as top-level ones, so the rule reads the instruction list
+    // wherever an instruction sits. Same wire shape as the existing
+    // CPI-transfer fixture: the compiled burn is relocated into
+    // meta.innerInstructions.
+    const { ix } = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+      ix,
+    ]);
+    raw.meta!.innerInstructions = [
+      { index: 0, instructions: [message.instructions[1]] },
+    ];
+    const rows = feeRowsFromRawTransactions([{ signature: "nftcpi", raw }], FEE_WALLET);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lamports).toBe(NFT_FEE);
+  });
+
+  it("sums rent across a BurnNft and a plain close in one transaction", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const closed = Keypair.generate().publicKey;
+    const close = new TransactionInstruction({
+      keys: [
+        { pubkey: closed, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      close,
+      // The fee is 1% of the TOTAL rent, floored once: 8,842,440 lamports
+      // of rent implies 88,424, not the 88,423 the per-item floors sum to.
+      systemTransfer(new PublicKey(FEE_WALLET), 88_424),
+    ]);
+    raw.meta!.preBalances = message.accountKeys.map((k) =>
+      k.equals(metadata)
+        ? NFT_RENTS.metadata
+        : k.equals(token)
+          ? NFT_RENTS.token
+          : k.equals(edition)
+            ? NFT_RENTS.edition
+            : k.equals(closed)
+              ? 2_039_280
+              : 1
+    );
+    const rows = feeRowsFromRawTransactions([{ signature: "both", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("checks a v0 BurnNft transaction too", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const message = new TransactionMessage({
+      payerKey: Keypair.generate().publicKey,
+      recentBlockhash: RECENT_BLOCKHASH,
+      instructions: [ix, systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE)],
+    }).compileToV0Message();
+    const serialized = new VersionedTransaction(message).serialize();
+    const raw: RawTransaction = {
+      blockTime: BLOCK_TIME,
+      version: 0,
+      meta: {
+        err: null,
+        loadedAddresses: { readonly: [], writable: [] },
+        innerInstructions: [],
+        preBalances: message.staticAccountKeys.map((k) =>
+          k.equals(metadata)
+            ? NFT_RENTS.metadata
+            : k.equals(token)
+              ? NFT_RENTS.token
+              : k.equals(edition)
+                ? NFT_RENTS.edition
+                : 1
+        ),
+      },
+      transaction: [Buffer.from(serialized).toString("base64"), "base64"],
+    };
+    const rows = feeRowsFromRawTransactions([{ signature: "v0nft", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+});
+
 describe("isKnownTestFee", () => {
   it("tags the seven known mainnet test signatures", () => {
     // Receipt-verified signatures: two Aug 19 self-tests, the Aug 29
