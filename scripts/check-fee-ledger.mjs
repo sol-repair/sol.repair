@@ -63,28 +63,77 @@ const TOKEN_PROGRAMS = new Set([
 ]);
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 // Signatures per listing page; the walk repeats until a short page ends
-// the history. Transaction fetches pace at one every 400ms so the public
-// endpoint is not hammered.
+// the history. Transaction fetches pace at one per second: the bell
+// walks the ledger from a shared GitHub Actions IP, which the public
+// endpoint throttles at a sustained rate far below what a desktop gets
+// away with (run 210, 2026-11-12: the walk's own pacing is minutes, yet
+// the runner still lost most of its step time to 429 retries, and one
+// row exhausted its budget - the audit honestly exited 2 on a
+// conforming ledger). The fix is patience, not a narrower audit.
 const SIGNATURES_PER_PAGE = 1000;
-const TX_PACING_MS = 400;
+const TX_PACING_MS = 1000;
 // Bounded in-place retries for one getTransaction fetch that throws
-// (network/RPC failure). A retry SUCCEEDS with a null response is still
-// an unverifiable row: null is a definitive answer (pruned or
-// unreadable), not a failure.
-const TX_FETCH_ATTEMPTS = 3;
+// (network/RPC failure). The backoff grows per attempt because throttle
+// windows on the shared runner IP arrive in bursts lasting tens of
+// seconds, not the fixed 2s/4s a desktop-sized budget assumed. A retry
+// that SUCCEEDS with a null response is still an unverifiable row:
+// null is a definitive answer (pruned or unreadable), not a failure.
+const TX_FETCH_ATTEMPTS = 5;
+const TX_FETCH_BACKOFF_MS = [2000, 8000, 30000, 90000];
 
 const sleep = (ms) => new Promise((x) => setTimeout(x, ms));
 
+// One JSON-RPC call, with bounded patience for the public endpoint's
+// throttles and gateway hiccups. A 429 or 5xx is retried with a sleep
+// that grows per attempt (a flat 8s twice kept failing on the shared
+// runner IP); network-level fetch throws and non-JSON bodies get the
+// same patience, because a throttled response is not always parseable
+// JSON. The status code rides in the thrown message so the row-level
+// WARN names what actually happened. Anything else surfaces
+// immediately and lets the row-level fetch budget decide the row's
+// fate - an RPC error that is not a throttle is a real answer.
+const RPC_ATTEMPTS = 3;
+const RPC_RETRY_MS = 10000;
+
 async function rpc(method, params, attempt = 1) {
-  const r = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const j = await r.json();
+  let r;
+  try {
+    r = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+  } catch (e) {
+    if (attempt < RPC_ATTEMPTS) {
+      await sleep(RPC_RETRY_MS * attempt);
+      return rpc(method, params, attempt + 1);
+    }
+    throw e;
+  }
+  if (!r.ok) {
+    const retryable = r.status === 429 || r.status >= 500;
+    if (retryable && attempt < RPC_ATTEMPTS) {
+      await sleep(RPC_RETRY_MS * attempt);
+      return rpc(method, params, attempt + 1);
+    }
+    throw new Error(`HTTP ${r.status} on ${method}`);
+  }
+  let j;
+  try {
+    j = await r.json();
+  } catch {
+    if (attempt < RPC_ATTEMPTS) {
+      await sleep(RPC_RETRY_MS * attempt);
+      return rpc(method, params, attempt + 1);
+    }
+    throw new Error(`non-JSON response on ${method}`);
+  }
   if (j.error) {
-    if (attempt < 3 && String(j.error.message ?? "").match(/429|too many/i)) {
-      await sleep(8000);
+    if (
+      attempt < RPC_ATTEMPTS &&
+      String(j.error.message ?? "").match(/429|too many|rate|limit/i)
+    ) {
+      await sleep(RPC_RETRY_MS * attempt);
       return rpc(method, params, attempt + 1);
     }
     throw new Error(JSON.stringify(j.error).slice(0, 120));
@@ -169,7 +218,7 @@ async function fetchTransaction(signature) {
         );
         return undefined;
       }
-      await sleep(2000 * attempt);
+      await sleep(TX_FETCH_BACKOFF_MS[attempt - 1]);
     }
   }
   return undefined;
