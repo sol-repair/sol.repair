@@ -800,7 +800,7 @@ export type NftGateRead = {
     | { kind: "read"; program: TokenProgram; owner: string; mint: string; amount: string; frozen: boolean; lamports: number };
   metadata:
     | { kind: "missing" }
-    | { kind: "read"; mint: string; name: string | null; collectionVerified: boolean; collectionKey: string | null; lamports: number };
+    | { kind: "read"; mint: string; name: string | null; collectionVerified: boolean; collectionKey: string | null; lamports: number; dataLen: number; returnLamports: number };
   edition:
     | { kind: "missing" }
     | { kind: "unreadable" }
@@ -810,14 +810,20 @@ export type NftGateRead = {
 /** The action read: ONE batched getMultipleAccountsInfo over the
  *  token account, metadata PDA, and edition PDA at "confirmed" - the
  *  commitment the confirmation waits at, the same single-read
- *  discipline as unwrapNative's gate (audit L6). Throws on RPC
- *  failure; the hook decides how to report it. */
+ *  discipline as unwrapNative's gate (audit L6) - plus the CURRENT
+ *  rent-exempt minimum for the metadata's data length, which the
+ *  on-chain close uses as its return figure (see
+ *  close_program_account). Throws on RPC failure; the hook decides
+ *  how to report it. */
 export async function readNftGateState(
   connection: {
     getMultipleAccountsInfo: (
       keys: PublicKey[],
       config?: Commitment | GetMultipleAccountsConfig
     ) => Promise<Array<{ owner: PublicKey; lamports: number; data: Uint8Array } | null>>;
+    getMinimumBalanceForRentExemption: (
+      dataLen: number
+    ) => Promise<number>;
   },
   candidate: { mint: string; pubkey: string }
 ): Promise<NftGateRead> {
@@ -858,16 +864,34 @@ export async function readNftGateState(
   let metadataRead: NftGateRead["metadata"] = { kind: "missing" };
   if (metadata) {
     const body = parseNftMetadata(metadata.data);
-    metadataRead = body
-      ? {
-          kind: "read",
-          mint: body.mint,
-          name: body.name,
-          collectionVerified: body.collectionVerified,
-          collectionKey: body.collectionKey,
-          lamports: metadata.lamports,
-        }
-      : { kind: "missing" };
+    if (body) {
+      // The close's return figure: today's rent-exempt minimum for the
+      // metadata's data length, capped at the balance. One extra cheap
+      // read, the same figure the on-chain close itself computes.
+      const rentExempt = await connection.getMinimumBalanceForRentExemption(
+        metadata.data.length
+      );
+      metadataRead = {
+        kind: "read",
+        mint: body.mint,
+        name: body.name,
+        collectionVerified: body.collectionVerified,
+        collectionKey: body.collectionKey,
+        lamports: metadata.lamports,
+        dataLen: metadata.data.length,
+        returnLamports: metadataReturnLamports(
+          metadata.lamports,
+          metadata.data.length,
+          rentExempt
+        ),
+      };
+    } else if (isMetadataFeeHusk(metadata.data)) {
+      // The closed-with-fee husk: not the reviewed metadata in any
+      // usable sense, and the burn flow treats it as closed.
+      metadataRead = { kind: "missing" };
+    } else {
+      metadataRead = { kind: "missing" };
+    }
   }
 
   let editionRead: NftGateRead["edition"] = { kind: "missing" };
@@ -879,6 +903,31 @@ export async function readNftGateState(
   }
 
   return { token: tokenRead, metadata: metadataRead, edition: editionRead };
+}
+
+/** What the on-chain close returns for a metadata account:
+ *  close_program_account moves exactly Rent::minimum_balance(dataLen)
+ *  to the destination and leaves any excess in a one-byte husk (the
+ *  metadata's stored Metaplex create fee, claimable only through
+ *  Metaplex's own ownerless path). Capped at the balance: a metadata
+ *  account holding less than today's minimum (grandfathered below it)
+ *  returns what it holds. DEVNET-VERIFIED 2026-11-13: a fee-era
+ *  metadata closed to a 1-byte zero-key husk with the fee inside. */
+export function metadataReturnLamports(
+  lamports: number,
+  dataLen: number,
+  rentExempt: number
+): number {
+  return Math.min(lamports, rentExempt);
+}
+
+/** The closed-with-fee husk shape the on-chain close leaves behind
+ *  when a metadata account holds more than its rent-exempt minimum:
+ *  one byte, set to 0 (Key::Uninitialized). The verification reads
+ *  this as the closed shape - the burn succeeded and the account's
+ *  recoverable rent left for the wallet. */
+export function isMetadataFeeHusk(data: Uint8Array): boolean {
+  return data.length === 1 && data[0] === KEY_UNINITIALIZED;
 }
 
 export type NftGateAbortReason =
@@ -900,6 +949,13 @@ export type NftGateVerdict =
       tokenLamports: number;
       metadataLamports: number;
       editionLamports: number;
+      /** What the metadata close actually returns: today's rent-exempt
+       *  minimum for its data length, capped at the balance (the
+       *  stored Metaplex create fee, when one exists, stays in the
+       *  one-byte husk). Equal to metadataLamports for every
+       *  metadata priced exactly at today's minimum - the whole
+       *  current cohort. */
+      metadataReturnLamports: number;
       collectionVerified: boolean;
       collectionKey: string | null;
       name: string | null;
@@ -974,6 +1030,7 @@ export function evaluateNftGate(
     kind: "pass",
     tokenLamports: t.lamports,
     metadataLamports: m.lamports,
+    metadataReturnLamports: m.returnLamports,
     editionLamports: e.lamports,
     collectionVerified: m.collectionVerified,
     collectionKey: m.collectionKey,
@@ -1083,13 +1140,34 @@ export const NFT_BURN_CARD_STRANDING =
 export const nftBurnCardIntro = (rentSol: string): string =>
   `This sends one instruction (Metaplex BurnNft). It burns this NFT\u2019s single token, then closes three accounts: the token account, the metadata account, and the master edition account. All three deposits, ${rentSol} SOL, return to your wallet.`;
 
+/** The fee-era intro variant: when the metadata holds more than its
+ *  rent-exempt minimum (a stored Metaplex create fee), only the rent
+ *  returns and the fee stays in the husk. Used when the return figure
+ *  differs from the deposit total; the plain intro is exact otherwise. */
+export const nftBurnCardIntroFeeEra = (
+  returnSol: string,
+  depositSol: string
+): string =>
+  `This sends one instruction (Metaplex BurnNft). It burns this NFT\u2019s single token, then closes three accounts: the token account, the metadata account, and the master edition account. The three accounts\u2019 rent, ${returnSol} SOL, returns to your wallet. The three deposits hold ${depositSol} SOL in total; the metadata account carries a stored Metaplex create fee which stays in a one-byte husk that only Metaplex can claim.`;
+
 /** The consent card's fee line with the exact figures (memo section
- *  1.3 card wording). */
+ *  1.3 card wording). Exact when the deposits equal what the closes
+ *  return (the whole current cohort); the fee-era variant below states
+ *  the deposit base when a stored fee makes them differ. */
 export const nftBurnCardFeeLine = (
   feeLamports: string,
   rentLamports: string
 ): string =>
   `The fee is 1 percent of the SOL these closes return, floored to whole lamports: ${feeLamports} lamports of ${rentLamports} lamports. It is a plain transfer in the same transaction, visible before you approve, charged only if the transaction succeeds. Burning the token itself destroys it and is charged nothing.`;
+
+/** The fee-era fee line: the ruling's base is the three deposits'
+ *  pre-balances (memo section 1.3), stated as such when a stored fee
+ *  makes the deposits differ from what the closes return. */
+export const nftBurnCardFeeLineFeeEra = (
+  feeLamports: string,
+  depositLamports: string
+): string =>
+  `The fee is 1 percent of the three deposits, floored to whole lamports: ${feeLamports} lamports of ${depositLamports} lamports. It is a plain transfer in the same transaction, visible before you approve, charged only if the transaction succeeds. Burning the token itself destroys it and is charged nothing.`;
 
 /** The scan row's summary (memo section 1.5 row label). */
 export const nftRowSummary = (rentSol: string, feeSol: string): string =>

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   holder: { publicKey: null as PublicKey | null },
   conn: {
     getMultipleAccountsInfo: vi.fn(),
+    getMinimumBalanceForRentExemption: vi.fn().mockResolvedValue(3733800),
     simulateTransaction: vi.fn(),
   },
 }));

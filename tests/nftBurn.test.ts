@@ -31,6 +31,10 @@ import {
   NFT_BURN_CARD_COLLECTION,
   NFT_BURN_CARD_PERMANENCE,
   NFT_BURN_CARD_STRANDING,
+  isMetadataFeeHusk,
+  metadataReturnLamports,
+  nftBurnCardFeeLineFeeEra,
+  nftBurnCardIntroFeeEra,
   NFT_METADATA_ONLY_COPY,
   buildBurnNftInstruction,
   classifyNftCandidate,
@@ -617,6 +621,8 @@ function gateRead(over: {
       collectionVerified: false,
       collectionKey: null,
       lamports: 3733800,
+      dataLen: 607,
+      returnLamports: 3733800,
       ...over.metadata,
     } as NftGateRead["metadata"],
     edition: {
@@ -651,6 +657,7 @@ describe("evaluateNftGate (the N1-N7 abort rows)", () => {
     if (verdict.kind === "pass") {
       expect(verdict.tokenLamports).toBe(2039280);
       expect(verdict.metadataLamports).toBe(3733800);
+      expect(verdict.metadataReturnLamports).toBe(3733800);
       expect(verdict.editionLamports).toBe(1030080);
       expect(verdict.collectionVerified).toBe(true);
       expect(verdict.collectionKey).toBe(SAGA_COLLECTION_MINT);
@@ -887,5 +894,49 @@ describe("nftBurn copy", () => {
     expect(NFT_BURN_CARD_STRANDING).toBe(
       "This burn also closes the metadata and edition rent. Closing the account through the plain token burn instead strands that rent permanently: no instruction can reach it once the token is gone."
     );
+  });
+
+  it("pins the fee-era intro and fee line (the stored-create-fee shape)", () => {
+    const intro = nftBurnCardIntroFeeEra("0.005115", "0.015115");
+    expect(intro).toContain(
+      "The three accounts\u2019 rent, 0.005115 SOL, returns to your wallet."
+    );
+    expect(intro).toContain(
+      "The three deposits hold 0.015115 SOL in total; the metadata account carries a stored Metaplex create fee which stays in a one-byte husk that only Metaplex can claim."
+    );
+    expect(nftBurnCardFeeLineFeeEra("151152", "15115200")).toContain(
+      "The fee is 1 percent of the three deposits, floored to whole lamports: 151152 lamports of 15115200 lamports."
+    );
+    // The mechanical rules hold on the variants too.
+    for (const text of [intro, nftBurnCardFeeLineFeeEra("1", "100")]) {
+      expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+      expect(text.includes("!")).toBe(false);
+      expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+      expect(text.includes("'")).toBe(false);
+    }
+  });
+});
+
+describe("the metadata close-return math (devnet-verified 2026-11-13)", () => {
+  it("returns the balance when it is at or below today's rent-exempt minimum", () => {
+    // The current cohort: every metadata priced exactly at today's
+    // minimum, so the close is a real close and the deposit returns in
+    // full.
+    expect(metadataReturnLamports(3_733_800, 607, 3_733_800)).toBe(3_733_800);
+    expect(metadataReturnLamports(1_000, 607, 3_733_800)).toBe(1_000);
+  });
+
+  it("caps the return at the rent-exempt minimum (the stored-fee shape)", () => {
+    // A fee-era metadata: rent-exempt deposit plus the stored
+    // Metaplex create fee; the close returns the deposit and leaves
+    // the fee in the husk.
+    expect(metadataReturnLamports(15_115_600, 607, 3_733_800)).toBe(3_733_800);
+  });
+
+  it("recognizes the closed-with-fee husk shape", () => {
+    expect(isMetadataFeeHusk(Buffer.from([0]))).toBe(true);
+    expect(isMetadataFeeHusk(Buffer.from([4]))).toBe(false);
+    expect(isMetadataFeeHusk(Buffer.alloc(607))).toBe(false);
+    expect(isMetadataFeeHusk(Buffer.alloc(0))).toBe(false);
   });
 });
