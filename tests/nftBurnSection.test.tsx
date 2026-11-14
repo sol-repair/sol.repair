@@ -217,8 +217,9 @@ function editionBody(opts: { key: number; supply?: bigint }): Buffer {
  *  classifier sees, so the rendered rows come from real parse paths. */
 function stubDetection(specs: Array<{
   entry: SkippedAccount;
-  class: DetectedNft["class"];
+  class: DetectedNft['class'];
   collection?: { verified: boolean; key: string } | null;
+  metadataLamports?: number;
 }>) {
   const byPubkey = new Map<
     string,
@@ -241,7 +242,7 @@ function stubDetection(specs: Array<{
       findMetadataPda(mintKey).toBase58(),
       {
         owner: pk(METAPLEX),
-        lamports: 3733800,
+        lamports: spec.metadataLamports ?? 3733800,
         data: metadataBody({
           mint: spec.entry.mint,
           name: "Saga Pass",
@@ -510,6 +511,45 @@ describe("NftBurnSection rows and the consent card", () => {
     expect(screen.getByText(/Inspect exactly what you/)).toBeDefined();
     // The approve button.
     expect(screen.getByText("Approve & Burn NFT")).toBeDefined();
+  });
+
+  it("renders the fee-era card: the fee is 1 percent of the RETURN, with the husk disclosure", async () => {
+    const entry = nftEntry();
+    const collectionMint = Keypair.generate().publicKey.toBase58();
+    // The stored-fee shape: the metadata holds 13,733,800 (rent
+    // 3,733,800 + the 10,000,000 stored Metaplex create fee); the gate
+    // caps the return at the rent-exempt minimum. Fee base = the
+    // RETURN: 2,039,280 + 3,733,800 + 1,030,080 = 6,803,160, fee
+    // 68,031. Deposits 16,803,160.
+    stubDetection([
+      {
+        entry,
+        class: "burnable",
+        collection: null,
+        metadataLamports: 13_733_800,
+      },
+    ]);
+    renderSection({ entries: [entry], feeReady: true });
+    await waitFor(() => {
+      expect(screen.getByText("Burn and close")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("Burn and close"));
+    await waitFor(() => {
+      expect(screen.getByText("Burn NFT and close its accounts")).toBeDefined();
+    });
+    const body = document.body.textContent ?? "";
+    // The fee line carries the RETURN base, never the deposits.
+    expect(body).toContain(
+      "The fee is 1 percent of the SOL these closes return, floored to whole lamports: 68031 lamports of 6803160 lamports"
+    );
+    // The husk disclosure names the stored fee.
+    expect(body).toContain(
+      "The three deposits hold 0.016803 SOL in total; the metadata account carries a stored Metaplex create fee which stays in a one-byte husk that only Metaplex can claim."
+    );
+    expect(body).toContain(
+      "The three accounts’ rent, 0.006803 SOL, returns to your wallet."
+    );
+    expect(document.querySelectorAll("img").length).toBe(0);
   });
 
   it("renders the abort card when the fresh read shows a non-master edition", async () => {

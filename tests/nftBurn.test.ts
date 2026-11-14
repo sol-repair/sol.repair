@@ -33,7 +33,6 @@ import {
   NFT_BURN_CARD_STRANDING,
   isMetadataFeeHusk,
   metadataReturnLamports,
-  nftBurnCardFeeLineFeeEra,
   nftBurnCardIntroFeeEra,
   NFT_METADATA_ONLY_COPY,
   buildBurnNftInstruction,
@@ -659,6 +658,9 @@ describe("evaluateNftGate (the N1-N7 abort rows)", () => {
       expect(verdict.metadataLamports).toBe(3733800);
       expect(verdict.metadataReturnLamports).toBe(3733800);
       expect(verdict.editionLamports).toBe(1030080);
+      // The fee base ruling (owner word 2026-11-13): 1% of the ACTUAL
+      // return, never of lamports the user does not receive.
+      expect(verdict.returnLamports).toBe(6803160);
       expect(verdict.collectionVerified).toBe(true);
       expect(verdict.collectionKey).toBe(SAGA_COLLECTION_MINT);
     }
@@ -896,7 +898,7 @@ describe("nftBurn copy", () => {
     );
   });
 
-  it("pins the fee-era intro and fee line (the stored-create-fee shape)", () => {
+  it("pins the fee-era intro (the stored-create-fee shape)", () => {
     const intro = nftBurnCardIntroFeeEra("0.005115", "0.015115");
     expect(intro).toContain(
       "The three accounts\u2019 rent, 0.005115 SOL, returns to your wallet."
@@ -904,11 +906,8 @@ describe("nftBurn copy", () => {
     expect(intro).toContain(
       "The three deposits hold 0.015115 SOL in total; the metadata account carries a stored Metaplex create fee which stays in a one-byte husk that only Metaplex can claim."
     );
-    expect(nftBurnCardFeeLineFeeEra("151152", "15115200")).toContain(
-      "The fee is 1 percent of the three deposits, floored to whole lamports: 151152 lamports of 15115200 lamports."
-    );
     // The mechanical rules hold on the variants too.
-    for (const text of [intro, nftBurnCardFeeLineFeeEra("1", "100")]) {
+    for (const text of [intro]) {
       expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
       expect(text.includes("!")).toBe(false);
       expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);

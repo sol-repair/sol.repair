@@ -956,6 +956,12 @@ export type NftGateVerdict =
        *  metadata priced exactly at today's minimum - the whole
        *  current cohort. */
       metadataReturnLamports: number;
+      /** The FEE BASE under the owner ruling (2026-11-13): the ACTUAL
+       *  return - token (SPL closes return everything) + edition (the
+       *  close takes the whole balance for non-metadata keys) +
+       *  metadata (capped at today's rent-exempt minimum). Never 1% of
+       *  lamports the user does not receive. */
+      returnLamports: number;
       collectionVerified: boolean;
       collectionKey: string | null;
       name: string | null;
@@ -1026,11 +1032,13 @@ export function evaluateNftGate(
   if (e.supply !== null && BigInt(e.supply) > 0n) {
     return { kind: "abort", reason: "has-prints" };
   }
+  const metadataReturn = m.returnLamports;
   return {
     kind: "pass",
     tokenLamports: t.lamports,
     metadataLamports: m.lamports,
-    metadataReturnLamports: m.returnLamports,
+    metadataReturnLamports: metadataReturn,
+    returnLamports: t.lamports + metadataReturn + e.lamports,
     editionLamports: e.lamports,
     collectionVerified: m.collectionVerified,
     collectionKey: m.collectionKey,
@@ -1160,14 +1168,6 @@ export const nftBurnCardFeeLine = (
 ): string =>
   `The fee is 1 percent of the SOL these closes return, floored to whole lamports: ${feeLamports} lamports of ${rentLamports} lamports. It is a plain transfer in the same transaction, visible before you approve, charged only if the transaction succeeds. Burning the token itself destroys it and is charged nothing.`;
 
-/** The fee-era fee line: the ruling's base is the three deposits'
- *  pre-balances (memo section 1.3), stated as such when a stored fee
- *  makes the deposits differ from what the closes return. */
-export const nftBurnCardFeeLineFeeEra = (
-  feeLamports: string,
-  depositLamports: string
-): string =>
-  `The fee is 1 percent of the three deposits, floored to whole lamports: ${feeLamports} lamports of ${depositLamports} lamports. It is a plain transfer in the same transaction, visible before you approve, charged only if the transaction succeeds. Burning the token itself destroys it and is charged nothing.`;
 
 /** The scan row's summary (memo section 1.5 row label). */
 export const nftRowSummary = (rentSol: string, feeSol: string): string =>

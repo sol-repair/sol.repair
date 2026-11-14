@@ -309,8 +309,9 @@ export function useNftBurn() {
         // reviewed figure, the flow stops before anything is built or
         // signed and requires a fresh review click. Callers that omit
         // the reviewed figure keep the drift-consent behavior.
-        const rentBeforeAction =
-          verdict.tokenLamports + verdict.metadataLamports + verdict.editionLamports;
+        // The consented figure under the owner ruling (2026-11-13):
+        // the ACTUAL return, which is also the fee base.
+        const rentBeforeAction = verdict.returnLamports;
         if (reviewed && reviewed.rentLamports !== undefined && reviewed.rentLamports !== rentBeforeAction) {
           setRunState({
             status: "error",
@@ -451,6 +452,12 @@ export function useNftBurn() {
           // recovered, and is charged nothing beyond its share of the
           // close base.
           if (feeReady) {
+            // The fee base is the ACTUAL return (owner ruling
+            // 2026-11-13): each entry carries what ITS close returns -
+            // token and edition in full (SPL close and the program's
+            // whole-balance close), the metadata capped at today's
+            // rent-exempt minimum. The stored Metaplex create fee, when
+            // one exists, is never charged.
             const mintKey = new PublicKey(candidate.mint);
             const fee = buildFeeTransfer(actionOwner, [
               {
@@ -462,7 +469,7 @@ export function useNftBurn() {
               {
                 pubkey: findMetadataPda(mintKey).toBase58(),
                 mint: candidate.mint,
-                lamports: verdict.metadataLamports,
+                lamports: verdict.metadataReturnLamports,
                 program: "spl",
               },
               {

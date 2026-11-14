@@ -48,7 +48,6 @@ import {
   findMasterEditionPda,
   findMetadataPda,
   nftBurnCardFeeLine,
-  nftBurnCardFeeLineFeeEra,
   nftBurnCardIntro,
   nftBurnCardIntroFeeEra,
   NFT_ALREADY_GONE_COPY,
@@ -354,13 +353,12 @@ export function NftBurnSection({
               d.candidate.mint,
               publicKey.toBase58()
             );
-            if (verdict.kind === "pass") {
+            if (verdict.kind === 'pass') {
               return {
-                state: "pass",
-                rentLamports:
-                  verdict.tokenLamports +
-                  verdict.metadataLamports +
-                  verdict.editionLamports,
+                state: 'pass',
+                // The consented figure and the fee base: the ACTUAL
+                // return (owner ruling 2026-11-13).
+                rentLamports: verdict.returnLamports,
                 tokenLamports: verdict.tokenLamports,
                 metadataLamports: verdict.metadataLamports,
                 metadataReturnLamports: verdict.metadataReturnLamports,
@@ -437,7 +435,7 @@ export function NftBurnSection({
           {
             pubkey: findMetadataPda(mintKey).toBase58(),
             mint: reviewing.candidate.mint,
-            lamports: gatePreview.metadataLamports,
+            lamports: gatePreview.metadataReturnLamports,
             program: "spl",
           },
           {
@@ -519,7 +517,7 @@ export function NftBurnSection({
           {
             pubkey: findMetadataPda(mintKey).toBase58(),
             mint: reviewing.candidate.mint,
-            lamports: gatePreview.metadataLamports,
+            lamports: gatePreview.metadataReturnLamports,
             program: "spl",
           },
           {
@@ -825,37 +823,38 @@ export function NftBurnSection({
           {gatePreview.state === "pass" && (
             <>
               {(() => {
-                const depositSol = lamportsToSol(BigInt(gatePreview.rentLamports));
-                const returnLamports =
-                  gatePreview.tokenLamports +
-                  gatePreview.metadataReturnLamports +
-                  gatePreview.editionLamports;
+                // The figures under the owner ruling (2026-11-13):
+                // gatePreview.rentLamports IS the actual return (the
+                // fee base). The deposit total is shown separately with
+                // the husk disclosure when a stored Metaplex create fee
+                // makes the deposits differ from the return.
+                const returnSol = lamportsToSol(
+                  BigInt(gatePreview.rentLamports)
+                );
                 const feeLamports = BigInt(gatePreview.rentLamports) / 100n;
-                if (returnLamports === gatePreview.rentLamports) {
-                  return (
-                    <>
-                      <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                        {nftBurnCardIntro(depositSol)}
-                      </p>
-                      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                        {nftBurnCardFeeLine(
-                          feeLamports.toString(),
-                          gatePreview.rentLamports.toString()
-                        )}
-                      </p>
-                    </>
-                  );
-                }
+                const depositTotal =
+                  gatePreview.tokenLamports +
+                  gatePreview.metadataLamports +
+                  gatePreview.editionLamports;
+                const feeHusk =
+                  gatePreview.metadataReturnLamports !==
+                  gatePreview.metadataLamports;
                 return (
                   <>
-                    <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                      {nftBurnCardIntroFeeEra(
-                        lamportsToSol(BigInt(returnLamports)),
-                        depositSol
-                      )}
-                    </p>
+                    {feeHusk ? (
+                      <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                        {nftBurnCardIntroFeeEra(
+                          returnSol,
+                          lamportsToSol(BigInt(depositTotal))
+                        )}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                        {nftBurnCardIntro(returnSol)}
+                      </p>
+                    )}
                     <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-                      {nftBurnCardFeeLineFeeEra(
+                      {nftBurnCardFeeLine(
                         feeLamports.toString(),
                         gatePreview.rentLamports.toString()
                       )}
