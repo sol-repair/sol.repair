@@ -33,7 +33,7 @@ export const LAST_MODIFIED: Record<string, string> = {
   "/guides/close-token-accounts": "2026-11-01",
   "/guides/what-did-i-just-sign": "2026-11-11",
   "/guides/repair-transaction": "2026-11-14",
-  "/guides": "2026-11-13",
+  "/guides": "2026-11-14",
   "/terms": "2026-11-11",
   "/privacy": "2026-11-14",
 };
