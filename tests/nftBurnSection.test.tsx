@@ -24,6 +24,7 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   holder: { publicKey: null as PublicKey | null },
+  unstable: false,
   conn: {
     getMultipleAccountsInfo: vi.fn(),
     getMinimumBalanceForRentExemption: vi.fn().mockResolvedValue(3733800),
@@ -36,7 +37,7 @@ vi.mock("@solana/wallet-adapter-react", () => ({
 }));
 
 vi.mock("@/hooks/useRpcConnection", () => ({
-  useRpcConnection: () => mocks.conn,
+  useRpcConnection: () => (mocks.unstable ? { ...mocks.conn } : mocks.conn),
 }));
 
 vi.mock("@/hooks/useNftBurn", () => ({
@@ -326,6 +327,31 @@ describe("NftBurnSection detection states", () => {
     ).toBeNull();
   });
 
+  it("runs detection once per scan even when the connection identity churns", async () => {
+    // mintAuthorityDisplay’s useConnection mock returns an inline {} per
+    // render; through useRpcConnection’s memo the connection identity
+    // churns every render. The detection effect keyed on the connection,
+    // so each churn re-fired detection -> setDetected -> render -> more
+    // churn: an infinite loop that wedged the whole test worker (the CI
+    // gate, three consecutive runs). The contract: detection runs ONCE
+    // per scan + explicit retry, reading the latest connection through
+    // a ref.
+    const entry = nftEntry();
+    mocks.unstable = true;
+    stubDetection([{ entry, class: "burnable" }]);
+    renderSection({ entries: [entry] });
+    await waitFor(() => {
+      expect(screen.getByText("Burn and close")).toBeDefined();
+    });
+    const callsAfterSettled = mocks.conn.getMultipleAccountsInfo.mock.calls.length;
+    expect(callsAfterSettled).toBeGreaterThan(0);
+    // One quiet period after settling: no re-detection churn.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(mocks.conn.getMultipleAccountsInfo.mock.calls.length).toBe(
+      callsAfterSettled
+    );
+    mocks.unstable = false;
+  });
   it("renders the honest reading state while detection is in flight", async () => {
     const entry = nftEntry();
     const holder: { resolve?: (v: unknown) => void } = {};

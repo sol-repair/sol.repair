@@ -33,7 +33,7 @@
  * em-dashes, no emojis, no exclamation marks, curly apostrophes.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import { PublicKey, VersionedTransaction } from "@solana/web3.js";
@@ -264,14 +264,28 @@ export function NftBurnSection({
   const [detected, setDetected] = useState<DetectionState | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
 
+  // The LATEST connection without re-firing detection: the M9 failover
+  // proxy and the adapter can rotate the connection object's identity
+  // without any scan change, and a test harness may hand the section a
+  // fresh wrapper object every render. Detection is keyed on the SCAN
+  // and the explicit retry only; it reads the connection through this
+  // ref. (A detection effect keyed on connection identity re-fired on
+  // every churn -> setDetected -> render -> more churn: an infinite
+  // loop that wedged a whole test worker; found 2026-11-14.)
+  const connectionRef = useRef(connection);
   useEffect(() => {
-    if (candidates.length === 0) {
-      setDetected({ candidates, status: "done", detected: [] });
-      return;
-    }
+    connectionRef.current = connection;
+  }, [connection]);
+
+  useEffect(() => {
+    // Empty candidates: nothing to read, nothing to detect. The render
+    // derives "nothing offered" directly (no detection state at all),
+    // and the routing effect below reports the empty pending set from
+    // the candidates alone.
+    if (candidates.length === 0) return;
     let cancelled = false;
     setDetected({ candidates, status: "reading" });
-    detectNftCandidates(connection, candidates)
+    detectNftCandidates(connectionRef.current, candidates)
       .then((found) => {
         if (!cancelled) {
           setDetected({ candidates, status: "done", detected: found });
@@ -283,7 +297,7 @@ export function NftBurnSection({
     return () => {
       cancelled = true;
     };
-  }, [connection, candidates, retryNonce]);
+  }, [candidates, retryNonce]);
 
   // The routing contract upward: pending covers every candidate while
   // the classification is unread (detection reading or failed); the

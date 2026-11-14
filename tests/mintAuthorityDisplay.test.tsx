@@ -189,6 +189,7 @@ vi.mock("@/components/WalletButton", () => ({
   WalletButton: () => null,
 }));
 
+
 const HOME = () => import("../src/app/page");
 
 async function renderHomeWithScan(result: ScanResult | null) {
