@@ -6,10 +6,12 @@
  * fetch + extraction logic; nothing here builds or signs anything.
  *
  * "A fee" is defined reproducibly: a System transfer INTO the fee wallet
- * that happened inside a repair transaction (a transaction that also
- * contains a token-program closeAccount instruction). That definition
- * excludes the fee wallet's initial seed funding, which was a plain
- * transfer and is not a fee.
+ * that happened inside a fee-bearing transaction - a transaction that
+ * contains a token-program closeAccount instruction, or a Metaplex
+ * BurnNft instruction (tag 29, the dead-NFT burn-and-close whose three
+ * closes ride as CPI inner instructions, recognized 2026-11-13 per the
+ * dead-NFT scope memo §1.4). That definition excludes the fee wallet's
+ * initial seed funding, which was a plain transfer and is not a fee.
  *
  * Why transactions are fetched base64-encoded and decoded here: the public
  * Solana endpoints no longer serve parsed transactions (getParsedTransaction
@@ -88,11 +90,13 @@ export type FeeLedgerRow = {
   blockTime: number | null;
   lamports: number;
   /** Conformance to the fee rule: true when the inbound lamports equal
-   *  exactly floor(1%) of the SOL this transaction's closeAccount
-   *  instructions freed — the shape every real SOL.repair fee has. False
-   *  when they differ: the page marks the row (never hides it), because a
-   *  crafted transfer inside a repair-shaped transaction must not display
-   *  as ordinary revenue. Null when the rent cannot be computed from the
+   *  exactly floor(1%) of the SOL this transaction's fee-bearing
+   *  instructions freed (closeAccount accounts, plus the metadata,
+   *  token, and master edition accounts of every Metaplex BurnNft) —
+   *  the shape every real SOL.repair fee has. False when they differ:
+   *  the page marks the row (never hides it), because a crafted
+   *  transfer inside a repair-shaped transaction must not display as
+   *  ordinary revenue. Null when the rent cannot be computed from the
    *  response — no verdict, no accusation, no tag. Encodes today's 1%
    *  rate (FEE_PERCENT); if the fee ever changes, this must become
    *  era-aware. */
@@ -177,6 +181,12 @@ export type RawTransaction = {
      *  message account keys in wire order: static keys, then loaded
      *  writable, then loaded readonly. */
     preBalances?: number[];
+    /** Lamports of each account after the transaction, same index
+     *  order. The Metaplex BurnNft fee rule counts preBalances -
+     *  postBalances of its closed keys: the ACTUAL return, which a
+     *  husked metadata close (the stored create fee stays behind)
+     *  reports honestly. */
+    postBalances?: number[];
     loadedAddresses?: { readonly?: string[]; writable?: string[] };
     innerInstructions?: {
       index?: number;
@@ -194,6 +204,20 @@ export type RawTransaction = {
 /* CloseAccount is the token program's instruction tag 9 in both the
  * classic SPL program and Token-2022; the data is the tag byte alone. */
 const CLOSE_ACCOUNT_TAG = 9;
+
+/* The Metaplex Token Metadata program and its BurnNft instruction: a
+ * single data byte (29), whose account keys 0, 3, and 4 (metadata PDA,
+ * token account, master edition PDA) are the three accounts the burn
+ * closes by CPI. A BurnNft transaction carries ZERO outer closeAccount
+ * instructions, so the dead-NFT fee rule (scope memo 2026-11-13 §1.4)
+ * counts those three accounts' preBalances as the rent the transaction
+ * freed. BurnEditionNft (37) and Burn (41) are different instructions
+ * the v1 NFT slice does not charge and this rule does not count. */
+const METAPLEX_TOKEN_METADATA_PROGRAM_ID =
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
+const MPL_BURN_NFT_TAG = 29;
+/** The BurnNft account keys whose preBalances the fee rule counts. */
+const MPL_BURN_NFT_CLOSED_KEYS = [0, 3, 4] as const;
 
 /* System program instruction tags: Transfer = 2, TransferWithSeed = 11.
  * Both put the lamports u64 at byte offset 4. */
@@ -486,6 +510,26 @@ function isCloseAccount(ix: DecodedInstruction): boolean {
   );
 }
 
+/** The Metaplex BurnNft instruction: program + exactly the tag byte 29
+ *  of data. The account-key positions it closes are fixed by the
+ *  wire (keys 0, 3, 4); an instruction with fewer keys than that is
+ *  not the shape and yields no rent verdict (closedRentLamports
+ *  returns null for it rather than a guess). */
+function isMplBurnNft(ix: DecodedInstruction): boolean {
+  return (
+    ix.programId === METAPLEX_TOKEN_METADATA_PROGRAM_ID &&
+    ix.data.length === 1 &&
+    ix.data[0] === MPL_BURN_NFT_TAG
+  );
+}
+
+/** The one fee-bearing transaction shapes: a token-program closeAccount
+ *  (repair, dust burn-and-close, unwrap) or a Metaplex BurnNft (the
+ *  dead-NFT burn-and-close, whose three closes are CPI inner). */
+function isFeeBearingShape(ix: DecodedInstruction): boolean {
+  return isCloseAccount(ix) || isMplBurnNft(ix);
+}
+
 /** Lamports a decoded instruction moved INTO the fee wallet, or 0. */
 function inboundTransferLamports(
   ix: DecodedInstruction,
@@ -507,24 +551,55 @@ function inboundTransferLamports(
   return Number.isSafeInteger(lamports) && lamports > 0 ? lamports : 0;
 }
 
-/** Total rent the transaction's closeAccount instructions freed (the
- *  closed accounts' pre-tx lamports), or null when it cannot be computed
- *  from the response — a missing/truncated preBalances array or an
- *  unresolvable account index means no verdict rather than a guess. */
+/** Total rent the transaction's fee-bearing instructions freed (the
+ *  closed accounts' pre-tx lamports): each token-program closeAccount
+ *  contributes its closed account's preBalance, and each Metaplex
+ *  BurnNft contributes the preBalances of its metadata, token, and
+ *  master edition accounts (keys 0, 3, 4 - the three closes the
+ *  instruction performs by CPI). Null when it cannot be computed from
+ *  the response — a missing/truncated preBalances array, an
+ *  unresolvable account index, or a BurnNft with fewer than the five
+ *  keys the rule reads means no verdict rather than a guess. */
 function closedRentLamports(
   decoded: { instructions: DecodedInstruction[]; accountKeys: string[] },
-  preBalances: number[] | undefined
+  preBalances: number[] | undefined,
+  postBalances: number[] | undefined
 ): number | null {
   if (!Array.isArray(preBalances)) return null;
   let total = 0;
   for (const ix of decoded.instructions) {
-    if (!isCloseAccount(ix)) continue;
-    const closed = ix.accountPubkeys[0];
-    const index = decoded.accountKeys.indexOf(closed);
-    if (index < 0 || index >= preBalances.length) return null;
-    const lamports = preBalances[index];
-    if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
-    total += lamports;
+    const isBurnNft = isMplBurnNft(ix);
+    const closedKeys: readonly number[] = isBurnNft
+      ? MPL_BURN_NFT_CLOSED_KEYS
+      : isCloseAccount(ix)
+        ? [0]
+        : [];
+    if (closedKeys.length === 0) continue;
+    // The BurnNft rent is the ACTUAL return (preBalances - postBalances
+    // of keys 0/3/4, owner ruling 2026-11-13): a husked metadata close
+    // keeps its stored fee behind, and preBalances alone would count
+    // lamports the user never received. A missing postBalances array
+    // means no verdict, never a guess.
+    const burnedPostBalances = isBurnNft ? postBalances : undefined;
+    if (isBurnNft && !Array.isArray(burnedPostBalances)) return null;
+    const post = burnedPostBalances as number[];
+    for (const key of closedKeys) {
+      const closed = ix.accountPubkeys[key];
+      if (closed === undefined) return null;
+      const index = decoded.accountKeys.indexOf(closed);
+      if (index < 0 || index >= preBalances.length) return null;
+      const lamports = preBalances[index];
+      if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
+      let contribution = lamports;
+      if (isBurnNft) {
+        if (index >= post.length) return null;
+        const postLamports = post[index];
+        if (!Number.isSafeInteger(postLamports) || postLamports < 0) return null;
+        contribution = lamports - postLamports;
+        if (contribution < 0) return null;
+      }
+      total += contribution;
+    }
   }
   return total;
 }
@@ -546,7 +621,7 @@ export function feeRowsFromRawTransactions(
     if (!raw || raw.meta?.err != null) continue;
     const decoded = decodeRawTransaction(raw);
     if (!decoded) continue;
-    if (!decoded.instructions.some(isCloseAccount)) continue;
+    if (!decoded.instructions.some(isFeeBearingShape)) continue;
     const lamports = decoded.instructions.reduce(
       (sum, ix) => sum + inboundTransferLamports(ix, feeWallet),
       0
@@ -554,7 +629,11 @@ export function feeRowsFromRawTransactions(
     if (lamports <= 0) continue;
     // Same arithmetic as the frozen fee builder (fees.ts): BigInt
     // division truncates, i.e. floor, with no float drift possible.
-    const rent = closedRentLamports(decoded, raw.meta?.preBalances);
+    const rent = closedRentLamports(
+      decoded,
+      raw.meta?.preBalances,
+      raw.meta?.postBalances
+    );
     const onePercentMatch =
       rent === null
         ? null
