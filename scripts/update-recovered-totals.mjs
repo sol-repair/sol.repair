@@ -201,7 +201,17 @@ for (const s of uniqueSigs) {
     for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
       const src = burn.accounts?.[key];
       const idx = src === undefined ? -1 : keys.indexOf(src);
-      if (idx >= 0) freed += BigInt(t.meta.preBalances[idx]);
+      if (idx < 0) continue;
+      // The BurnNft rent is the ACTUAL return (preBalances -
+      // postBalances, owner ruling 2026-11-13): a husked metadata close
+      // keeps its stored fee behind, and preBalances alone would count
+      // lamports the user never received. postBalances rides every
+      // real getParsedTransaction response; a missing entry undercounts
+      // the freed figure, which then fails the 1% check and aborts the
+      // run - never a silent pass.
+      const pre = BigInt(t.meta.preBalances[idx]);
+      const post = BigInt(t.meta.postBalances?.[idx] ?? 0);
+      freed += pre - post;
     }
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);

@@ -62,6 +62,17 @@ const TOKEN_PROGRAMS = new Set([
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
 ]);
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+// The Metaplex Token Metadata program and its BurnNft instruction (tag
+// 29, one data byte): the dead-NFT burn-and-close whose three closes
+// (metadata PDA, token account, master edition PDA - the instruction's
+// account keys 0, 3, 4) ride as CPI inner instructions. Owner ruling
+// 2026-11-13 (directive item 4): these rows enter the bell's 1% audit,
+// and their rent is the ACTUAL return (preBalances - postBalances of
+// keys 0, 3, 4) - a husked metadata close keeps its stored fee behind,
+// and preBalances alone would bless lamports the user never received.
+const MPL_TOKEN_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
+const MPL_BURN_NFT_TAG = 29;
+const MPL_BURN_NFT_CLOSED_KEYS = [0, 3, 4];
 // Signatures per listing page; the walk repeats until a short page ends
 // the history. Transaction fetches pace at one per second: the bell
 // walks the ledger from a shared GitHub Actions IP, which the public
@@ -267,10 +278,67 @@ for (const entry of sigs) {
       ix.data.length === 1 &&
       ix.data[0] === 9
   );
+  // The Metaplex BurnNft shape (the dead-NFT burn-and-close, owner
+  // ruling 2026-11-13, directive item 4): recognized alongside closes,
+  // audited against the same 1% rule, with the rent computed as the
+  // ACTUAL return (preBalances - postBalances of account keys 0, 3, 4)
+  // - a husked metadata close keeps its stored fee behind, and
+  // preBalances alone would bless lamports the user never received.
+  const mplBurns = ixs.filter(
+    (ix) =>
+      ix.programId === MPL_TOKEN_METADATA_PROGRAM &&
+      ix.data.length === 1 &&
+      ix.data[0] === MPL_BURN_NFT_TAG
+  );
   if (closes.length === 0) {
-    notRepairShaped += 1;
-    continue; // not repair-shaped
+    if (mplBurns.length === 0) {
+      notRepairShaped += 1;
+      continue; // not repair-shaped
+    }
+    const lamports = ixs.reduce((sum, ix) => sum + inboundLamports(ix), 0);
+    if (lamports <= 0) {
+      notRepairShaped += 1;
+      continue;
+    }
+    checked += 1;
+    fees += lamports;
+    let rent = 0;
+    let verdictPossible = true;
+    const pre = tx.meta?.preBalances;
+    const post = tx.meta?.postBalances;
+    if (!Array.isArray(pre) || !Array.isArray(post)) {
+      verdictPossible = false;
+    } else {
+      for (const burn of mplBurns) {
+        for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
+          const index = accountKeys.indexOf(burn.accounts[key]);
+          if (index < 0 || index >= pre.length || index >= post.length) {
+            verdictPossible = false;
+            break;
+          }
+          const delta = pre[index] - post[index];
+          if (delta < 0) {
+            verdictPossible = false;
+            break;
+          }
+          rent += delta;
+        }
+        if (!verdictPossible) break;
+      }
+    }
+    if (!verdictPossible) {
+      noVerdict.push(entry.signature);
+      continue;
+    }
+    const expected = Math.floor(rent / 100);
+    if (lamports !== expected) {
+      violations.push({ signature: entry.signature, lamports, rent, expected });
+    }
+    await sleep(TX_PACING_MS);
+    continue;
   }
+  // Metaplex BurnNft rows riding WITH closes in one transaction are
+  // audited below, together with the closes, under the combined rent.
   const lamports = ixs.reduce((sum, ix) => sum + inboundLamports(ix), 0);
   if (lamports <= 0) {
     notRepairShaped += 1;
@@ -278,7 +346,8 @@ for (const entry of sigs) {
   }
   checked += 1;
   fees += lamports;
-  // Rent freed: each closed account's pre-tx balance.
+  // Rent freed: each closed account's pre-tx balance; each BurnNft's
+  // closed keys' preBalance minus its postBalance.
   let rent = 0;
   let verdictPossible = true;
   for (const close of closes) {
@@ -289,6 +358,30 @@ for (const entry of sigs) {
       break;
     }
     rent += pre[index];
+  }
+  if (verdictPossible && mplBurns.length > 0) {
+    const pre = tx.meta?.preBalances;
+    const post = tx.meta?.postBalances;
+    if (!Array.isArray(pre) || !Array.isArray(post)) {
+      verdictPossible = false;
+    } else {
+      for (const burn of mplBurns) {
+        for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
+          const index = accountKeys.indexOf(burn.accounts[key]);
+          if (index < 0 || index >= pre.length || index >= post.length) {
+            verdictPossible = false;
+            break;
+          }
+          const delta = pre[index] - post[index];
+          if (delta < 0) {
+            verdictPossible = false;
+            break;
+          }
+          rent += delta;
+        }
+        if (!verdictPossible) break;
+      }
+    }
   }
   if (!verdictPossible) {
     noVerdict.push(entry.signature);

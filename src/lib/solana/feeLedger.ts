@@ -181,6 +181,12 @@ export type RawTransaction = {
      *  message account keys in wire order: static keys, then loaded
      *  writable, then loaded readonly. */
     preBalances?: number[];
+    /** Lamports of each account after the transaction, same index
+     *  order. The Metaplex BurnNft fee rule counts preBalances -
+     *  postBalances of its closed keys: the ACTUAL return, which a
+     *  husked metadata close (the stored create fee stays behind)
+     *  reports honestly. */
+    postBalances?: number[];
     loadedAddresses?: { readonly?: string[]; writable?: string[] };
     innerInstructions?: {
       index?: number;
@@ -556,17 +562,27 @@ function inboundTransferLamports(
  *  keys the rule reads means no verdict rather than a guess. */
 function closedRentLamports(
   decoded: { instructions: DecodedInstruction[]; accountKeys: string[] },
-  preBalances: number[] | undefined
+  preBalances: number[] | undefined,
+  postBalances: number[] | undefined
 ): number | null {
   if (!Array.isArray(preBalances)) return null;
   let total = 0;
   for (const ix of decoded.instructions) {
-    const closedKeys: readonly number[] = isMplBurnNft(ix)
+    const isBurnNft = isMplBurnNft(ix);
+    const closedKeys: readonly number[] = isBurnNft
       ? MPL_BURN_NFT_CLOSED_KEYS
       : isCloseAccount(ix)
         ? [0]
         : [];
     if (closedKeys.length === 0) continue;
+    // The BurnNft rent is the ACTUAL return (preBalances - postBalances
+    // of keys 0/3/4, owner ruling 2026-11-13): a husked metadata close
+    // keeps its stored fee behind, and preBalances alone would count
+    // lamports the user never received. A missing postBalances array
+    // means no verdict, never a guess.
+    const burnedPostBalances = isBurnNft ? postBalances : undefined;
+    if (isBurnNft && !Array.isArray(burnedPostBalances)) return null;
+    const post = burnedPostBalances as number[];
     for (const key of closedKeys) {
       const closed = ix.accountPubkeys[key];
       if (closed === undefined) return null;
@@ -574,7 +590,15 @@ function closedRentLamports(
       if (index < 0 || index >= preBalances.length) return null;
       const lamports = preBalances[index];
       if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
-      total += lamports;
+      let contribution = lamports;
+      if (isBurnNft) {
+        if (index >= post.length) return null;
+        const postLamports = post[index];
+        if (!Number.isSafeInteger(postLamports) || postLamports < 0) return null;
+        contribution = lamports - postLamports;
+        if (contribution < 0) return null;
+      }
+      total += contribution;
     }
   }
   return total;
@@ -605,7 +629,11 @@ export function feeRowsFromRawTransactions(
     if (lamports <= 0) continue;
     // Same arithmetic as the frozen fee builder (fees.ts): BigInt
     // division truncates, i.e. floor, with no float drift possible.
-    const rent = closedRentLamports(decoded, raw.meta?.preBalances);
+    const rent = closedRentLamports(
+      decoded,
+      raw.meta?.preBalances,
+      raw.meta?.postBalances
+    );
     const onePercentMatch =
       rent === null
         ? null

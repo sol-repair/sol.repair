@@ -375,6 +375,27 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
     );
   }
 
+  /** Post-balances for a FULL close: every closed account ends at 0.
+   *  The tag-29 rent is preBalances - postBalances of keys 0/3/4
+   *  (owner ruling 2026-11-13, directive item 3): identical to the
+   *  preBalances figure for full closes, and the ACTUAL return for
+   *  husked closes. */
+  function postBalancesFor(
+    message: Message,
+    burn: { metadata: PublicKey; token: PublicKey; edition: PublicKey },
+    overrides: Partial<{ metadata: number; token: number; edition: number }> = {}
+  ): number[] {
+    return message.accountKeys.map((k) =>
+      k.equals(burn.metadata)
+        ? (overrides.metadata ?? 0)
+        : k.equals(burn.token)
+          ? (overrides.token ?? 0)
+          : k.equals(burn.edition)
+            ? (overrides.edition ?? 0)
+            : 1
+    );
+  }
+
   it("extracts a fee row from a BurnNft transaction that has no outer closeAccount", () => {
     // The load-bearing case: under the close-only rule this returned no
     // row, making the feature's own fees invisible to the site's central
@@ -390,15 +411,96 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
     ]);
   });
 
-  it("marks a BurnNft fee conforming when it equals floor(1%) of the three accounts' preBalances", () => {
+  it("marks a BurnNft fee conforming when it equals floor(1%) of the returned rent (full closes: post 0)", () => {
     const { ix, metadata, token, edition } = burnNftIx();
     const { raw, message } = buildLegacyRaw([
       ix,
       systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
     ]);
     raw.meta!.preBalances = preBalancesFor(message, { metadata, token, edition });
+    raw.meta!.postBalances = postBalancesFor(message, { metadata, token, edition });
     const rows = feeRowsFromRawTransactions([{ signature: "nftconform", raw }], FEE_WALLET);
     expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  // The owner-ruling fixture (directive item 3), the DEVNET-MEASURED
+  // pre-cut shape from receipt phase6-precut (signature
+  // 65JncJEV7d8YKKCKx5L5ti6YLPv4kGpjbDF47jN1fKDZBXhucyHDpTYnLiaXEzX6XNARx893V2nd1DMmQsvtYosK):
+  // the metadata husked (pre 15,115,600, post 11,381,800 -> 3,733,800
+  // returned), token and edition closed in full. The return is
+  // 1,488,440 + 3,733,800 + 1,030,080 = 6,252,320; the ruling's fee is
+  // floor(1%) = 62,523.
+  const HUSK_FIGURES = {
+    metadataPre: 15_115_600,
+    metadataPost: 11_381_800,
+    tokenPre: 1_488_440,
+    editionPre: 1_030_080,
+    returned: 6_252_320,
+    fee: 62_523,
+  };
+
+  function huskedBalancesFor(
+    message: Message,
+    burn: { metadata: PublicKey; token: PublicKey; edition: PublicKey }
+  ): { pre: number[]; post: number[] } {
+    const pre: number[] = [];
+    const post: number[] = [];
+    for (const k of message.accountKeys) {
+      pre.push(1);
+      post.push(1);
+    }
+    const set = (key: PublicKey, preValue: number, postValue: number) => {
+      const idx = message.accountKeys.findIndex((k) => k.equals(key));
+      pre[idx] = preValue;
+      post[idx] = postValue;
+    };
+    set(burn.metadata, HUSK_FIGURES.metadataPre, HUSK_FIGURES.metadataPost);
+    set(burn.token, HUSK_FIGURES.tokenPre, 0);
+    set(burn.edition, HUSK_FIGURES.editionPre, 0);
+    return { pre, post };
+  }
+
+  it("marks the ruling's fee conforming for a HUSKED close (rent = pre - post)", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), HUSK_FIGURES.fee),
+    ]);
+    const { pre, post } = huskedBalancesFor(message, { metadata, token, edition });
+    raw.meta!.preBalances = pre;
+    raw.meta!.postBalances = post;
+    const rows = feeRowsFromRawTransactions([{ signature: "huskconform", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("marks a deposit-based fee non-conforming when a husk kept the excess", () => {
+    // The pre-ruling rule (1% of preBalances) would bless a fee the
+    // close did not earn: the husk-aware rule marks it.
+    const { ix, metadata, token, edition } = burnNftIx();
+    const depositBasedFee =
+      Math.floor(
+        (HUSK_FIGURES.metadataPre + HUSK_FIGURES.tokenPre + HUSK_FIGURES.editionPre) / 100
+      );
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), depositBasedFee),
+    ]);
+    const { pre, post } = huskedBalancesFor(message, { metadata, token, edition });
+    raw.meta!.preBalances = pre;
+    raw.meta!.postBalances = post;
+    const rows = feeRowsFromRawTransactions([{ signature: "depositfee", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("does not judge when postBalances is missing (no verdict, never a guess)", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      systemTransfer(new PublicKey(FEE_WALLET), HUSK_FIGURES.fee),
+    ]);
+    raw.meta!.preBalances = preBalancesFor(message, { metadata, token, edition });
+    const rows = feeRowsFromRawTransactions([{ signature: "nopost", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBeNull();
   });
 
   it("marks a BurnNft fee one lamport off the rule non-conforming", () => {
@@ -408,6 +510,7 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
       systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE + 1),
     ]);
     raw.meta!.preBalances = preBalancesFor(message, { metadata, token, edition });
+    raw.meta!.postBalances = postBalancesFor(message, { metadata, token, edition });
     const rows = feeRowsFromRawTransactions([{ signature: "nftoff", raw }], FEE_WALLET);
     expect(rows[0].onePercentMatch).toBe(false);
   });
@@ -515,6 +618,16 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
               ? 2_039_280
               : 1
     );
+    // Full closes: the closed accounts end at zero. The tag-29 keys'
+    // rent is pre - post; the closeAccount key stays preBalances.
+    raw.meta!.postBalances = message.accountKeys.map((k) =>
+      k.equals(metadata) ||
+      k.equals(token) ||
+      k.equals(edition) ||
+      k.equals(closed)
+        ? 0
+        : 1
+    );
     const rows = feeRowsFromRawTransactions([{ signature: "both", raw }], FEE_WALLET);
     expect(rows[0].onePercentMatch).toBe(true);
   });
@@ -542,6 +655,9 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
               : k.equals(edition)
                 ? NFT_RENTS.edition
                 : 1
+        ),
+        postBalances: message.staticAccountKeys.map((k) =>
+          k.equals(metadata) || k.equals(token) || k.equals(edition) ? 0 : 1
         ),
       },
       transaction: [Buffer.from(serialized).toString("base64"), "base64"],
