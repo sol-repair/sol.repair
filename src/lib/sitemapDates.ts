@@ -21,19 +21,19 @@
  * directories and fails any date that understates it.
  */
 export const LAST_MODIFIED: Record<string, string> = {
-  "/": "2026-11-10",
-  "/fees": "2026-11-11",
+  "/": "2026-11-14",
+  "/fees": "2026-11-14",
   "/understand": "2026-11-11",
-  "/report": "2026-11-01",
-  "/changelog": "2026-11-11",
+  "/report": "2026-11-14",
+  "/changelog": "2026-11-14",
   "/guides/random-tokens": "2026-11-01",
   "/guides/rent-reduction": "2026-11-01",
   "/guides/solana-rent": "2026-11-01",
   "/guides/token-approvals": "2026-11-11",
   "/guides/close-token-accounts": "2026-11-01",
   "/guides/what-did-i-just-sign": "2026-11-11",
-  "/guides/repair-transaction": "2026-11-11",
-  "/guides": "2026-11-11",
+  "/guides/repair-transaction": "2026-11-14",
+  "/guides": "2026-11-13",
   "/terms": "2026-11-11",
-  "/privacy": "2026-11-11",
+  "/privacy": "2026-11-14",
 };

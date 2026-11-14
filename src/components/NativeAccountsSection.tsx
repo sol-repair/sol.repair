@@ -208,6 +208,7 @@ export function NativeAccountsSection({
   revokeInFlight,
   burnInFlight,
   excessInFlight,
+  nftInFlight,
   onActionInFlightChange,
 }: {
   scan: ScanResult;
@@ -218,6 +219,8 @@ export function NativeAccountsSection({
   burnInFlight?: boolean;
   /** The G.4 excess-withdrawal action's in-flight signal. */
   excessInFlight?: boolean;
+  /** The dead-NFT burn action in-flight signal. */
+  nftInFlight?: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
 }) {
   const connection = useRpcConnection();
@@ -407,7 +410,8 @@ export function NativeAccountsSection({
     repairInFlight ||
     revokeInFlight ||
     burnInFlight === true ||
-    excessInFlight === true;
+    excessInFlight === true ||
+    nftInFlight === true;
 
   return (
     <div

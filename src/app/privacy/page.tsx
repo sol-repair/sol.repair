@@ -68,6 +68,14 @@ export default function PrivacyPage() {
                 wrapped-SOL state, Token-2022 extension data, and current rent
                 minimums.
               </li>
+              <li>
+                For NFTs you hold, the public metadata account behind the
+                token and, when it names a verified collection, the public
+                metadata account of that collection, so a burn card can show
+                the token&rsquo;s name and the collection&rsquo;s name. Those
+                names are self-declared on-chain text. No images are fetched:
+                the NFT cards show text only.
+              </li>
             </ul>
             <p className="mt-2">On the read-only pages:</p>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-400">

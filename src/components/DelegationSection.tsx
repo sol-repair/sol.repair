@@ -213,6 +213,7 @@ export function DelegationSection({
   unwrapInFlight,
   burnInFlight,
   excessInFlight,
+  nftInFlight,
   onActionInFlightChange,
 }: {
   scan: ScanResult;
@@ -226,6 +227,8 @@ export function DelegationSection({
   burnInFlight?: boolean;
   /** The G.4 excess-withdrawal action's in-flight signal. */
   excessInFlight?: boolean;
+  /** The dead-NFT burn action in-flight signal. */
+  nftInFlight?: boolean;
   onActionInFlightChange?: (inFlight: boolean) => void;
 }) {
   const connection = useRpcConnection();
@@ -381,7 +384,8 @@ export function DelegationSection({
     repairInFlight ||
     unwrapInFlight === true ||
     burnInFlight === true ||
-    excessInFlight === true;
+    excessInFlight === true ||
+    nftInFlight === true;
 
   return (
     <div
