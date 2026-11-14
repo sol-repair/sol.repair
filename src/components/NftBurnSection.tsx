@@ -256,9 +256,11 @@ export function NftBurnSection({
 
   // Detection carries an explicit state (the ExcessSection pattern): a
   // failed detection must never be indistinguishable from a scan that
-  // found nothing.
+  // found nothing. Only COMPLETION states are stored — the "reading"
+  // state is DERIVED (candidates present, no matching stored result),
+  // never set synchronously inside an effect (the set-state-in-effect
+  // lint rule, and no cascading renders by construction).
   type DetectionState =
-    | { candidates: NftScanCandidate[]; status: "reading" }
     | { candidates: NftScanCandidate[]; status: "failed" }
     | { candidates: NftScanCandidate[]; status: "done"; detected: DetectedNft[] };
   const [detected, setDetected] = useState<DetectionState | null>(null);
@@ -284,7 +286,6 @@ export function NftBurnSection({
     // the candidates alone.
     if (candidates.length === 0) return;
     let cancelled = false;
-    setDetected({ candidates, status: "reading" });
     detectNftCandidates(connectionRef.current, candidates)
       .then((found) => {
         if (!cancelled) {
@@ -302,16 +303,16 @@ export function NftBurnSection({
   // The routing contract upward: pending covers every candidate while
   // the classification is unread (detection reading or failed); the
   // burnable class is routed out of the dust flow once classified.
-  const detectionCurrent = detected !== null && detected.candidates === candidates;
+  const detectionCurrentDone =
+    detected !== null &&
+    detected.status === "done" &&
+    detected.candidates === candidates;
+  const detectionCurrentFailed =
+    detected !== null &&
+    detected.status === "failed" &&
+    detected.candidates === candidates;
   useEffect(() => {
-    if (!detectionCurrent || detected === null) {
-      onRoutingChange?.({
-        routed: new Set(),
-        pending: new Set(candidates.map((c) => c.pubkey)),
-      });
-      return;
-    }
-    if (detected.status !== "done") {
+    if (!detectionCurrentDone || detected === null) {
       onRoutingChange?.({
         routed: new Set(),
         pending: new Set(candidates.map((c) => c.pubkey)),
@@ -326,7 +327,7 @@ export function NftBurnSection({
       ),
       pending: new Set(),
     });
-  }, [detectionCurrent, detected, candidates, onRoutingChange]);
+  }, [detectionCurrentDone, detected, candidates, onRoutingChange]);
 
   // Report the in-flight signal upward (the affordance half; the
   // mutex is the guarantee).
@@ -551,7 +552,7 @@ export function NftBurnSection({
   if (candidates.length === 0) {
     return null;
   }
-  if (detectionCurrent && detected !== null && detected.status === "failed") {
+  if (detectionCurrentFailed) {
     // A failed check renders its own honest state, never
     // absence-of-section: a user cannot tell "no NFTs" from "the check
     // never ran" if the section silently disappears.
@@ -576,10 +577,7 @@ export function NftBurnSection({
       </div>
     );
   }
-  const detectedList =
-    detectionCurrent && detected !== null && detected.status === "done"
-      ? detected.detected
-      : null;
+  const detectedList = detectionCurrentDone ? detected!.detected : null;
   const burnable =
     detectedList !== null
       ? detectedList.filter((d) => d.class === "burnable")
