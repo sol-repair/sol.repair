@@ -346,41 +346,35 @@ for (const entry of sigs) {
   }
   checked += 1;
   fees += lamports;
-  // Rent freed: each closed account's pre-tx balance; each BurnNft's
-  // closed keys' preBalance minus its postBalance.
+  // Rent freed: UNIQUE closed accounts (deduplicated — a wallet can
+  // append its own closeAccount for the token account a BurnNft already
+  // closes), each counted once as preBalances - postBalances, the
+  // actual return (owner ruling 2026-11-13). closeAccount rows have
+  // post 0, so pre - post = pre — the figure the bell always counted.
   let rent = 0;
   let verdictPossible = true;
+  const closedAccounts = new Map();
   for (const close of closes) {
-    const index = accountKeys.indexOf(close.accounts[0]);
-    const pre = tx.meta?.preBalances;
-    if (index < 0 || !Array.isArray(pre) || index >= pre.length) {
-      verdictPossible = false;
-      break;
-    }
-    rent += pre[index];
+    closedAccounts.set(close.accounts[0], false);
   }
-  if (verdictPossible && mplBurns.length > 0) {
-    const pre = tx.meta?.preBalances;
-    const post = tx.meta?.postBalances;
-    if (!Array.isArray(pre) || !Array.isArray(post)) {
-      verdictPossible = false;
-    } else {
-      for (const burn of mplBurns) {
-        for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
-          const index = accountKeys.indexOf(burn.accounts[key]);
-          if (index < 0 || index >= pre.length || index >= post.length) {
-            verdictPossible = false;
-            break;
-          }
-          const delta = pre[index] - post[index];
-          if (delta < 0) {
-            verdictPossible = false;
-            break;
-          }
-          rent += delta;
-        }
-        if (!verdictPossible) break;
+  for (const burn of mplBurns) {
+    for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
+      const addr = burn.accounts[key];
+      closedAccounts.set(addr, true);
+    }
+  }
+  const pre = tx.meta?.preBalances;
+  const post = tx.meta?.postBalances;
+  if (!Array.isArray(pre) || !Array.isArray(post)) {
+    verdictPossible = false;
+  } else {
+    for (const [addr, sawBurnNft] of closedAccounts) {
+      const index = accountKeys.indexOf(addr);
+      if (index < 0 || index >= pre.length || index >= post.length) {
+        verdictPossible = false;
+        break;
       }
+      rent += pre[index] - post[index];
     }
   }
   if (!verdictPossible) {

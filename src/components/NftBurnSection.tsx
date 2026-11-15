@@ -239,7 +239,7 @@ export function NftBurnSection({
     signatures,
     accountPubkey,
     mint,
-    tokenLamportsBeforeAction,
+    returnLamportsBeforeAction,
     accountsPresentAfterAction,
     note,
     error,
@@ -561,7 +561,7 @@ export function NftBurnSection({
         data-testid="nft-burn-section"
         className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
       >
-        <p className="text-sm text-zinc-300">NFT burn-and-close</p>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">NFT burn-and-close</p>
         <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
           The NFT check could not be read from the network. Nothing was
           checked this round, so a dead NFT may be missing from this
@@ -594,7 +594,7 @@ export function NftBurnSection({
         data-testid="nft-burn-section"
         className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
       >
-        <p className="text-sm text-zinc-300">NFT burn-and-close</p>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">NFT burn-and-close</p>
         <p className="mt-1 text-xs leading-relaxed text-zinc-400">
           Reading {candidates.length}{" "}
           {candidates.length === 1 ? "account" : "accounts"} for dead
@@ -639,7 +639,7 @@ export function NftBurnSection({
       data-testid="nft-burn-section"
       className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
     >
-      <p className="text-sm text-zinc-300">NFT burn-and-close</p>
+      <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">NFT burn-and-close</p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-400">
         {burnable.length > 0 && (
           <>
@@ -761,9 +761,19 @@ export function NftBurnSection({
       )}
 
       {/* Confirmation card. The pre-card read is presentation; the
-          hook re-runs the gate authoritatively. */}
+          hook re-runs the gate authoritatively. The card scrolls into
+          view when it opens: without it, a click reads as a dead link
+          (the card renders below the row list, off-screen on a phone). */}
       {reviewing && status === "idle" && (
-        <div className="mt-3 rounded-md border border-zinc-700 p-3">
+        <div
+          ref={(el) => {
+            if (el && !el.dataset.scrolled && typeof el.scrollIntoView === "function") {
+              el.dataset.scrolled = "1";
+              el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+          }}
+          className="mt-3 rounded-md border border-emerald-800 bg-zinc-950 p-3"
+        >
           <p className="text-sm font-medium text-zinc-200">
             Burn NFT and close its accounts
           </p>
@@ -1024,12 +1034,12 @@ export function NftBurnSection({
                 Token account {accountPubkey ? short(accountPubkey) : ""}
                 {mint ? ` (mint ${short(mint)})` : ""} no longer exists,
                 and neither do its metadata and master edition accounts,
-                confirmed by fresh reads after the transaction. All three
-                deposits{" "}
-                {tokenLamportsBeforeAction === null
-                  ? "figure unavailable"
-                  : `${groupCount(tokenLamportsBeforeAction)} lamports of rent the accounts held`}
-                went to your wallet. The NFT was destroyed permanently.
+                confirmed by fresh reads after the transaction. The closes
+                returned{" "}
+                {returnLamportsBeforeAction === null
+                  ? "a figure that could not be read"
+                  : `${groupCount(returnLamportsBeforeAction)} lamports`}{" "}
+                to your wallet. The NFT was destroyed permanently.
               </p>
             </>
           )}

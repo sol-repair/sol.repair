@@ -423,6 +423,93 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
     expect(rows[0].onePercentMatch).toBe(true);
   });
 
+  // The wallet-appended close: Phantom appends its own closeAccount for
+  // the token account the BurnNft already closes (DEVNET-MEASURED on the
+  // owner's walk, signature 3bwFXwS5vwtM99egteekFhAhnqExbS7Vhuqc3hhawtg5xhjBM6dhGs7CC4paArskFvFLiDoUZnsac7BVuT1gWC9v).
+  // The rule counts each unique closed account's pre - post ONCE: the
+  // token account rides both the BurnNft (key 3) and the appended
+  // closeAccount, and counting it twice inflates the rent past the fee.
+  it("marks the ruling's fee conforming when the wallet appended its own closeAccount (unique accounts, counted once)", () => {
+    const { ix, metadata, token, edition } = burnNftIx();
+    const appendedClose = new TransactionInstruction({
+      keys: [
+        { pubkey: token, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      appendedClose,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+    ]);
+    raw.meta!.preBalances = message.accountKeys.map((k) =>
+      k.equals(metadata)
+        ? NFT_RENTS.metadata
+        : k.equals(token)
+          ? NFT_RENTS.token
+          : k.equals(edition)
+            ? NFT_RENTS.edition
+            : 1
+    );
+    // Full closes: every closed account ends at zero — and the token
+    // account appears in BOTH closing instructions but is ONE account.
+    raw.meta!.postBalances = message.accountKeys.map((k) =>
+      k.equals(metadata) || k.equals(token) || k.equals(edition) ? 0 : 1
+    );
+    const rows = feeRowsFromRawTransactions([{ signature: "appended", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("counts a double-closed token account's rent once, not twice", () => {
+    // The discriminating figure: with double-counting, the rent would be
+    // 6,803,160 + 1,488,440 = 8,291,600 -> floor(1%) = 82,916; the fee
+    // charged the return's 68,031 and the rule must call it conforming.
+    const { ix, metadata, token, edition } = burnNftIx();
+    const appendedClose = new TransactionInstruction({
+      keys: [
+        { pubkey: token, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+    const { raw, message } = buildLegacyRaw([
+      ix,
+      appendedClose,
+      systemTransfer(new PublicKey(FEE_WALLET), NFT_FEE),
+    ]);
+    raw.meta!.preBalances = preBalancesFor(message, { metadata, token, edition });
+    raw.meta!.postBalances = postBalancesFor(message, { metadata, token, edition });
+    const rows = feeRowsFromRawTransactions([{ signature: "deduped", raw }], FEE_WALLET);
+    // The rent the rule derived, made observable through the verdict:
+    // a fee one lamport UNDER a double-counted base still conforms
+    // (82,915 < 82,916), while the true base's floor is 68,031.
+    const doubleCountProbe = new TransactionInstruction({
+      keys: [
+        { pubkey: token, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+    const { raw: raw2, message: message2 } = buildLegacyRaw([
+      ix,
+      appendedClose,
+      doubleCountProbe,
+      systemTransfer(new PublicKey(FEE_WALLET), 68_031),
+    ]);
+    raw2.meta!.preBalances = preBalancesFor(message2, { metadata, token, edition });
+    raw2.meta!.postBalances = postBalancesFor(message2, { metadata, token, edition });
+    const rows2 = feeRowsFromRawTransactions([{ signature: "deduped2", raw: raw2 }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+    expect(rows2[0].onePercentMatch).toBe(true);
+  });
+
   // The owner-ruling fixture (directive item 3), the DEVNET-MEASURED
   // pre-cut shape from receipt phase6-precut (signature
   // 65JncJEV7d8YKKCKx5L5ti6YLPv4kGpjbDF47jN1fKDZBXhucyHDpTYnLiaXEzX6XNARx893V2nd1DMmQsvtYosK):
@@ -445,7 +532,7 @@ describe("feeRowsFromRawTransactions Metaplex BurnNft (tag 29) recognition", () 
   ): { pre: number[]; post: number[] } {
     const pre: number[] = [];
     const post: number[] = [];
-    for (const k of message.accountKeys) {
+    for (let i = 0; i < message.accountKeys.length; i += 1) {
       pre.push(1);
       post.push(1);
     }
