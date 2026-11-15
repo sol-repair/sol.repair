@@ -387,15 +387,20 @@ describe("NftBurnSection detection states", () => {
       entries: [burnableEntry, frozenEntry],
       onRoutingChange: (r) => routing.push(r),
     });
-    // Wait for the actual row button: the reading and failed states
-    // also render the section heading.
+    // Wait for the actual row button (the reading and failed states
+    // also render the section heading), THEN wait on the routed state
+    // itself: the routing effect is passive and flushes after paint, so
+    // reading it synchronously after the button appears races on a
+    // loaded machine (the CI failure this fix closes).
     await waitFor(() => {
       expect(screen.getByText("Burn and close")).toBeDefined();
     });
-    const last = routing[routing.length - 1];
-    expect(last.routed.has(burnableEntry.pubkey)).toBe(true);
-    expect(last.routed.has(frozenEntry.pubkey)).toBe(false);
-    expect(last.pending.size).toBe(0);
+    await waitFor(() => {
+      const last = routing[routing.length - 1];
+      expect(last.routed.has(burnableEntry.pubkey)).toBe(true);
+      expect(last.routed.has(frozenEntry.pubkey)).toBe(false);
+      expect(last.pending.size).toBe(0);
+    });
     // The frozen row renders with no offer anywhere for it.
     expect(screen.getByText(/account as frozen/)).toBeDefined();
     expect(screen.getAllByText("Burn and close").length).toBe(1);
