@@ -392,7 +392,7 @@ export function DelegationSection({
       data-testid="delegation-section"
       className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
     >
-      <p className="text-sm text-zinc-300">Standing delegations</p>
+      <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">Standing delegations</p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-400">
         {delegations.length} funded{" "}
         {plural(delegations.length, "account", "accounts")} with a balance{" "}

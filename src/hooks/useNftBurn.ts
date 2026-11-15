@@ -106,6 +106,9 @@ export interface NftBurnState {
   tokenLamportsBeforeAction: number | null;
   metadataLamportsBeforeAction: number | null;
   editionLamportsBeforeAction: number | null;
+  /** The ACTUAL return (owner ruling 2026-11-13): the fee base and the
+   *  figure the done card reports as what the closes returned. */
+  returnLamportsBeforeAction: number | null;
   accountsPresentAfterAction: NftPresenceAfterAction | null;
   note: string | null;
   error: string | null;
@@ -122,6 +125,7 @@ const INITIAL_STATE: NftBurnState = {
   tokenLamportsBeforeAction: null,
   metadataLamportsBeforeAction: null,
   editionLamportsBeforeAction: null,
+  returnLamportsBeforeAction: null,
   accountsPresentAfterAction: null,
   note: null,
   error: null,
@@ -327,6 +331,7 @@ export function useNftBurn() {
           tokenLamportsBeforeAction: verdict.tokenLamports,
           metadataLamportsBeforeAction: verdict.metadataLamports,
           editionLamportsBeforeAction: verdict.editionLamports,
+          returnLamportsBeforeAction: rentBeforeAction,
         });
         const snapshot: GateSnapshot = {
           amount: "1",

@@ -468,7 +468,7 @@ export function BurnDustSection({
       data-testid="burn-dust-section"
       className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
     >
-      <p className="text-sm text-zinc-300">Dust tokens</p>
+      <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">Dust tokens</p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-400">
         {dust.length} {plural(dust.length, "account", "accounts")}{" "}
         {plural(dust.length, "holds", "hold")} tokens. Burning a token
@@ -588,7 +588,15 @@ export function BurnDustSection({
       {/* Confirmation card. The pre-card read is presentation; the
           hook re-runs the gate authoritatively. */}
       {reviewing && status === "idle" && (
-        <div className="mt-3 rounded-md border border-zinc-700 p-3">
+        <div
+          ref={(el) => {
+            if (el && !el.dataset.scrolled && typeof el.scrollIntoView === "function") {
+              el.dataset.scrolled = "1";
+              el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+          }}
+          className="mt-3 rounded-md border border-emerald-800 bg-zinc-950 p-3"
+        >
           <p className="text-sm font-medium text-zinc-200">
             Review before you sign
           </p>

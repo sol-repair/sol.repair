@@ -418,7 +418,7 @@ export function NativeAccountsSection({
       data-testid="native-accounts-section"
       className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
     >
-      <p className="text-sm text-zinc-300">Wrapped SOL</p>
+      <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">Wrapped SOL</p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-400">
         {natives.length} {plural(natives.length, "account", "accounts")}{" "}
         {natives.length === 1 ? "holds" : "hold"} wrapped SOL (a

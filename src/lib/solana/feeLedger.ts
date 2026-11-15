@@ -566,7 +566,16 @@ function closedRentLamports(
   postBalances: number[] | undefined
 ): number | null {
   if (!Array.isArray(preBalances)) return null;
-  let total = 0;
+  // UNIQUE closed accounts, deduplicated: the owner's Solflare wallet
+  // appended its own closeAccount for the token account a BurnNft
+  // already closes (DEVNET-MEASURED on the owner's walk, signature
+  // 3bwFXwS5vwtM99egteekFhAhnqExbS7Vhuqc3hhawtg5xhjBM6dhGs7CC4paArskFvFLiDoUZnsac7BVuT1gWC9v),
+  // so one account can ride two closing instructions. Counting per
+  // INSTRUCTION would double-count that account's rent past the fee.
+  // The rent is per ACCOUNT: preBalances - postBalances, the actual
+  // return (closeAccount rows have post 0, so pre - post = pre —
+  // backward compatible with every close-only row).
+  const closed = new Map<string, boolean>();
   for (const ix of decoded.instructions) {
     const isBurnNft = isMplBurnNft(ix);
     const closedKeys: readonly number[] = isBurnNft
@@ -574,32 +583,34 @@ function closedRentLamports(
       : isCloseAccount(ix)
         ? [0]
         : [];
-    if (closedKeys.length === 0) continue;
-    // The BurnNft rent is the ACTUAL return (preBalances - postBalances
-    // of keys 0/3/4, owner ruling 2026-11-13): a husked metadata close
-    // keeps its stored fee behind, and preBalances alone would count
-    // lamports the user never received. A missing postBalances array
-    // means no verdict, never a guess.
-    const burnedPostBalances = isBurnNft ? postBalances : undefined;
-    if (isBurnNft && !Array.isArray(burnedPostBalances)) return null;
-    const post = burnedPostBalances as number[];
     for (const key of closedKeys) {
-      const closed = ix.accountPubkeys[key];
-      if (closed === undefined) return null;
-      const index = decoded.accountKeys.indexOf(closed);
-      if (index < 0 || index >= preBalances.length) return null;
-      const lamports = preBalances[index];
-      if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
-      let contribution = lamports;
-      if (isBurnNft) {
-        if (index >= post.length) return null;
-        const postLamports = post[index];
-        if (!Number.isSafeInteger(postLamports) || postLamports < 0) return null;
-        contribution = lamports - postLamports;
-        if (contribution < 0) return null;
-      }
-      total += contribution;
+      const closedAddr = ix.accountPubkeys[key];
+      if (closedAddr === undefined) return null;
+      const alreadyBurn = closed.get(closedAddr) ?? false;
+      closed.set(closedAddr, alreadyBurn || isBurnNft);
     }
+  }
+  if (closed.size === 0) return null;
+  let total = 0;
+  for (const [closedAddr, sawBurnNft] of closed) {
+    const index = decoded.accountKeys.indexOf(closedAddr);
+    if (index < 0 || index >= preBalances.length) return null;
+    const lamports = preBalances[index];
+    if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
+    // The BurnNft rent is the ACTUAL return (preBalances - postBalances,
+    // owner ruling 2026-11-13): a husked metadata close keeps its stored
+    // fee behind, and preBalances alone would count lamports the user
+    // never received. A missing postBalances array means no verdict,
+    // never a guess. closeAccount rows close fully (post 0), so pre -
+    // post = pre — the figure every close-only row has always counted.
+    if (sawBurnNft && !Array.isArray(postBalances)) return null;
+    const post = sawBurnNft && Array.isArray(postBalances) ? postBalances : [];
+    if (sawBurnNft && index >= post.length) return null;
+    const postLamports = sawBurnNft && index < post.length ? post[index] : 0;
+    if (!Number.isSafeInteger(postLamports) || postLamports < 0) return null;
+    const contribution = lamports - postLamports;
+    if (contribution < 0) return null;
+    total += contribution;
   }
   return total;
 }

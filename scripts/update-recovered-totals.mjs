@@ -192,27 +192,37 @@ for (const s of uniqueSigs) {
   if (isTest) { testCount++; continue; }
   const keys = (t.transaction.message.accountKeys || []).map((k) => (typeof k === "string" ? k : String(k.pubkey)));
   let freed = 0n;
+  // UNIQUE closed accounts, deduplicated: a wallet can append its own
+  // closeAccount for the token account a BurnNft already closes
+  // (Phantom does — DEVNET-MEASURED on the owner's walk), so one
+  // account can ride two closing instructions. Counting per
+  // INSTRUCTION would double-count that account's rent past the fee.
+  // The rent is per ACCOUNT: preBalances - postBalances, the actual
+  // return (closeAccount rows have post 0, so pre - post = pre).
+  const closedAccounts = new Map();
   for (const cl of closesIx) {
     const src = cl.parsed.info?.source ?? cl.parsed.info?.account;
-    const idx = keys.indexOf(src);
-    if (idx >= 0) freed += BigInt(t.meta.preBalances[idx]);
+    if (src !== undefined && !closedAccounts.has(src)) closedAccounts.set(src, true);
   }
   for (const burn of mplBurns) {
     for (const key of MPL_BURN_NFT_CLOSED_KEYS) {
       const src = burn.accounts?.[key];
-      const idx = src === undefined ? -1 : keys.indexOf(src);
-      if (idx < 0) continue;
-      // The BurnNft rent is the ACTUAL return (preBalances -
-      // postBalances, owner ruling 2026-11-13): a husked metadata close
-      // keeps its stored fee behind, and preBalances alone would count
-      // lamports the user never received. postBalances rides every
-      // real getParsedTransaction response; a missing entry undercounts
-      // the freed figure, which then fails the 1% check and aborts the
-      // run - never a silent pass.
-      const pre = BigInt(t.meta.preBalances[idx]);
-      const post = BigInt(t.meta.postBalances?.[idx] ?? 0);
-      freed += pre - post;
+      if (src !== undefined) closedAccounts.set(src, true);
     }
+  }
+  for (const [src] of closedAccounts) {
+    const idx = keys.indexOf(src);
+    if (idx < 0) continue;
+    // The BurnNft rent is the ACTUAL return (preBalances -
+    // postBalances, owner ruling 2026-11-13): a husked metadata close
+    // keeps its stored fee behind, and preBalances alone would count
+    // lamports the user never received. postBalances rides every
+    // real getParsedTransaction response; a missing entry undercounts
+    // the freed figure, which then fails the 1% check and aborts the
+    // run - never a silent pass.
+    const pre = BigInt(t.meta.preBalances[idx]);
+    const post = BigInt(t.meta.postBalances?.[idx] ?? 0);
+    freed += pre - post;
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
   organicRows++;

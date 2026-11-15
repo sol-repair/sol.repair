@@ -305,7 +305,7 @@ export function ExcessSection({
         data-testid="excess-section"
         className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
       >
-        <p className="text-sm text-zinc-300">Excess lamports</p>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">Excess lamports</p>
         <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
           The excess-lamport check could not be read from the network.
           Nothing was checked this round, so an account holding excess
@@ -341,7 +341,7 @@ export function ExcessSection({
       data-testid="excess-section"
       className="rounded-lg border border-zinc-800 bg-zinc-950 p-4"
     >
-      <p className="text-sm text-zinc-300">Excess lamports</p>
+      <p className="font-mono text-[11px] uppercase tracking-wider text-emerald-400/80">Excess lamports</p>
       <p className="mt-1 text-xs leading-relaxed text-zinc-400">
         {candidates.length}{" "}
         {candidates.length === 1 ? "account holds" : "accounts hold"} more

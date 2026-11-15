@@ -15,7 +15,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 
 import { NftBurnSection } from "../src/components/NftBurnSection";
 import type { NftBurnState } from "../src/hooks/useNftBurn";
-import type { DetectedNft, NftScanCandidate } from "../src/lib/solana/nftBurn";
+import type { DetectedNft } from "../src/lib/solana/nftBurn";
 import { findMasterEditionPda, findMetadataPda } from "../src/lib/solana/nftBurn";
 import type {
   ScanResult,
@@ -49,7 +49,6 @@ import { useNftBurn } from "@/hooks/useNftBurn";
 const hookMock = vi.mocked(useNftBurn);
 
 const OWNER = Keypair.generate();
-const OWNER_B58 = OWNER.publicKey.toBase58();
 const METAPLEX = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 const SPL_TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -66,6 +65,7 @@ const idleState = (): NftBurnState => ({
   tokenLamportsBeforeAction: null,
   metadataLamportsBeforeAction: null,
   editionLamportsBeforeAction: null,
+  returnLamportsBeforeAction: null,
   accountsPresentAfterAction: null,
   note: null,
   error: null,
@@ -105,38 +105,6 @@ function scanWith(entries: SkippedAccount[]): ScanResult {
     eligibleAccounts: [],
     recoverableLamports: 0n,
     skippedAccounts: entries,
-  };
-}
-
-function candidateOf(entry: SkippedAccount): NftScanCandidate {
-  return {
-    pubkey: entry.pubkey,
-    mint: entry.mint,
-    program: entry.program,
-    lamports: 2039280,
-    amountAtScan: "1",
-  };
-}
-
-function detected(
-  entry: SkippedAccount,
-  cls: DetectedNft["class"],
-  over: Partial<DetectedNft> = {}
-): DetectedNft {
-  return {
-    candidate: candidateOf(entry),
-    class: cls,
-    tokenLamports: 2039280,
-    metadataLamports: 3733800,
-    editionLamports: 1030080,
-    rentLamports: 6803160,
-    name: "Saga Pass",
-    collectionVerified: false,
-    collectionKey: null,
-    collectionName: null,
-    masterSupply: "0",
-    editionKey: 6,
-    ...over,
   };
 }
 
@@ -541,7 +509,6 @@ describe("NftBurnSection rows and the consent card", () => {
 
   it("renders the fee-era card: the fee is 1 percent of the RETURN, with the husk disclosure", async () => {
     const entry = nftEntry();
-    const collectionMint = Keypair.generate().publicKey.toBase58();
     // The stored-fee shape: the metadata holds 13,733,800 (rent
     // 3,733,800 + the 10,000,000 stored Metaplex create fee); the gate
     // caps the return at the rent-exempt minimum. Fee base = the
