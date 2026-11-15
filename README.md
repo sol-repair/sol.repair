@@ -94,6 +94,18 @@ wallet. SOL.REPAIR cannot judge what a token is worth, nothing is
 selected by default, and the same 1% fee applies to the recovered
 deposit. Frozen accounts cannot be burned.
 
+Dead NFTs get their own burn: a dead NFT is a one-of-one token whose
+mint, metadata, and master edition accounts are all that is left of it,
+and burning it through the plain dust burn above would strand the
+metadata and edition deposits forever, because no instruction can reach
+them once the token is gone. So for classic-program NFTs whose master
+edition has no prints outstanding, the tool builds Metaplex's BurnNft
+instruction instead: one instruction burns the token and closes all
+three accounts, returning every deposit together. The fee is the same
+1 percent of the rent the closes return, floored to whole lamports.
+NFTs with prints outstanding, Token-2022 NFTs, and NFTs without an
+edition account are shown with an honest note and no offer.
+
 Wrapped-SOL accounts get their own action: unwrap and close. A wrapped-SOL
 account is a token-program representation of SOL, typically opened by swaps
 and left behind. Closing it deletes the account and returns every lamport it
