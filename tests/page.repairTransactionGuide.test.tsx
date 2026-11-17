@@ -225,8 +225,8 @@ describe("owner writing rules hold on the new strings", () => {
 });
 
 describe("the registry, the index, and the homepage include the guide", () => {
-  it("registry holds seven guides with the new one seventh, flagship first", () => {
-    expect(GUIDES).toHaveLength(7);
+  it("registry holds eight guides with the repair guide last, flagship first", () => {
+    expect(GUIDES).toHaveLength(8);
     expect(GUIDES[GUIDES.length - 1]?.href).toBe("/guides/repair-transaction");
     expect(GUIDES[0]?.href).toBe("/guides/close-token-accounts");
   });

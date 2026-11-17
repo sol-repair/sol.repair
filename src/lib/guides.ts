@@ -16,6 +16,12 @@ export const GUIDES: Guide[] = [
       "Every route back to your rent: wallet built-ins, the CLI, and web tools, plus the special cases.",
   },
   {
+    href: "/guides/burn-dead-nfts",
+    title: "How to burn a dead NFT and recover its SOL",
+    summary:
+      "What a dead NFT is, why a plain burn strands its metadata rent forever, and the one burn that returns all three deposits.",
+  },
+  {
     href: "/guides/solana-rent",
     title: "What is Solana rent?",
     summary:

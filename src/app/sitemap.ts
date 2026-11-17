@@ -75,6 +75,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${base}/guides/burn-dead-nfts`,
+      lastModified: new Date(LAST_MODIFIED["/guides/burn-dead-nfts"]),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${base}/guides/what-did-i-just-sign`,
       lastModified: new Date(LAST_MODIFIED["/guides/what-did-i-just-sign"]),
       changeFrequency: "monthly",
