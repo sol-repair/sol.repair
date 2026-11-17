@@ -197,7 +197,7 @@ export default function FeesPage() {
           As of {longDate(RECOVERED_TOTALS.asOf)}:{" "}
           {RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs
           and burn-closes for {RECOVERED_TOTALS.wallets} wallets across{" "}
-          {RECOVERED_TOTALS.closes} accounts on mainnet-beta. Updated weekly.
+          {RECOVERED_TOTALS.closes} accounts on mainnet. Updated weekly.
         </p>
 
         <p className="mb-4 font-mono text-xs text-zinc-400">
