@@ -18,7 +18,7 @@ const schema = guideSchema({
   description: metadata.description as string,
   path: "/guides/close-token-accounts",
   datePublished: "2026-09-03",
-  dateModified: "2026-10-31",
+  dateModified: "2026-11-17",
 });
 
 export default function CloseTokenAccountsGuide() {
@@ -124,7 +124,16 @@ export default function CloseTokenAccountsGuide() {
               them, or leave the account alone. Burning destroys the
               balance permanently and is not undoable, so it is worth a
               thought first. This site can burn and close dust accounts in
-              one step, with your approval per account.
+              one step, with your approval per account. A dead NFT is its
+              own case: burning one the plain way strands its metadata and
+              edition rent forever, so it gets a dedicated burn, covered in{" "}
+              <Link
+                href="/guides/burn-dead-nfts"
+                className="underline underline-offset-2 hover:text-zinc-100"
+              >
+                how to burn a dead NFT and recover its SOL
+              </Link>
+              .
             </p>
           </section>
 

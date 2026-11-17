@@ -109,6 +109,7 @@ const CONTENT_PATHS: Record<string, string[]> = {
   "/guides/solana-rent": ["src/app/guides/solana-rent"],
   "/guides/token-approvals": ["src/app/guides/token-approvals"],
   "/guides/close-token-accounts": ["src/app/guides/close-token-accounts"],
+  "/guides/burn-dead-nfts": ["src/app/guides/burn-dead-nfts"],
   "/guides/what-did-i-just-sign": ["src/app/guides/what-did-i-just-sign"],
   "/guides/repair-transaction": ["src/app/guides/repair-transaction"],
   "/guides": ["src/app/guides"],

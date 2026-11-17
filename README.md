@@ -126,12 +126,12 @@ ones, because the on-chain instruction does not check frozen state.
 
 Beyond the repair tool itself, the site ships:
 
-- Seven guides under /guides: what Solana rent is, how to close empty token
-  accounts, why random tokens show up in your wallet, how to check and
-  revoke token approvals, how rent cuts let you reclaim excess SOL, what
-  to check after signing something you did not fully read, and the exact
-  transaction the repair tool builds, written for developers running
-  their own clients.
+- Eight guides under /guides: what Solana rent is, how to close empty token
+  accounts, how to burn a dead NFT and recover its rent, why random tokens
+  show up in your wallet, how to check and revoke token approvals, how rent
+  cuts let you reclaim excess SOL, what to check after signing something
+  you did not fully read, and the exact transaction the repair tool
+  builds, written for developers running their own clients.
 - /understand: paste a transaction signature, or connect read-only to
   walk your recent transactions, and see what each instruction did and
   what lasting permissions it left behind.
@@ -173,7 +173,7 @@ npm test
 
 The suite covers the account eligibility rules, transaction building, fee
 math, the repair flow, the per-item action flows (revoke, unwrap, burn,
-excess withdrawal) and the shared transaction lifecycle they run on -
+dead-NFT burn, excess withdrawal) and the shared transaction lifecycle they run on -
 fresh-read gates, expiry corroboration, the cross-action mutex - the
 fee-ledger decoder, and the transaction explainer's instruction and
 left-behind analysis. It runs against local fixtures, never the live

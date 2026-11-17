@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import RandomTokensGuide from "@/app/guides/random-tokens/page";
 import SolanaRentGuide from "@/app/guides/solana-rent/page";
 import CloseTokenAccountsGuide from "@/app/guides/close-token-accounts/page";
+import BurnDeadNftsGuide from "@/app/guides/burn-dead-nfts/page";
 import WhatDidIJustSignGuide from "@/app/guides/what-did-i-just-sign/page";
 import TokenApprovalsGuide from "@/app/guides/token-approvals/page";
 import RentReductionGuide from "@/app/guides/rent-reduction/page";
@@ -38,6 +39,7 @@ const PAGES = [
   { name: "random-tokens", Component: RandomTokensGuide },
   { name: "solana-rent", Component: SolanaRentGuide },
   { name: "close-token-accounts", Component: CloseTokenAccountsGuide },
+  { name: "burn-dead-nfts", Component: BurnDeadNftsGuide },
   { name: "what-did-i-just-sign", Component: WhatDidIJustSignGuide },
   { name: "token-approvals", Component: TokenApprovalsGuide },
   { name: "rent-reduction", Component: RentReductionGuide },
@@ -234,6 +236,34 @@ describe("guide pages render with their content", () => {
     expectLinkTo("/report");
   });
 
+  it("dead NFT burn guide explains the three deposits and the stranded rent", () => {
+    render(<BurnDeadNftsGuide />);
+    expect(
+      screen.getByRole("heading", { level: 1, name: /burn a dead nft/i })
+    ).toBeTruthy();
+    // The measured deposit figures for a pre-cut one-of-one NFT
+    // (chain-read census 2026-11-13). The total must stay exact.
+    expect(screen.getByText(/2,039,280/)).toBeTruthy();
+    expect(screen.getByText(/3,733,800/)).toBeTruthy();
+    expect(screen.getByText(/1,030,080/)).toBeTruthy();
+    expect(screen.getByText(/6,803,160/)).toBeTruthy();
+    // The load-bearing protocol facts.
+    expect(
+      screen.getByText(/now unreachable by anyone, forever/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/no command that reaches an NFT/i)).toBeTruthy();
+    expect(screen.getByText(/fixed Metaplex destination, not to you/i)).toBeTruthy();
+    expect(screen.getByText(/exactly one instruction, Metaplex/i)).toBeTruthy();
+    expect(screen.getByText(/promises the return figure, not the deposit figure/i)).toBeTruthy();
+    expect(screen.getByText(/One percent of the SOL the three closes return/i)).toBeTruthy();
+    expectLinkTo("/guides/close-token-accounts");
+    expectLinkTo("/guides/repair-transaction");
+    expectLinkTo("/guides/solana-rent");
+    expectLinkTo("/guides/rent-reduction");
+    expectLinkTo("/understand");
+    expectLinkTo("/fees");
+  });
+
   it("guides index links every published guide from the registry", () => {
     render(<GuidesIndexPage />);
     for (const guide of GUIDES) {
@@ -259,6 +289,7 @@ describe("every guide carries a visible breadcrumb that matches its schema", () 
     "random-tokens",
     "solana-rent",
     "close-token-accounts",
+    "burn-dead-nfts",
     "what-did-i-just-sign",
     "token-approvals",
     "rent-reduction",
@@ -268,8 +299,8 @@ describe("every guide carries a visible breadcrumb that matches its schema", () 
     GUIDE_PAGE_NAMES.includes(p.name)
   );
 
-  it("covers all seven guides", () => {
-    expect(GUIDE_PAGES.length).toBe(7);
+  it("covers all eight guides", () => {
+    expect(GUIDE_PAGES.length).toBe(8);
   });
 
   for (const { name, Component } of GUIDE_PAGES) {
@@ -380,9 +411,10 @@ describe("owner writing rules hold mechanically", () => {
 });
 
 describe("the guide list is a single source", () => {
-  it("holds exactly the seven published guides, flagship first", () => {
+  it("holds exactly the eight published guides, flagship first", () => {
     expect(GUIDES.map((g) => g.href)).toEqual([
       "/guides/close-token-accounts",
+      "/guides/burn-dead-nfts",
       "/guides/solana-rent",
       "/guides/rent-reduction",
       "/guides/token-approvals",
