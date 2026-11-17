@@ -242,7 +242,7 @@ describe("fees page recovered-to-date line", () => {
     expect(
       screen.getByText(
         new RegExp(
-          `As of .+: ${RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs and burn-closes for ${RECOVERED_TOTALS.wallets} wallets across ${RECOVERED_TOTALS.closes} accounts on mainnet-beta\. Updated weekly\.`
+          `As of .+: ${RECOVERED_TOTALS.lamportsFreedSol} SOL recovered through repairs and burn-closes for ${RECOVERED_TOTALS.wallets} wallets across ${RECOVERED_TOTALS.closes} accounts on mainnet\. Updated weekly\.`
         )
       )
     ).toBeTruthy();
