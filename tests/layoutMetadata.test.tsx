@@ -22,7 +22,8 @@
  * wording; pinned so a copy edit cannot silently desync them.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/font/google", () => ({
   Geist: () => ({ variable: "--font-geist-sans" }),
@@ -33,7 +34,7 @@ vi.mock("@vercel/analytics/react", () => ({
   Analytics: () => null,
 }));
 
-import { metadata } from "../src/app/layout";
+import Layout, { metadata } from "../src/app/layout";
 
 describe("layout metadata rent wording", () => {
   it("openGraph description carries the range wording", () => {
@@ -88,5 +89,30 @@ describe("robots gate keeps non-mainnet builds out of search", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("site JSON-LD schema", () => {
+  // The one structured-data object the whole site ships, rendered in
+  // the root layout body. alternateName maps the two-words-no-dot
+  // spelling of the brand onto the canonical name for search engines.
+  afterEach(cleanup);
+
+  it("describes the site and carries the two-word brand alias", () => {
+    const { container } = render(
+      <Layout>
+        <div />
+      </Layout>
+    );
+    const parsed = JSON.parse(
+      container.querySelector('script[type="application/ld+json"]')
+        ?.textContent ?? "null"
+    );
+    expect(parsed).toMatchObject({
+      "@type": "WebApplication",
+      name: "SOL.repair",
+      alternateName: "Sol Repair",
+      url: "https://sol.repair",
+    });
   });
 });

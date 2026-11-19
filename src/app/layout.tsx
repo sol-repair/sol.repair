@@ -58,6 +58,9 @@ const structuredData = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
   name: "SOL.repair",
+  // Maps the two-words-no-dot spelling onto the brand for search
+  // engines (schema.org alternateName, inherited from Thing).
+  alternateName: "Sol Repair",
   url: "https://sol.repair",
   applicationCategory: "FinanceApplication",
   operatingSystem: "Web",
