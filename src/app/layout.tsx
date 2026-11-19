@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     template: "%s | SOL.repair",
   },
   description:
-    "Find unused Solana token accounts and recover the SOL locked inside them as account rent. Non-custodial.",
+    "sol.repair finds unused Solana token accounts and recovers the SOL locked inside them as account rent. Non-custodial, 1% success fee.",
   // Canonical for the homepage only. Every other page overrides this
   // with its own path via pageMetadata(); a page that silently inherits
   // it declares itself a duplicate of the homepage.
