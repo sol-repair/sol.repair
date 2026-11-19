@@ -3,7 +3,7 @@
 /**
  * Metadata copy and architecture tests for layout.tsx.
  *
- * The layout owns three site-wide contracts:
+ * The layout owns four site-wide contracts:
  *  1. The title template ("%s | SOL.repair") that every child page's
  *     bare title flows through, with the homepage title as the default
  *     (the homepage itself is a client page and defines no metadata).
@@ -14,6 +14,9 @@
  *     "index, follow" used to conflict with the framework's own
  *     noindex on the not-found page (two robots metas, opposite
  *     meanings), so mainnet now relies on the crawler default.
+ *  4. The homepage meta description: the string search engines most
+ *     often reuse verbatim in results, so it leads with the brand
+ *     name and carries the fee fact.
  *
  * The openGraph and twitter descriptions describe rent with the range
  * wording; pinned so a copy edit cannot silently desync them.
@@ -42,6 +45,18 @@ describe("layout metadata rent wording", () => {
   it("twitter description carries the range wording", () => {
     expect(metadata.twitter?.description).toBe(
       "Empty token accounts lock about 0.00149 to 0.00208 SOL each as rent. Close them in a few transactions you sign yourself."
+    );
+  });
+});
+
+describe("homepage meta description", () => {
+  // The homepage is a client page, so this layout string is the served
+  // <meta name="description"> on "/" - the sentence search engines most
+  // often reuse verbatim. Pinned brand-led so a copy edit cannot quietly
+  // drop the brand from it again.
+  it("leads with the brand name and states the fee", () => {
+    expect(metadata.description).toBe(
+      "sol.repair finds unused Solana token accounts and recovers the SOL locked inside them as account rent. Non-custodial, 1% success fee."
     );
   });
 });
