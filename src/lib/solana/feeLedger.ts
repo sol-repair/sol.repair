@@ -93,13 +93,16 @@ export type FeeLedgerRow = {
    *  exactly floor(1%) of the SOL this transaction's fee-bearing
    *  instructions freed (closeAccount accounts, plus the metadata,
    *  token, and master edition accounts of every Metaplex BurnNft) —
-   *  the shape every real SOL.repair fee has. False when they differ:
-   *  the page marks the row (never hides it), because a crafted
-   *  transfer inside a repair-shaped transaction must not display as
-   *  ordinary revenue. Null when the rent cannot be computed from the
-   *  response — no verdict, no accusation, no tag. Encodes today's 1%
-   *  rate (FEE_PERCENT); if the fee ever changes, this must become
-   *  era-aware. */
+   *  arm 1, the shape every repair row has always satisfied — OR
+   *  exactly the sum of each account's own floor(1%), the rule the
+   *  batched burn-and-close charges (arm 2, owner decision
+   *  2026-11-22). Both arms are exact; one lamport off both flags.
+   *  False when they differ: the page marks the row (never hides it),
+   *  because a crafted transfer inside a repair-shaped transaction
+   *  must not display as ordinary revenue. Null when the rent cannot
+   *  be computed from the response — no verdict, no accusation, no
+   *  tag. Encodes today's 1% rate (FEE_PERCENT); if the fee ever
+   *  changes, this must become era-aware. */
   onePercentMatch: boolean | null;
 };
 
@@ -551,20 +554,22 @@ function inboundTransferLamports(
   return Number.isSafeInteger(lamports) && lamports > 0 ? lamports : 0;
 }
 
-/** Total rent the transaction's fee-bearing instructions freed (the
- *  closed accounts' pre-tx lamports): each token-program closeAccount
- *  contributes its closed account's preBalance, and each Metaplex
- *  BurnNft contributes the preBalances of its metadata, token, and
- *  master edition accounts (keys 0, 3, 4 - the three closes the
- *  instruction performs by CPI). Null when it cannot be computed from
- *  the response — a missing/truncated preBalances array, an
+/** Per-account rent the transaction's fee-bearing instructions freed
+ *  (the closed accounts' pre-tx lamports): each token-program
+ *  closeAccount contributes its closed account's preBalance, and each
+ *  Metaplex BurnNft contributes the preBalances of its metadata,
+ *  token, and master edition accounts (keys 0, 3, 4 - the three closes
+ *  the instruction performs by CPI). Null when it cannot be computed
+ *  from the response — a missing/truncated preBalances array, an
  *  unresolvable account index, or a BurnNft with fewer than the five
- *  keys the rule reads means no verdict rather than a guess. */
+ *  keys the rule reads means no verdict rather than a guess. The
+ *  per-account list is what the dual-arm conformance comparison needs
+ *  (onePercentArms below); total is their sum. */
 function closedRentLamports(
   decoded: { instructions: DecodedInstruction[]; accountKeys: string[] },
   preBalances: number[] | undefined,
   postBalances: number[] | undefined
-): number | null {
+): { total: number; perAccount: number[] } | null {
   if (!Array.isArray(preBalances)) return null;
   // UNIQUE closed accounts, deduplicated: the owner's Solflare wallet
   // appended its own closeAccount for the token account a BurnNft
@@ -591,7 +596,7 @@ function closedRentLamports(
     }
   }
   if (closed.size === 0) return null;
-  let total = 0;
+  const perAccount: number[] = [];
   for (const [closedAddr, sawBurnNft] of closed) {
     const index = decoded.accountKeys.indexOf(closedAddr);
     if (index < 0 || index >= preBalances.length) return null;
@@ -610,9 +615,32 @@ function closedRentLamports(
     if (!Number.isSafeInteger(postLamports) || postLamports < 0) return null;
     const contribution = lamports - postLamports;
     if (contribution < 0) return null;
-    total += contribution;
+    perAccount.push(contribution);
   }
-  return total;
+  return { total: perAccount.reduce((a, r) => a + r, 0), perAccount };
+}
+
+/** The two honest readings of "1 percent of the rent, floored", both
+ *  EXACT (owner decision 2026-11-22, the batched burn-and-close): arm 1
+ *  floors the batch total once — the rule every repair row has always
+ *  satisfied; arm 2 sums each account's own floor — the rule the
+ *  batched burn charges, byte-identical to what the same accounts cost
+ *  burned one at a time. A fee matching either arm conforms; one
+ *  lamport off both flags. The arms differ by less than one lamport
+ *  per account (at most k-1 lamports on a k-account transaction), and
+ *  both are exact comparisons: no tolerance, no slop. */
+function onePercentArms(perAccount: number[]): {
+  floorOfTotal: bigint;
+  sumOfFloors: bigint;
+} {
+  const total = perAccount.reduce((acc, r) => acc + BigInt(r), 0n);
+  return {
+    floorOfTotal: (total * BigInt(FEE_PERCENT)) / 100n,
+    sumOfFloors: perAccount.reduce(
+      (acc, r) => acc + (BigInt(r) * BigInt(FEE_PERCENT)) / 100n,
+      0n
+    ),
+  };
 }
 
 /**
@@ -640,16 +668,19 @@ export function feeRowsFromRawTransactions(
     if (lamports <= 0) continue;
     // Same arithmetic as the frozen fee builder (fees.ts): BigInt
     // division truncates, i.e. floor, with no float drift possible.
-    const rent = closedRentLamports(
+    // Dual-arm (owner decision 2026-11-22): a fee matching EITHER
+    // honest reading of "1%, floored" conforms, both compared exactly.
+    const rents = closedRentLamports(
       decoded,
       raw.meta?.preBalances,
       raw.meta?.postBalances
     );
-    const onePercentMatch =
-      rent === null
-        ? null
-        : BigInt(lamports) ===
-          (BigInt(rent) * BigInt(FEE_PERCENT)) / 100n;
+    let onePercentMatch: boolean | null = null;
+    if (rents !== null) {
+      const arms = onePercentArms(rents.perAccount);
+      const fee = BigInt(lamports);
+      onePercentMatch = fee === arms.floorOfTotal || fee === arms.sumOfFloors;
+    }
     rows.push({ signature, blockTime: decoded.blockTime, lamports, onePercentMatch });
   }
   return rows;

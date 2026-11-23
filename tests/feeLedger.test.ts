@@ -20,6 +20,11 @@ import {
 } from "@solana/web3.js";
 import fc from "fast-check";
 import { describe, expect, it, vi, afterEach } from "vitest";
+import {
+  createBurnInstruction,
+  createCloseAccountInstruction,
+  TOKEN_2022_PROGRAM_ID,
+} from "@solana/spl-token";
 
 import {
   BLOCK_TIME,
@@ -309,6 +314,97 @@ describe("feeRowsFromRawTransactions 1% conformance (onePercentMatch)", () => {
     };
     const rows = feeRowsFromRawTransactions([{ signature: "v0check", raw }], FEE_WALLET);
     expect(rows[0].onePercentMatch).toBe(true);
+  });
+});
+
+describe("feeRowsFromRawTransactions batched burn-and-close (the dual-arm 1% rule, E425)", () => {
+  // The batched burn-and-close charges ONE summed transfer: the SUM of
+  // each account's floor(1%), riding last (owner decision 2026-11-22).
+  // The published rule becomes dual-arm and BOTH ARMS ARE EXACT: a row
+  // conforms when the fee equals floor(1% of total rent) (arm 1, the
+  // repair rule every historical row satisfied) OR the sum of
+  // per-account floors (arm 2, the batched burn rule). One lamport off
+  // both arms must still flag. Fixture conditions from the owner:
+  // UNEQUAL rents (identical rents cannot catch a per-account
+  // attribution bug) and a Token-2022 account in the batch.
+  const RENTS = [1_488_440, 1_513_840, 2_039_280]; // SPL, SPL, Token-2022
+  const ARM1 = 50_415; // floor(5,041,560 / 100)
+  const ARM2 = 50_414; // 14,884 + 15,138 + 20,392
+
+  /** One real burn+close pair on a KNOWN token account, so the test can
+   *  place that account's rent into meta.preBalances. */
+  function burnClosePair(
+    programId: PublicKey
+  ): { instructions: TransactionInstruction[]; account: PublicKey } {
+    const account = Keypair.generate().publicKey;
+    const mint = Keypair.generate().publicKey;
+    const authority = Keypair.generate().publicKey;
+    return {
+      instructions: [
+        createBurnInstruction(account, mint, authority, 1000n, [], programId),
+        createCloseAccountInstruction(account, authority, authority, [], programId),
+      ],
+      account,
+    };
+  }
+
+  function batchedRaw(fee: number): RawTransaction {
+    const pairs = [
+      burnClosePair(TOKEN_PROGRAM_ID),
+      burnClosePair(TOKEN_PROGRAM_ID),
+      burnClosePair(TOKEN_2022_PROGRAM_ID),
+    ];
+    const instructions = pairs.flatMap((p) => p.instructions);
+    instructions.push(systemTransfer(new PublicKey(FEE_WALLET), fee));
+    const { raw, message } = buildLegacyRaw(instructions);
+    raw.meta!.preBalances = message.accountKeys.map((k) => {
+      const i = pairs.findIndex((p) => p.account.equals(k));
+      return i >= 0 ? RENTS[i] : 1;
+    });
+    return raw;
+  }
+
+  function singleRaw(fee: number): { raw: RawTransaction; account: PublicKey } {
+    const pair = burnClosePair(TOKEN_PROGRAM_ID);
+    const { raw, message } = buildLegacyRaw([
+      ...pair.instructions,
+      systemTransfer(new PublicKey(FEE_WALLET), fee),
+    ]);
+    raw.meta!.preBalances = message.accountKeys.map((k) =>
+      k.equals(pair.account) ? RENTS[0] : 1
+    );
+    return { raw, account: pair.account };
+  }
+
+  it("verdict 1: a single-account row conforms on arm 1 unchanged (14,884 of 1,488,440)", () => {
+    const { raw } = singleRaw(14_884);
+    const rows = feeRowsFromRawTransactions([{ signature: "single", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("verdict 2: a batched sum-of-floors row (50,414) conforms on arm 2", () => {
+    const raw = batchedRaw(ARM2);
+    const rows = feeRowsFromRawTransactions([{ signature: "batched", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("verdict 3: a repair-style floor-of-total row (50,415) conforms on arm 1 unchanged", () => {
+    const raw = batchedRaw(ARM1);
+    const rows = feeRowsFromRawTransactions([{ signature: "repair-style", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("verdict 4: a fee one lamport off either arm flags (50,416 and 50,413 both false)", () => {
+    const above = feeRowsFromRawTransactions(
+      [{ signature: "above", raw: batchedRaw(ARM1 + 1) }],
+      FEE_WALLET
+    );
+    expect(above[0].onePercentMatch).toBe(false);
+    const below = feeRowsFromRawTransactions(
+      [{ signature: "below", raw: batchedRaw(ARM2 - 1) }],
+      FEE_WALLET
+    );
+    expect(below[0].onePercentMatch).toBe(false);
   });
 });
 
