@@ -71,9 +71,14 @@ const idleState = (): BurnState => ({
   note: null,
   error: null,
   errorDetail: null,
+  batchProgress: null,
+  batchAccounts: null,
+  batchVerifiedCount: 0,
+  batchExcluded: null,
 });
 
 const reset = vi.fn();
+const burnBatchFn = vi.fn();
 
 function setHook(over: Partial<BurnState>, actionInFlight = false) {
   hookMock.mockReturnValue({
@@ -81,6 +86,7 @@ function setHook(over: Partial<BurnState>, actionInFlight = false) {
     ...over,
     actionInFlight,
     burn: vi.fn(),
+    burnBatch: burnBatchFn,
     reset,
   });
 }
@@ -590,6 +596,7 @@ describe("BurnDustSection reviewed figures and the preview race", () => {
       ...idleState(),
       actionInFlight: false,
       burn: burnFn,
+      burnBatch: burnBatchFn,
       reset,
     });
     renderSection([entry]);
@@ -653,5 +660,270 @@ describe("BurnDustSection reviewed figures and the preview race", () => {
     expect(
       screen.queryByText(/At the fresh read just now: 5,000 base units/)
     ).toBeNull();
+  });
+});
+
+describe("the batched burn UI (owner decision 2026-11-22)", () => {
+  /** Local copies: the helpers above live inside their own describe. */
+  function parsedRead(entry: SkippedAccount) {
+    return {
+      value: {
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        lamports: entry.lamports,
+        data: {
+          parsed: {
+            info: {
+              mint: entry.mint,
+              owner: OWNER.publicKey.toBase58(),
+              tokenAmount: {
+                amount: entry.balance ?? "5000",
+                decimals: entry.decimals ?? 6,
+                uiAmount: null,
+                uiAmountString: "0",
+              },
+              state: "initialized",
+              isNative: false,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  function renderBatch(entries: SkippedAccount[], feeReady = true) {
+    mocks.conn.getParsedAccountInfo.mockImplementation(
+      async (address: unknown) => {
+        const b58 =
+          typeof address === "string"
+            ? address
+            : (address as { toBase58?: () => string })?.toBase58?.();
+        const entry = entries.find((e) => e.pubkey === b58);
+        return entry ? parsedRead(entry) : { value: null };
+      }
+    );
+    render(
+      <BurnDustSection
+        scan={scanWith(entries)}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={feeReady}
+      />
+    );
+  }
+
+  async function tickTwoAndReview() {
+    const boxes = screen.getAllByRole("checkbox");
+    fireEvent.click(boxes[0]);
+    fireEvent.click(boxes[1]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review the batch" })
+    );
+    await screen.findByText(/Review the batched burn before you sign/);
+    await screen.findByText(/You are about to approve/);
+  }
+
+  it("selects nothing by default: no checkbox is ticked and no batch bar renders", () => {
+    renderBatch([dustEntry(), dustEntry()]);
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
+      expect((box as HTMLInputElement).checked).toBe(false);
+    }
+    expect(screen.queryByText(/Review the batch/)).toBeNull();
+  });
+
+  it("offers the batch bar only with two or more accounts ticked", () => {
+    renderBatch([dustEntry(), dustEntry(), dustEntry()]);
+    const boxes = screen.getAllByRole("checkbox");
+    fireEvent.click(boxes[0]);
+    expect(screen.queryByText(/Review the batch/)).toBeNull();
+    fireEvent.click(boxes[1]);
+    expect(
+      screen.getByText(/selected for one batched burn/)
+    ).toBeTruthy();
+  });
+
+  it("states the honest approval count and the summed per-account fee sentence", async () => {
+    renderBatch([dustEntry(), dustEntry()]);
+    await tickTwoAndReview();
+    // Two accounts chunk into ONE transaction (under the 9-pair cap).
+    expect(
+      screen.getByText(/approve 1 transaction, one approval each/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /the sum of 1 percent of what each close returns, floored per account, sent as one transfer per transaction riding last/
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/Total rent returning/)).toBeTruthy();
+  });
+
+  it("shows the transaction grouping for an eleven-account batch (2 approvals)", async () => {
+    renderBatch(
+      Array.from({ length: 11 }, () => dustEntry())
+    );
+    const boxes = screen.getAllByRole("checkbox");
+    for (const box of boxes) fireEvent.click(box);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review the batch" })
+    );
+    await screen.findByText(/Review the batched burn before you sign/);
+    await screen.findByText(/approve 2 transactions, one approval each/);
+    expect(screen.getByText(/Transaction 1 of 2/)).toBeTruthy();
+    expect(screen.getByText(/Transaction 2 of 2/)).toBeTruthy();
+  });
+
+  it("carries the delegate disclosure into the batch card", async () => {
+    const clean = dustEntry();
+    const withDelegate = dustEntry();
+    const delegateB58 = Keypair.generate().publicKey.toBase58();
+    mocks.conn.getParsedAccountInfo.mockImplementation(
+      async (address: unknown) => {
+        const b58 =
+          typeof address === "string"
+            ? address
+            : (address as { toBase58?: () => string })?.toBase58?.();
+        if (b58 === withDelegate.pubkey) {
+          const read = parsedRead(withDelegate) as {
+            value: { data: { parsed: { info: Record<string, unknown> } } };
+          };
+          read.value.data.parsed.info.delegate = delegateB58;
+          return read;
+        }
+        return parsedRead(clean);
+      }
+    );
+    render(
+      <BurnDustSection
+        scan={scanWith([clean, withDelegate])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={true}
+      />
+    );
+    await tickTwoAndReview();
+    expect(
+      screen.getByText(/has a delegate holding a spending permission/)
+    ).toBeTruthy();
+  });
+
+  it("lists the accounts excluded before signing, with their reasons", async () => {
+    // The scan row is clean (a scan-frozen account never renders); it
+    // is the FRESH read that turns frozen, which is the case the batch
+    // pre-card exclusion exists for.
+    const turnsFrozen = dustEntry();
+    const ok = dustEntry();
+    const ok2 = dustEntry();
+    mocks.conn.getParsedAccountInfo.mockImplementation(
+      async (address: unknown) => {
+        const b58 =
+          typeof address === "string"
+            ? address
+            : (address as { toBase58?: () => string })?.toBase58?.();
+        if (b58 === turnsFrozen.pubkey) {
+          return {
+            value: {
+              owner: new PublicKey(
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+              ),
+              lamports: turnsFrozen.lamports,
+              data: {
+                parsed: {
+                  info: {
+                    mint: turnsFrozen.mint,
+                    owner: OWNER.publicKey.toBase58(),
+                    tokenAmount: {
+                      amount: "5000",
+                      decimals: 6,
+                      uiAmount: null,
+                      uiAmountString: "0",
+                    },
+                    state: "frozen",
+                    isNative: false,
+                  },
+                },
+              },
+            },
+          };
+        }
+        const entry = [turnsFrozen, ok, ok2].find((e) => e.pubkey === b58);
+        return entry ? parsedRead(entry) : { value: null };
+      }
+    );
+    render(
+      <BurnDustSection
+        scan={scanWith([turnsFrozen, ok, ok2])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={true}
+      />
+    );
+    const boxes = screen.getAllByRole("checkbox");
+    for (const box of boxes) fireEvent.click(box);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review the batch" })
+    );
+    await screen.findByText(/Review the batched burn before you sign/);
+    expect(
+      await screen.findByText(/1 account was excluded from the batch before signing/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/a frozen account cannot be burned/)
+    ).toBeTruthy();
+  });
+
+  it("hands the reviewed figures to burnBatch on approve", async () => {
+    setHook({}, false);
+    renderBatch([dustEntry(), dustEntry()]);
+    await tickTwoAndReview();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Approve & Burn 2 accounts/ })
+    );
+    expect(burnBatchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the project writing rules on the batch copy", async () => {
+    renderBatch([dustEntry(), dustEntry()]);
+    await tickTwoAndReview();
+    const batchCopy = [
+      screen.getByText(/one approval each/).textContent ?? "",
+      screen.getByText(/the sum of 1 percent of what each close returns/).textContent ?? "",
+    ];
+    for (const text of batchCopy) {
+      expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+      expect(text.includes("!")).toBe(false);
+      expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    }
+  });
+
+  it("renders the per-account exclusion reasons on the batch done card", () => {
+    setHook(
+      {
+        status: "done",
+        outcome: "burn-verified",
+        batchAccounts: ["a1", "a2", "a3"],
+        batchVerifiedCount: 2,
+        batchExcluded: [
+          {
+            pubkey: "a3FrozenAccountPlaceholder000000000000000000000",
+            reason:
+              "The fresh read reports this account as frozen, and a frozen account cannot be burned. Nothing was signed.",
+          },
+        ],
+      },
+      false
+    );
+    renderBatch([dustEntry(), dustEntry(), dustEntry()]);
+    expect(screen.getByText(/2 of 3 accounts verified gone/)).toBeTruthy();
+    expect(screen.getByText(/1 account was excluded before signing/)).toBeTruthy();
+    expect(
+      screen.getByText(/a frozen account cannot be burned/)
+    ).toBeTruthy();
   });
 });
