@@ -12,8 +12,9 @@
 // The signature walk paginates with the before cursor until exhausted
 // (the pattern scripts/update-recovered-totals.mjs installed), so
 // history growth past any single page can never silently narrow the
-// audit. A null getTransaction response is an UNVERIFIABLE row, never a
-// pass, and the exit ladder is honest:
+// audit. A null getTransaction response that survives its null-read
+// retries is an UNVERIFIABLE row, never a pass, and the exit ladder is
+// honest:
 //
 // Exit 0 = every repair-shaped row in the full history was actually
 //          verified against the 1% rule (or the history holds none).
@@ -86,11 +87,23 @@ const TX_PACING_MS = 1000;
 // Bounded in-place retries for one getTransaction fetch that throws
 // (network/RPC failure). The backoff grows per attempt because throttle
 // windows on the shared runner IP arrive in bursts lasting tens of
-// seconds, not the fixed 2s/4s a desktop-sized budget assumed. A retry
-// that SUCCEEDS with a null response is still an unverifiable row:
-// null is a definitive answer (pruned or unreadable), not a failure.
+// seconds, not the fixed 2s/4s a desktop-sized budget assumed.
 const TX_FETCH_ATTEMPTS = 5;
 const TX_FETCH_BACKOFF_MS = [2000, 8000, 30000, 90000];
+// A read that SUCCEEDS with a null body is no longer believed on the
+// first answer (owner word 2026-11-22, the E422 shelf option): the
+// public endpoint occasionally returns a healthy 200 with no
+// transaction for a signature it serves fine moments later (runs 224,
+// 228, 231 - 2026-11-18/20/22 - one null row each, all verified
+// conforming on the next run), and each such flake was a red bell and
+// an owner email for a conforming ledger. A null gets
+// NULL_TX_READ_ATTEMPTS reads paced NULL_TX_READ_BACKOFF_MS apart;
+// worst case a flaky row costs about a minute before the verdict. Only
+// a null that SURVIVES the retries is definitive (pruned or
+// unreadable) - still an unverifiable row, never a pass, exit 2
+// unchanged.
+const NULL_TX_READ_ATTEMPTS = 3;
+const NULL_TX_READ_BACKOFF_MS = 30000;
 
 const sleep = (ms) => new Promise((x) => setTimeout(x, ms));
 
@@ -212,13 +225,16 @@ let checked = 0;
 let fees = 0;
 let failedOnChain = 0;
 let notRepairShaped = 0;
+let nullRecovered = 0;
 const violations = [];
 const noVerdict = [];
 
 async function fetchTransaction(signature) {
+  let nulls = 0;
   for (let attempt = 1; attempt <= TX_FETCH_ATTEMPTS; attempt++) {
+    let tx;
     try {
-      return await rpc("getTransaction", [
+      tx = await rpc("getTransaction", [
         signature,
         { maxSupportedTransactionVersion: 1, encoding: "json" },
       ]);
@@ -230,7 +246,23 @@ async function fetchTransaction(signature) {
         return undefined;
       }
       await sleep(TX_FETCH_BACKOFF_MS[attempt - 1]);
+      continue;
     }
+    if (tx !== null) {
+      if (nulls > 0) nullRecovered += 1;
+      return tx;
+    }
+    // A null body: paced retries before it is believed (see
+    // NULL_TX_READ_ATTEMPTS above). A null that outlasts the budget is
+    // definitive and the WARN below names it for the log reader.
+    nulls += 1;
+    if (nulls >= NULL_TX_READ_ATTEMPTS) {
+      console.log(
+        `WARN ${signature.slice(0, 12)} returned no transaction body after ${NULL_TX_READ_ATTEMPTS} read(s); row is unverifiable`
+      );
+      return null;
+    }
+    await sleep(NULL_TX_READ_BACKOFF_MS);
   }
   return undefined;
 }
@@ -246,11 +278,9 @@ for (const entry of sigs) {
     continue;
   }
   if (tx === null) {
-    // A definitive null (pruned or otherwise unreadable): counted as
-    // unverifiable, never skipped silently.
-    console.log(
-      `WARN no transaction body returned for ${entry.signature.slice(0, 12)}; row is unverifiable`
-    );
+    // A definitive null - it survived the null-read retries (pruned or
+    // otherwise unreadable; fetchTransaction already WARNed): counted
+    // as unverifiable, never skipped silently.
     noVerdict.push(entry.signature);
     continue;
   }
@@ -392,6 +422,7 @@ console.log(
   `fee ledger check: ${checked} repair fee(s) verified across ${sigs.length} signature(s) in ${pages} page(s), ` +
     `${fees} lamports total, ${noVerdict.length} unverifiable, ` +
     `${failedOnChain} failed on chain, ${notRepairShaped} not repair-shaped, ` +
+    `${nullRecovered} null read(s) recovered by retry, ` +
     `${violations.length} violation(s)`
 );
 if (violations.length > 0) {
