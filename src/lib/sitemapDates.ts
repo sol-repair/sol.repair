@@ -22,10 +22,10 @@
  */
 export const LAST_MODIFIED: Record<string, string> = {
   "/": "2026-11-14",
-  "/fees": "2026-11-17",
+  "/fees": "2026-11-22",
   "/understand": "2026-11-11",
   "/report": "2026-11-14",
-  "/changelog": "2026-11-14",
+  "/changelog": "2026-11-22",
   "/guides/burn-dead-nfts": "2026-11-17",
   "/guides/random-tokens": "2026-11-01",
   "/guides/rent-reduction": "2026-11-01",
