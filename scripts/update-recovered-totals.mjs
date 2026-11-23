@@ -11,7 +11,10 @@
 // and master edition closes ride as CPI inner instructions) AND a
 // System transfer INTO the fee wallet; the fee must equal exactly
 // floor(1%) of the rent the closes freed (for a BurnNft: the
-// preBalances of its account keys 0, 3, 4). Known operator-test
+// preBalances of its account keys 0, 3, 4), or, since the batched
+// burn-and-close (owner decision 2026-11-22), the sum of each
+// account's own floor(1%) - the dual-arm comparison in
+// ./fee-verdict-arms.mjs, both arms exact. Known operator-test
 // signatures and the
 // wallet's own funding transfer are excluded, every exclusion is
 // printed with its signature, and nothing is ever silently skipped: a
@@ -33,6 +36,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 import bs58 from "bs58";
 import { Connection, PublicKey } from "@solana/web3.js";
+
+import { feeConforms } from "./fee-verdict-arms.mjs";
 
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 const SYSTEM_PROGRAM = "1".repeat(32);
@@ -210,6 +215,10 @@ for (const s of uniqueSigs) {
       if (src !== undefined) closedAccounts.set(src, true);
     }
   }
+  // Per-account rents: what the dual-arm conformance comparison (the
+  // shared helper) needs alongside the total. Previously only the
+  // total was accumulated.
+  const perAccount = [];
   for (const [src] of closedAccounts) {
     const idx = keys.indexOf(src);
     if (idx < 0) continue;
@@ -223,10 +232,11 @@ for (const s of uniqueSigs) {
     const pre = BigInt(t.meta.preBalances[idx]);
     const post = BigInt(t.meta.postBalances?.[idx] ?? 0);
     freed += pre - post;
+    perAccount.push(pre - post);
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
   organicRows++;
-  if (feeAmt !== freed / 100n) {
+  if (!feeConforms(feeAmt, perAccount)) {
     violations++;
     console.log("CONFORMANCE VIOLATION", s.signature, "fee", feeAmt.toString(), "freed", freed.toString());
     continue;
