@@ -465,6 +465,7 @@ export function BurnDustSection({
     batchAccounts,
     batchVerifiedCount,
     batchExcluded,
+    batchUnverifiedCount,
   } = useBurnDust();
 
   const dust = useMemo(
@@ -1284,7 +1285,8 @@ export function BurnDustSection({
       {/* Done cards */}
       {status === "done" && (
         <div className="mt-3 rounded-md border border-emerald-800 bg-emerald-950/30 p-3">
-          {outcome === "burn-verified" && (
+          {(outcome === "burn-verified" ||
+            outcome === "burn-unverified-reads") && (
             <>
               <p className="text-sm font-medium text-emerald-400">
                 Burn and close complete.
@@ -1300,6 +1302,22 @@ export function BurnDustSection({
                     held went to your wallet as the closes&rsquo;
                     destination.
                   </p>
+                  {outcome === "burn-unverified-reads" &&
+                    batchUnverifiedCount > 0 && (
+                      <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
+                        {batchUnverifiedCount}{" "}
+                        {plural(
+                          batchUnverifiedCount,
+                          "account",
+                          "accounts"
+                        )}{" "}
+                        {plural(batchUnverifiedCount, "was", "were")} closed
+                        by transactions the network confirmed, but the
+                        follow-up reads that would confirm each deletion
+                        could not be completed. The closures are on chain;
+                        the individual fresh-read confirmation is not.
+                      </p>
+                    )}
                   {batchExcluded !== null && batchExcluded.length > 0 && (
                     <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
                       {batchExcluded.length}{" "}

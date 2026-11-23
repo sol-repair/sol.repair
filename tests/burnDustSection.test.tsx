@@ -75,6 +75,7 @@ const idleState = (): BurnState => ({
   batchAccounts: null,
   batchVerifiedCount: 0,
   batchExcluded: null,
+  batchUnverifiedCount: 0,
 });
 
 const reset = vi.fn();
@@ -925,5 +926,62 @@ describe("the batched burn UI (owner decision 2026-11-22)", () => {
     expect(
       screen.getByText(/a frozen account cannot be burned/)
     ).toBeTruthy();
+  });
+});
+
+describe("the batched burn done card with unverified reads (audit finding 2)", () => {
+  function renderDoneUnverified() {
+    setHook(
+      {
+        status: "done",
+        outcome: "burn-unverified-reads",
+        batchAccounts: ["a1", "a2", "a3"],
+        batchVerifiedCount: 2,
+        batchUnverifiedCount: 1,
+      },
+      false
+    );
+    render(
+      <BurnDustSection
+        scan={scanWith([dustEntry(), dustEntry(), dustEntry()])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={true}
+      />
+    );
+  }
+
+  it("does not end burn-verified and shows the verified and unverified split", () => {
+    renderDoneUnverified();
+    expect(
+      screen.getByText(/2 of 3 accounts verified gone by fresh reads/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/1 account was closed by transactions the network confirmed/)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/the individual fresh-read confirmation is not/)
+    ).toBeTruthy();
+    // the destruction claim must stay scoped to the verified subset:
+    // the unverified paragraph carries its own honest wording
+    const unverifiedParagraph = screen.getByText(
+      /1 account was closed by transactions the network confirmed/
+    ).textContent ?? "";
+    expect(unverifiedParagraph.includes("destroyed permanently")).toBe(false);
+  });
+
+  it("keeps the project writing rules on the unverified-reads copy", () => {
+    renderDoneUnverified();
+    const texts = [
+      screen.getByText(/the individual fresh-read confirmation is not/)
+        .textContent ?? "",
+    ];
+    for (const text of texts) {
+      expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
+      expect(text.includes("!")).toBe(false);
+      expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
+    }
   });
 });
