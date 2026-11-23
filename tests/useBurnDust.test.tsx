@@ -1414,4 +1414,132 @@ describe("useBurnDust burnBatch (the batched burn-and-close, owner decision 2026
     expect(result.current.error).toContain("Nothing more will be sent");
     expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
   });
+
+  // Audit finding 1 (HIGH): a batch error terminal must be
+  // progress-aware - which transactions stand, how many accounts
+  // verified, nothing more will be sent - and unexpected errors get
+  // their own outcome, never "cancelled".
+  it("an unexpected failure at chunk 2 of 3 reports the standing chunk and never claims nothing was sent", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(20); // 9 + 9 + 2
+    gateThenGone(candidates);
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    mocks.conn.getLatestBlockhash
+      .mockResolvedValueOnce({
+        blockhash: "BLOCKHASH",
+        lastValidBlockHeight: 1000,
+        feeCalculator: {},
+      })
+      .mockRejectedValue(new Error("rpc exploded"));
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("run-stopped");
+    expect(result.current.outcome).not.toBe("cancelled");
+    expect(result.current.error).toContain(
+      "1 of 3 transactions stand verified"
+    );
+    expect(result.current.error).toContain("9 of 20 accounts");
+    expect(result.current.error).toContain("Nothing more will be sent");
+    expect(result.current.errorDetail).toContain("rpc exploded");
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.batchVerifiedCount).toBe(9);
+  });
+
+  it("a wallet change mid-run stops with the standing chunk accounted for", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(11); // 9 + 2
+    gateThenGone(candidates);
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    // Pause chunk 2's build at its blockhash fetch so the test can
+    // switch the wallet (and rerender, mirroring the live key ref)
+    // while the run is held mid-flight.
+    const blockhashValue = {
+      blockhash: "BLOCKHASH",
+      lastValidBlockHeight: 1000,
+      feeCalculator: {},
+    };
+    let resolveBlockhash!: (v: typeof blockhashValue) => void;
+    let blockhashCalls = 0;
+    mocks.conn.getLatestBlockhash.mockImplementation(async () => {
+      blockhashCalls += 1;
+      if (blockhashCalls === 1) return blockhashValue;
+      return new Promise((resolve) => {
+        resolveBlockhash = resolve;
+      });
+    });
+    const { result, rerender } = renderHook(() => useBurnDust());
+    // Fire without awaiting: the run is driven step by step below.
+    act(() => {
+      void result.current.burnBatch(candidates, false);
+    });
+    // Wait until chunk 2's build is held on the pending blockhash.
+    for (let i = 0; i < 200 && blockhashCalls < 2; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(blockhashCalls).toBe(2);
+    // The wallet switches while the run is held. The rerender mirrors
+    // the live key ref, the same mechanism the single-account
+    // wallet-switch test uses.
+    await act(async () => {
+      mocks.wallet.publicKey = SWITCHED.publicKey;
+      rerender();
+    });
+    resolveBlockhash(blockhashValue);
+    // Chunk 2's identity check now sees the switched key and stops the
+    // run with the standing chunk accounted for.
+    for (let i = 0; i < 200 && result.current.status !== "error"; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("run-stopped");
+    expect(result.current.error).toContain(
+      "The connected wallet changed"
+    );
+    expect(result.current.error).toContain(
+      "1 of 2 transactions stand verified"
+    );
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.batchVerifiedCount).toBe(9);
+  });
+
+  // Audit finding 2 (MEDIUM): follow-up reads that cannot establish an
+  // account's state must never end burn-verified - the terminal carries
+  // a distinct outcome and the verified/unverified split.
+  it("failed follow-up reads do not end burn-verified and count the unverified subset", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(2);
+    const mintByPubkey = new Map(candidates.map((c) => [c.pubkey, c.mint]));
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    let calls = 0;
+    mocks.conn.getParsedAccountInfo.mockImplementation(async (address: unknown) => {
+      const b58 =
+        typeof address === "string"
+          ? address
+          : (address as { toBase58?: () => string })?.toBase58?.();
+      calls += 1;
+      if (calls <= candidates.length) {
+        return readShape({
+          lamports: 1_488_440,
+          ...infoBody(mintByPubkey.get(b58 ?? "") ?? MINT.toBase58(), "1000", "initialized"),
+        });
+      }
+      // follow-up verification reads: data the parser cannot read
+      return { value: { lamports: 1_488_440, data: {}, owner: TOKEN_OWNER_PLACEHOLDER } };
+    });
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.outcome).toBe("burn-unverified-reads");
+    expect(result.current.outcome).not.toBe("burn-verified");
+    expect(result.current.batchUnverifiedCount).toBe(2);
+    expect(result.current.batchVerifiedCount).toBe(0);
+    expect(result.current.error ?? "").not.toContain("destroyed permanently");
+  });
 });
+
+const TOKEN_OWNER_PLACEHOLDER = new PublicKey(
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+);

@@ -69,10 +69,12 @@ export type BurnStatus =
 export type BurnOutcome =
   // done
   | "burn-verified"
+  | "burn-unverified-reads"
   | "already-gone"
   | "already-empty"
   | "close-unattributed"
   // error
+  | "run-stopped"
   | "gate-state-changed"
   | "cancelled"
   | "expired"
@@ -109,6 +111,10 @@ export interface BurnState {
   /** Accounts the batch gate excluded before anything was built, with
    *  the reason each dropped (the honest exclusion report). */
   batchExcluded: Array<{ pubkey: string; reason: string }> | null;
+  /** Accounts included in confirmed transactions whose follow-up
+   *  deletion reads could not be completed: closed on chain, never
+   *  individually verified. Drives the split done card. */
+  batchUnverifiedCount: number;
 }
 
 const INITIAL_STATE: BurnState = {
@@ -129,6 +135,7 @@ const INITIAL_STATE: BurnState = {
   batchAccounts: null,
   batchVerifiedCount: 0,
   batchExcluded: null,
+  batchUnverifiedCount: 0,
 };
 
 /** The read shape the corroboration judge and the verification reads
@@ -741,6 +748,20 @@ export function useBurnDust() {
       burnInFlight.current = true;
 
       let holdLockForDismissal = false;
+      // Progress accounting for the progress-aware error terminal
+      // (audit finding): declared outside the try so the catch can
+      // report how much of the run stands when anything throws.
+      let completedChunks = 0;
+      let submittedCount = 0;
+      let verifiedSoFar = 0;
+      let totalChunks = 0;
+      let totalAccounts = 0;
+      const progressLine = () =>
+        completedChunks > 0
+          ? `${completedChunks} of ${totalChunks} transactions stand verified (${verifiedSoFar} of ${totalAccounts} accounts confirmed gone). `
+          : submittedCount > 0
+            ? `${submittedCount} transaction(s) were submitted but their outcome could not be established before the run stopped. `
+            : "";
       try {
         if (!wallet.publicKey || !wallet.signTransaction) {
           setState({
@@ -770,7 +791,6 @@ export function useBurnDust() {
         let reSignUsed = false;
         let refusalRetryUsed = false;
         let lastResolutionNote: string | null = null;
-
         const setRunState = (
           patch:
             | Partial<BurnState>
@@ -881,6 +901,8 @@ export function useBurnDust() {
             })
           )
         );
+        totalChunks = chunks.length;
+        totalAccounts = passing.length;
 
         setRunState({
           batchProgress: { current: 1, total: chunks.length },
@@ -906,7 +928,7 @@ export function useBurnDust() {
           const liveBeforeBuild = livePublicKeyRef.current;
           if (!liveBeforeBuild || !liveBeforeBuild.equals(actionOwner)) {
             throw new FriendlyError(
-              "The connected wallet changed. Stopped before signing anything."
+              `${progressLine()}The connected wallet changed. Stopped before signing anything. Nothing more will be sent.`
             );
           }
 
@@ -924,7 +946,7 @@ export function useBurnDust() {
           const liveBeforeSign = livePublicKeyRef.current;
           if (!liveBeforeSign || !liveBeforeSign.equals(actionOwner)) {
             throw new FriendlyError(
-              "The connected wallet changed. Stopped before signing anything."
+              `${progressLine()}The connected wallet changed. Stopped before signing anything. Nothing more will be sent.`
             );
           }
 
@@ -966,7 +988,7 @@ export function useBurnDust() {
           const signatureBytes = signed.signatures[0]?.signature;
           if (!signatureBytes) {
             throw new FriendlyError(
-              "Wallet returned a transaction without a signature. Nothing was sent."
+              `${progressLine()}Wallet returned a transaction without a signature. Nothing was sent.`
             );
           }
           const signature = bs58.encode(signatureBytes);
@@ -980,6 +1002,7 @@ export function useBurnDust() {
           let sendFailure: string | null = null;
           try {
             await connection.sendRawTransaction(signed.serialize());
+            submittedCount += 1;
           } catch (sendError) {
             sendFailure =
               sendError instanceof Error
@@ -1103,11 +1126,14 @@ export function useBurnDust() {
             setRunState((prev) => ({
               status: "building",
               batchVerifiedCount: prev.batchVerifiedCount + chunkVerified,
+              batchUnverifiedCount: prev.batchUnverifiedCount + unavailable,
               note:
                 unavailable > 0
                   ? `Transaction ${chunkIndex + 1} of ${chunks.length} confirmed, but ${unavailable} follow-up read(s) failed, so those accounts are unverified.`
                   : `Transaction ${chunkIndex + 1} of ${chunks.length} verified.`,
             }));
+            completedChunks += 1;
+            verifiedSoFar += chunkVerified;
             continue; // next chunk
           }
 
@@ -1181,25 +1207,43 @@ export function useBurnDust() {
         }
 
         // Every chunk landed and verified (or the loop returned a
-        // terminal above).
-        setRunState({
-          status: "done",
-          outcome: "burn-verified",
-          note: null,
-        });
+        // terminal above). A run whose follow-up reads could not
+        // complete for some accounts ends on the distinct
+        // unverified-reads outcome: the closures are confirmed on
+        // chain, the individual fresh-read confirmation is not.
+        setRunState((prev) =>
+          prev.batchUnverifiedCount > 0
+            ? { status: "done", outcome: "burn-unverified-reads" }
+            : { status: "done", outcome: "burn-verified", note: null }
+        );
       } catch (err) {
+        // Progress-aware terminal (audit finding): a batch error must
+        // account for the chunks that already stand, and unexpected
+        // errors get their own outcome, never "cancelled".
         const message = err instanceof Error ? err.message : String(err);
         const friendly = err instanceof FriendlyError;
-        setState((prev) => ({
-          ...prev,
-          status: "error",
-          outcome: friendly ? err.outcome : "cancelled",
-          note: null,
-          error: friendly
-            ? message
-            : "The burn could not be prepared. Nothing was signed or sent.",
-          errorDetail: friendly ? null : message,
-        }));
+        const upgraded = completedChunks > 0 || submittedCount > 0;
+        const progress = progressLine();
+        if (friendly) {
+          setState((prev) => ({
+            ...prev,
+            status: "error",
+            outcome: upgraded ? "run-stopped" : err.outcome,
+            error: `${upgraded ? progress : ""}${message}`,
+            errorDetail: null,
+          }));
+        } else {
+          const prepared = completedChunks === 0 && submittedCount === 0;
+          setState((prev) => ({
+            ...prev,
+            status: "error",
+            outcome: "run-stopped",
+            error: prepared
+              ? "The burn could not be prepared. Nothing was signed or sent."
+              : `${progress}The run stopped unexpectedly at transaction ${completedChunks + 1} of ${totalChunks}. Nothing more will be sent.`,
+            errorDetail: message,
+          }));
+        }
       } finally {
         if (!holdLockForDismissal || unmountedRef.current) {
           releaseAction("burn");
