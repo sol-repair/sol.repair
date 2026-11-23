@@ -109,6 +109,26 @@ describe("the changelog data list", () => {
       expect(text.includes("!")).toBe(false);
     }
   });
+
+  it("announces the batched dust burn as the newest entry (owner decision 2026-11-22)", () => {
+    expect(CHANGELOG[0].title).toBe(
+      "Several dust tokens can now burn in one approval"
+    );
+    // The honest headline facts, pinned: batch size, the popup math,
+    // the unchanged single-account flow, the dual-arm ledger rule, and
+    // the honest bound between the two readings.
+    expect(CHANGELOG[0].body).toContain("up to nine account pairs");
+    expect(CHANGELOG[0].body).toContain("took 47 approvals takes 6");
+    expect(CHANGELOG[0].body).toContain(
+      "Burning one account at a time works exactly as before"
+    );
+    expect(CHANGELOG[0].body).toContain(
+      "the per-account sum a batch charges"
+    );
+    expect(CHANGELOG[0].body).toContain(
+      "differ by at most 8 lamports per transaction"
+    );
+  });
 });
 
 describe("the /changelog page", () => {

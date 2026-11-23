@@ -18,6 +18,30 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: "2026-11-22",
+    title: "Several dust tokens can now burn in one approval",
+    body:
+      "The dust burn-and-close can now batch several accounts into one " +
+      "transaction: up to nine account pairs ride together, a size " +
+      "derived from the network's own 1232-byte limit with a tested " +
+      "margin for the instructions wallets add on their own. A cleanup " +
+      "that used to ask for one approval per account now asks for one " +
+      "approval per batch: a 47-token session that took 47 approvals " +
+      "takes 6. Nothing else changes. Each account is still read fresh " +
+      "right before anything is signed, the burn still destroys the " +
+      "balance permanently, the close still returns every lamport to " +
+      "your wallet, and the fee is still 1 percent, floored, of what " +
+      "each account's close returns, added up and sent as one plain " +
+      "transfer you can see before you approve. Burning one account at " +
+      "a time works exactly as before; the batch is optional and " +
+      "nothing is selected by default. The public fee ledger now " +
+      "accepts both exact readings of the 1 percent rule: the " +
+      "whole-batch floor the repair has always used, and the " +
+      "per-account sum a batch charges. The two readings differ by at " +
+      "most 8 lamports per transaction at this batch size. Dead NFT " +
+      "burns keep their own flow, one transaction per NFT.",
+  },
+  {
     date: "2026-11-13",
     title:
       "Dead NFTs can now burn and close all three of their accounts at once",

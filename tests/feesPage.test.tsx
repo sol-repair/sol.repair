@@ -173,6 +173,25 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
 
     expect(screen.getByText(/not exactly 1% of the SOL/i)).toBeTruthy();
   });
+
+  it("states the batched burn fee sentence (the dual-arm rule, owner decision 2026-11-22)", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /the fee is the sum of each account.s own 1 percent, floored/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /the same lamports burning them one at a time would charge/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/differ by at most 8 lamports per transaction/i)
+    ).toBeTruthy();
+  });
 });
 
 describe("fees page: the incomplete-history notice (audit F2)", () => {
