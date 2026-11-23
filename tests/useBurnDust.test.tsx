@@ -1170,3 +1170,248 @@ describe("useBurnDust mint blockers", () => {
     expect(result.current.error).not.toContain("permissioned burning");
   });
 });
+
+describe("useBurnDust burnBatch (the batched burn-and-close, owner decision 2026-11-22)", () => {
+  function makeCandidates(n: number) {
+    return Array.from({ length: n }, () => ({
+      pubkey: Keypair.generate().publicKey.toBase58(),
+      mint: Keypair.generate().publicKey.toBase58(),
+      program: "spl" as const,
+      lamports: 1_488_440,
+      amountAtScan: "1000",
+      decimals: 6,
+    }));
+  }
+
+  function infoBody(mint: string, amount: string, state: string) {
+    return {
+      data: {
+        parsed: {
+          info: {
+            mint,
+            owner: OWNER.publicKey.toBase58(),
+            tokenAmount: {
+              amount,
+              decimals: 6,
+              uiAmount: null,
+              uiAmountString: "0",
+            },
+            state,
+            isNative: false,
+          },
+        },
+      },
+    };
+  }
+
+  /** Gate reads keyed by the candidate list: each account's read must
+   *  carry ITS mint (the gate checks mint match). Verification reads
+   *  (after the send) report the account gone. */
+  function gateThenGone(candidates: ReturnType<typeof makeCandidates>) {
+    const mintByPubkey = new Map(candidates.map((c) => [c.pubkey, c.mint]));
+    let gateCalls = 0;
+    mocks.conn.getParsedAccountInfo.mockImplementation(async (address: unknown) => {
+      const b58 =
+        typeof address === "string"
+          ? address
+          : (address as { toBase58?: () => string })?.toBase58?.();
+      gateCalls += 1;
+      if (gateCalls <= candidates.length) {
+        return readShape({
+          lamports: 1_488_440,
+          ...infoBody(mintByPubkey.get(b58 ?? "") ?? MINT.toBase58(), "1000", "initialized"),
+        });
+      }
+      return { value: null };
+    });
+  }
+
+  it("burns two accounts in one approval and verifies both", async () => {
+    const candidates = makeCandidates(2);
+    gateThenGone(candidates);
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, true);
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(result.current.batchVerifiedCount).toBe(2);
+    expect(result.current.signatures).toHaveLength(1);
+    // One approval, and the transaction carried both pairs plus the
+    // summed fee transfer riding last (5 instructions).
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    const unsigned = (mocks.wallet.signTransaction as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as { instructions: { programId: PublicKey; data: Buffer }[] };
+    expect(unsigned.instructions).toHaveLength(5);
+    const last = unsigned.instructions[4];
+    expect(last.programId.equals(SystemProgram.programId)).toBe(true);
+    // 2 x floor(1% of 1,488,440) = 2 x 14,884 = 29,768.
+    expect(Number(last.data.readBigUInt64LE(4))).toBe(29_768);
+  });
+
+  it("splits eleven accounts into two approvals with honest progress", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(11);
+    gateThenGone(candidates);
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.outcome).toBe("burn-verified");
+    expect(result.current.batchVerifiedCount).toBe(11);
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(2);
+    // 11 accounts, no fee: 9 pairs = 18 instructions, then 2 pairs = 4.
+    const calls = (mocks.wallet.signTransaction as ReturnType<typeof vi.fn>).mock
+      .calls as unknown as { instructions: unknown[] }[][];
+    expect(calls[0][0].instructions).toHaveLength(18);
+    expect(calls[1][0].instructions).toHaveLength(4);
+  });
+
+  it("excludes a frozen account before chunking and states the reason", async () => {
+    const candidates = makeCandidates(2);
+    const mintByPubkey = new Map(candidates.map((c) => [c.pubkey, c.mint]));
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    let calls = 0;
+    mocks.conn.getParsedAccountInfo.mockImplementation(async (address: unknown) => {
+      const b58 =
+        typeof address === "string"
+          ? address
+          : (address as { toBase58?: () => string })?.toBase58?.();
+      calls += 1;
+      // Gate phase: the two candidate reads. Verification phase (past
+      // the gate): the surviving account reads gone.
+      if (calls > candidates.length) return { value: null };
+      const mint = mintByPubkey.get(b58 ?? "") ?? MINT.toBase58();
+      const state = calls === 1 ? "frozen" : "initialized";
+      return readShape({ lamports: 1_488_440, ...infoBody(mint, "1000", state) });
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.batchVerifiedCount).toBe(1);
+    expect(result.current.batchExcluded).toHaveLength(1);
+    expect(result.current.batchExcluded?.[0].pubkey).toBe(candidates[0].pubkey);
+    expect(result.current.batchExcluded?.[0].reason).toContain("frozen");
+    // Only the surviving account was signed for: one pair, no fee.
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    const unsigned = (mocks.wallet.signTransaction as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as { instructions: unknown[] };
+    expect(unsigned.instructions).toHaveLength(2);
+  });
+
+  it("stops with an honest error when every candidate is excluded, signing nothing", async () => {
+    const candidates = makeCandidates(2);
+    mocks.conn.getParsedAccountInfo.mockResolvedValue(
+      readShape(infoBody(MINT.toBase58(), "1000", "frozen"))
+    );
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toContain(
+      "None of the selected accounts can be burned right now. Nothing was signed."
+    );
+    expect(result.current.batchExcluded).toHaveLength(2);
+    expect(mocks.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("excludes an account whose reviewed figures no longer match the fresh read", async () => {
+    const candidates = makeCandidates(2);
+    const mintByPubkey = new Map(candidates.map((c) => [c.pubkey, c.mint]));
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    let calls = 0;
+    mocks.conn.getParsedAccountInfo.mockImplementation(async (address: unknown) => {
+      const b58 =
+        typeof address === "string"
+          ? address
+          : (address as { toBase58?: () => string })?.toBase58?.();
+      calls += 1;
+      // Gate phase first; verification phase reads the surviving
+      // account gone.
+      if (calls > candidates.length) return { value: null };
+      const mint = mintByPubkey.get(b58 ?? "") ?? MINT.toBase58();
+      // The first candidate drifted: its balance moved off the
+      // reviewed 1000 before anything was signed.
+      const amount = calls === 1 ? "999" : "1000";
+      return readShape({
+        lamports: 1_488_440,
+        ...infoBody(mint, amount, "initialized"),
+      });
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false, {
+        [candidates[0].pubkey]: { balance: "1000", lamports: 1_488_440 },
+        [candidates[1].pubkey]: { balance: "1000", lamports: 1_488_440 },
+      });
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.batchExcluded).toHaveLength(1);
+    expect(result.current.batchExcluded?.[0].pubkey).toBe(candidates[0].pubkey);
+    expect(result.current.batchExcluded?.[0].reason).toContain(
+      "no longer matches what you reviewed"
+    );
+    expect(result.current.batchVerifiedCount).toBe(1);
+  });
+
+  it("cancelling the second approval stops the run and the first chunk stands", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(11);
+    gateThenGone(candidates);
+    mocks.conn.getSignatureStatuses.mockResolvedValue(confirmedStatus());
+    let signCalls = 0;
+    mocks.wallet.signTransaction = vi.fn(async () => {
+      signCalls += 1;
+      if (signCalls === 2) {
+        throw new Error("User rejected the request");
+      }
+      return fakeSigned();
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toContain(
+      "Transaction 2 of 2 was cancelled. Earlier transactions stand. Nothing more will be sent."
+    );
+    expect(result.current.signatures).toHaveLength(1);
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(2);
+    expect(result.current.batchVerifiedCount).toBe(9);
+  });
+
+  it("stops the run when a chunk fails on-chain, stating what stands", async () => {
+    const candidates = makeCandidates(11);
+    gateThenGone(candidates);
+    mocks.conn.getSignatureStatuses.mockResolvedValue({
+      value: [{ err: { InstructionError: [0, "Custom"] }, confirmationStatus: "confirmed" }],
+    });
+
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("on-chain-failure");
+    expect(result.current.error).toContain(
+      "Transaction 1 of 2 was confirmed on-chain but failed"
+    );
+    expect(result.current.error).toContain("Nothing more will be sent");
+    expect(mocks.wallet.signTransaction).toHaveBeenCalledTimes(1);
+  });
+});

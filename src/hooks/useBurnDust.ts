@@ -28,7 +28,7 @@ import type { Transaction } from "@solana/web3.js";
 
 import { acquireAction, heldAction, releaseAction } from "@/lib/actionMutex";
 import { buildFeeTransfer } from "@/lib/solana/fees";
-import { buildTransaction } from "@/lib/solana/transactions";
+import { buildTransaction, chunkInstructions } from "@/lib/solana/transactions";
 import {
   classifySignRefusal,
   corroborateNonLanding,
@@ -42,10 +42,13 @@ import {
   ALREADY_EMPTY_COPY,
   ALREADY_GONE_COPY,
   BURN_GATE_ABORT_COPY,
+  MAX_BURN_PAIRS_PER_TX,
+  buildBatchedBurnDustInstructions,
   buildBurnDustInstructions,
   evaluateBurnGate,
   readMintBurnBlockers,
   readNativeAccountState,
+  type BatchedBurnCandidate,
   type BurnableDustAccount,
   type BurnGateVerdict,
   type NativeAccountRead,
@@ -95,6 +98,17 @@ export interface BurnState {
   note: string | null;
   error: string | null;
   errorDetail: string | null;
+  /** Batched-run progress while awaiting approvals (the repair's
+   *  N-of-M shape): 1-based current transaction and the chunk total.
+   *  Null outside a batched run. */
+  batchProgress: { current: number; total: number } | null;
+  /** Every account pubkey in the current batched run, chunk order. */
+  batchAccounts: string[] | null;
+  /** Accounts verified gone so far in the batched run. */
+  batchVerifiedCount: number;
+  /** Accounts the batch gate excluded before anything was built, with
+   *  the reason each dropped (the honest exclusion report). */
+  batchExcluded: Array<{ pubkey: string; reason: string }> | null;
 }
 
 const INITIAL_STATE: BurnState = {
@@ -111,6 +125,10 @@ const INITIAL_STATE: BurnState = {
   note: null,
   error: null,
   errorDetail: null,
+  batchProgress: null,
+  batchAccounts: null,
+  batchVerifiedCount: 0,
+  batchExcluded: null,
 };
 
 /** The read shape the corroboration judge and the verification reads
@@ -699,6 +717,500 @@ export function useBurnDust() {
     [connection, wallet]
   );
 
+  /**
+   * The batched burn-and-close (owner decision 2026-11-22): N reviewed
+   * accounts cost ceil(N / MAX_BURN_PAIRS_PER_TX) approvals instead of
+   * N. Every candidate is gate-read in-lock BEFORE anything is chunked,
+   * so one bad account can never strand a batch (it is excluded with a
+   * stated reason instead). Each chunk is one all-or-nothing
+   * transaction: k burn+close pairs plus one summed fee transfer riding
+   * last (the sum of each account's own floor(1%), exactly what the
+   * same accounts cost burned one at a time). A chunk that fails or is
+   * cancelled STOPS the run: earlier chunks stand verified, the rest is
+   * reported as not attempted. The consent shape mirrors the single
+   * flow per account: reviewed figures must match the in-lock gate
+   * read, or that account is excluded and the reason is stated.
+   */
+  const burnBatch = useCallback(
+    async (
+      candidates: BurnableDustAccount[],
+      feeReady: boolean,
+      reviewed?: Record<string, { balance?: string; lamports?: number }>
+    ) => {
+      if (burnInFlight.current) return;
+      burnInFlight.current = true;
+
+      let holdLockForDismissal = false;
+      try {
+        if (!wallet.publicKey || !wallet.signTransaction) {
+          setState({
+            ...INITIAL_STATE,
+            status: "error",
+            outcome: "cancelled",
+            error: "Wallet not connected or does not support signing.",
+          });
+          return;
+        }
+        if (!acquireAction("burn")) {
+          setState({
+            ...INITIAL_STATE,
+            status: "error",
+            outcome: "action-conflict",
+            error: "Another wallet action is underway. Wait for it to finish.",
+          });
+          return;
+        }
+        holdsLockRef.current = true;
+
+        const actionOwner = wallet.publicKey;
+        const signer = wallet.signTransaction;
+
+        // The single re-sign budget and the pacing note, per run (the
+        // same variables the single-account loop owns there).
+        let reSignUsed = false;
+        let refusalRetryUsed = false;
+        let lastResolutionNote: string | null = null;
+
+        const setRunState = (
+          patch:
+            | Partial<BurnState>
+            | ((prev: BurnState) => Partial<BurnState>)
+        ) =>
+          setState((prev) =>
+            typeof patch === "function"
+              ? { ...prev, ...patch(prev) }
+              : { ...prev, ...patch }
+          );
+
+        setState({
+          ...INITIAL_STATE,
+          status: "checking-current-state",
+          batchAccounts: candidates.map((c) => c.pubkey),
+        });
+
+        // ---- The batch gate: every candidate, in-lock, before chunking.
+        const passing: Array<{
+          candidate: BurnableDustAccount;
+          verdict: Extract<BurnGateVerdict, { kind: "pass" }>;
+        }> = [];
+        const excluded: Array<{ pubkey: string; reason: string }> = [];
+        for (const candidate of candidates) {
+          let gateRead: NativeAccountRead;
+          try {
+            gateRead = await readNativeAccountState(connection, candidate.pubkey);
+          } catch {
+            excluded.push({
+              pubkey: candidate.pubkey,
+              reason: BURN_GATE_ABORT_COPY.unreadable,
+            });
+            continue;
+          }
+          const mintRead =
+            candidate.program === "token-2022"
+              ? await readMintBurnBlockers(connection, candidate.mint).catch(
+                  () => undefined
+                )
+              : undefined;
+          const verdict: BurnGateVerdict = evaluateBurnGate(
+            gateRead,
+            candidate.mint,
+            actionOwner.toBase58(),
+            mintRead
+          );
+          if (verdict.kind === "pass") {
+            const want = reviewed?.[candidate.pubkey];
+            if (
+              want &&
+              ((want.balance !== undefined &&
+                verdict.balanceBeforeAction !== want.balance) ||
+                (want.lamports !== undefined &&
+                  verdict.lamportsBeforeAction !== want.lamports))
+            ) {
+              excluded.push({
+                pubkey: candidate.pubkey,
+                reason:
+                  "The account no longer matches what you reviewed (fresh read: " +
+                  `${verdict.balanceBeforeAction} base units, ` +
+                  `${verdict.lamportsBeforeAction} lamports). Nothing was signed for it.`,
+              });
+              continue;
+            }
+            passing.push({ candidate, verdict });
+            continue;
+          }
+          if (verdict.kind === "already-gone") {
+            excluded.push({
+              pubkey: candidate.pubkey,
+              reason: ALREADY_GONE_COPY,
+            });
+            continue;
+          }
+          if (verdict.kind === "already-empty") {
+            excluded.push({
+              pubkey: candidate.pubkey,
+              reason: ALREADY_EMPTY_COPY,
+            });
+            continue;
+          }
+          excluded.push({
+            pubkey: candidate.pubkey,
+            reason: BURN_GATE_ABORT_COPY[verdict.reason],
+          });
+        }
+
+        if (passing.length === 0) {
+          setRunState({
+            status: "error",
+            outcome: "gate-state-changed",
+            batchExcluded: excluded,
+            error:
+              "None of the selected accounts can be burned right now. Nothing was signed.",
+          });
+          return;
+        }
+
+        const chunks = chunkInstructions(
+          passing,
+          MAX_BURN_PAIRS_PER_TX
+        ).map((group) =>
+          group.map(
+            ({ candidate, verdict }): BatchedBurnCandidate => ({
+              ...candidate,
+              amountBeforeAction: verdict.balanceBeforeAction,
+              lamportsBeforeAction: verdict.lamportsBeforeAction,
+            })
+          )
+        );
+
+        setRunState({
+          batchProgress: { current: 1, total: chunks.length },
+          batchAccounts: passing.map(({ candidate }) => candidate.pubkey),
+          batchExcluded: excluded,
+        });
+
+        // ---- The chunk loop: one approval per chunk.
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+          const chunk = chunks[chunkIndex];
+          const chunkNote =
+            chunkIndex > 0
+              ? null
+              : excluded.length > 0
+                ? `${excluded.length} of the selected ${candidates.length} accounts were excluded before signing (the reasons are listed below).`
+                : null;
+          setRunState({
+            status: "building",
+            batchProgress: { current: chunkIndex + 1, total: chunks.length },
+            note: chunkNote ?? lastResolutionNote,
+          });
+
+          const liveBeforeBuild = livePublicKeyRef.current;
+          if (!liveBeforeBuild || !liveBeforeBuild.equals(actionOwner)) {
+            throw new FriendlyError(
+              "The connected wallet changed. Stopped before signing anything."
+            );
+          }
+
+          const instructions = buildBatchedBurnDustInstructions(
+            chunk,
+            actionOwner,
+            feeReady
+          );
+          const unsigned = await buildTransaction(
+            connection,
+            actionOwner,
+            instructions
+          );
+
+          const liveBeforeSign = livePublicKeyRef.current;
+          if (!liveBeforeSign || !liveBeforeSign.equals(actionOwner)) {
+            throw new FriendlyError(
+              "The connected wallet changed. Stopped before signing anything."
+            );
+          }
+
+          setRunState({ status: "awaiting-signature" });
+          let signed: Transaction;
+          try {
+            signed = await signer(unsigned);
+          } catch (signError) {
+            const refusal = classifySignRefusal(signError);
+            if (refusal === "rejected") {
+              throw new FriendlyError(
+                chunks.length > 1
+                  ? `Transaction ${chunkIndex + 1} of ${chunks.length} was cancelled. Earlier transactions stand. Nothing more will be sent.`
+                  : "Transaction cancelled. Nothing was sent."
+              );
+            }
+            if (refusal === "expired-refusal") {
+              if (!refusalRetryUsed) {
+                refusalRetryUsed = true;
+                lastResolutionNote =
+                  "The wallet refused the request: the transaction had expired. Nothing was signed. Retrying once with a fresh transaction.";
+                chunkIndex -= 1; // rebuild the same chunk
+                continue;
+              }
+              throw new FriendlyError(
+                "The wallet refused the request: the transaction had expired. Nothing was signed.",
+                "expired"
+              );
+            }
+            const message =
+              signError instanceof Error
+                ? signError.message
+                : String(signError);
+            const raw = new Error(message);
+            raw.name = signError instanceof Error ? signError.name : "Error";
+            throw raw;
+          }
+
+          const signatureBytes = signed.signatures[0]?.signature;
+          if (!signatureBytes) {
+            throw new FriendlyError(
+              "Wallet returned a transaction without a signature. Nothing was sent."
+            );
+          }
+          const signature = bs58.encode(signatureBytes);
+          setRunState((prev) => ({
+            status: "sending",
+            signatures: [...prev.signatures, signature],
+            note: null,
+          }));
+
+          const lastValidBlockHeight = unsigned.lastValidBlockHeight;
+          let sendFailure: string | null = null;
+          try {
+            await connection.sendRawTransaction(signed.serialize());
+          } catch (sendError) {
+            sendFailure =
+              sendError instanceof Error
+                ? sendError.message
+                : String(sendError);
+          }
+
+          setRunState({ status: "confirming" });
+          // The chunk's first account is the corroboration canary: the
+          // §8.5 judge compares every read against the gate's pre-send
+          // snapshot of that account (balance AND lamports), exactly
+          // like the single flow. Per-account verification below covers
+          // the whole chunk after confirmation.
+          const canary = chunk[0];
+          const readOnce = async (): Promise<
+            CorroborationRead<ReadAccount>
+          > => {
+            try {
+              const read = await readNativeAccountState(
+                connection,
+                canary.pubkey
+              );
+              if (read.kind === "read") return { kind: "read", value: read };
+              if (read.kind === "missing") return { kind: "missing" };
+              return { kind: "unusable" };
+            } catch {
+              return { kind: "unusable" };
+            }
+          };
+          const judge = (
+            read: ReadAccount,
+            prior: ReadAccount | null
+          ): CorroborationVerdict<BurnCorroboration> | null => {
+            if (
+              read.amount !== canary.amountBeforeAction ||
+              read.lamports !== canary.lamportsBeforeAction
+            ) {
+              return {
+                type: "state-changed-since-review",
+                observedBalance: read.amount,
+                observedLamports: read.lamports,
+              };
+            }
+            if (
+              read.nativeStatus !== "non-native" ||
+              read.state === "frozen"
+            ) {
+              return {
+                type: "cannot-establish",
+                detail:
+                  "the account read could not confirm the token identity",
+              };
+            }
+            if (prior && prior.lamports !== read.lamports) {
+              return {
+                type: "cannot-establish",
+                detail:
+                  "the account's lamports changed between the two corroboration reads, so its continuity is not established",
+              };
+            }
+            return null;
+          };
+
+          const resolution = await resolveTransaction(
+            connection,
+            signature,
+            lastValidBlockHeight,
+            () =>
+              corroborateNonLanding(
+                connection,
+                signature,
+                lastValidBlockHeight,
+                readOnce,
+                judge
+              ),
+            setRunState
+          );
+
+          if (resolution.type === "confirmed") {
+            // ---- Independent per-account verification.
+            setRunState({ status: "verifying" });
+            await sleep(RESOLVE_POLL_INTERVAL_MS);
+            let chunkVerified = 0;
+            let unavailable = 0;
+            for (const account of chunk) {
+              const tryRead = async (): Promise<NativeAccountRead> => {
+                try {
+                  return await readNativeAccountState(
+                    connection,
+                    account.pubkey
+                  );
+                } catch {
+                  return { kind: "unreadable" };
+                }
+              };
+              const first = await tryRead();
+              if (first.kind === "missing") {
+                chunkVerified += 1;
+                continue;
+              }
+              await sleep(RESOLVE_POLL_INTERVAL_MS);
+              const second = await tryRead();
+              if (second.kind === "missing") {
+                chunkVerified += 1;
+                continue;
+              }
+              if (second.kind === "read") {
+                setRunState((prev) => ({
+                  accountPresentAfterAction: true,
+                  status: "error",
+                  outcome: "recreated-after-close",
+                  batchVerifiedCount: prev.batchVerifiedCount + chunkVerified,
+                  error:
+                    "The transaction was confirmed by the network, but a fresh read shows an account still present: " +
+                    `${account.pubkey}. SOL.REPAIR cannot tell what created it. Nothing more will be sent automatically.`,
+                }));
+                return;
+              }
+              unavailable += 1;
+            }
+            setRunState((prev) => ({
+              status: "building",
+              batchVerifiedCount: prev.batchVerifiedCount + chunkVerified,
+              note:
+                unavailable > 0
+                  ? `Transaction ${chunkIndex + 1} of ${chunks.length} confirmed, but ${unavailable} follow-up read(s) failed, so those accounts are unverified.`
+                  : `Transaction ${chunkIndex + 1} of ${chunks.length} verified.`,
+            }));
+            continue; // next chunk
+          }
+
+          if (resolution.type === "on-chain-error") {
+            setRunState({
+              status: "error",
+              outcome: "on-chain-failure",
+              error:
+                `Transaction ${chunkIndex + 1} of ${chunks.length} was confirmed on-chain but failed. Nothing in it changed except the network fee, which was still charged. ` +
+                (chunks.length > 1
+                  ? "Earlier transactions stand. Nothing more will be sent."
+                  : ""),
+            });
+            return;
+          }
+
+          if (resolution.type === "account-gone") {
+            // The chunk's canary is gone; whether this app's transaction
+            // closed it could not be established. The run stops here.
+            setRunState({
+              status: "done",
+              outcome: "close-unattributed",
+              error:
+                "The account is gone. Whether this app's transaction closed it could not be established.",
+            });
+            return;
+          }
+
+          if (resolution.type === "domain") {
+            const changed = resolution.verdict;
+            setRunState({
+              status: "error",
+              outcome: "state-changed-since-review",
+              error:
+                "The transaction expired without landing, and the account changed since you reviewed it. " +
+                `When we checked, the balance was ${changed.observedBalance} base units and the account held ` +
+                `${changed.observedLamports} lamports. Nothing more will be sent automatically. ` +
+                "Start a fresh review to see the current state.",
+            });
+            return;
+          }
+
+          if (resolution.type === "unresolved") {
+            holdLockForDismissal = true;
+            setRunState({
+              status: "unverified",
+              outcome: "unresolved-outcome",
+              errorDetail: sendFailure
+                ? `${resolution.detail}; the submission itself failed with: ${sendFailure}`
+                : resolution.detail,
+              error:
+                "We could not verify whether the transaction landed. Its outcome could not be established. It may still land. Nothing more will be sent automatically.",
+            });
+            return;
+          }
+
+          // expired-standard-met: provable non-landing, corroborated.
+          if (reSignUsed) {
+            setRunState({
+              status: "error",
+              outcome: "expired",
+              error:
+                "The transaction expired again and was not retried further. Nothing landed in it. Earlier transactions stand.",
+            });
+            return;
+          }
+          reSignUsed = true;
+          lastResolutionNote =
+            "The transaction expired before the network confirmed it. Nothing landed. Retrying once with a fresh transaction. Your approval is required again.";
+          chunkIndex -= 1; // rebuild the same chunk
+        }
+
+        // Every chunk landed and verified (or the loop returned a
+        // terminal above).
+        setRunState({
+          status: "done",
+          outcome: "burn-verified",
+          note: null,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const friendly = err instanceof FriendlyError;
+        setState((prev) => ({
+          ...prev,
+          status: "error",
+          outcome: friendly ? err.outcome : "cancelled",
+          note: null,
+          error: friendly
+            ? message
+            : "The burn could not be prepared. Nothing was signed or sent.",
+          errorDetail: friendly ? null : message,
+        }));
+      } finally {
+        if (!holdLockForDismissal || unmountedRef.current) {
+          releaseAction("burn");
+          holdsLockRef.current = false;
+        }
+        burnInFlight.current = false;
+      }
+    },
+    [connection, wallet]
+  );
+
   const reset = useCallback(() => {
     if (statusRef.current === "unverified" && heldAction() === "burn") {
       releaseAction("burn");
@@ -716,5 +1228,5 @@ export function useBurnDust() {
     (state.status === "unverified" &&
       state.outcome === "unresolved-outcome");
 
-  return { ...state, actionInFlight, burn, reset };
+  return { ...state, actionInFlight, burn, burnBatch, reset };
 }
