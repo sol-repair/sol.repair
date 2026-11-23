@@ -257,7 +257,15 @@ export function buildBatchedBurnDustInstructions(
     );
   }
   if (feeReady && isFeeEnabled()) {
-    const lamports = sumFloorFeeLamports(candidates);
+    // The fee base is what each close RETURNS at gate time: the
+    // candidate's lamportsBeforeAction, NEVER the scan's lamports
+    // figure (the devnet rehearsal walk caught the drift: a
+    // Token-2022 account born at extension-era rent 1,513,840 was
+    // charged floor(1%) of the scan's 1,488,440 until the builder was
+    // pinned to the gate figure; receipt walk-chunk-2, 2026-11-23).
+    const lamports = sumFloorFeeLamports(
+      candidates.map((c) => ({ lamports: c.lamportsBeforeAction }))
+    );
     if (lamports > 0n) {
       instructions.push(
         SystemProgram.transfer({

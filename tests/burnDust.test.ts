@@ -601,6 +601,28 @@ describe("the batched burn-and-close (owner decision 2026-11-22)", () => {
     expect(buildBatchedBurnDustInstructions(zeroRent, OWNER.publicKey, true)).toHaveLength(4);
   });
 
+  it("computes the fee from the GATE's lamports, never the scan's stale figure (the devnet-walk finding)", () => {
+    // The devnet rehearsal walk caught this: a Token-2022 account born
+    // at extension-era rent 1,513,840 was charged floor(1%) of the
+    // scan's 1,488,440 because the builder read the wrong field. The
+    // fee base is what the close RETURNS at gate time: sum of floors
+    // of [1,513,840, 1,488,440, 1,488,440] = 15,138 + 14,884 + 14,884
+    // = 44,906, not 44,652.
+    const [a, b, c] = [0, 1, 2].map((i) => batchCandidate(i === 0 ? "token-2022" : "spl", i));
+    const drifted = [
+      { ...a, lamports: 1_488_440, lamportsBeforeAction: 1_513_840 },
+      { ...b, lamports: 1_488_440, lamportsBeforeAction: 1_488_440 },
+      { ...c, lamports: 1_488_440, lamportsBeforeAction: 1_488_440 },
+    ];
+    expect(
+      sumFloorFeeLamports(drifted.map((d) => ({ lamports: d.lamportsBeforeAction })))
+    ).toBe(44_906n);
+    const ixs = buildBatchedBurnDustInstructions(drifted, OWNER.publicKey, true);
+    const fee = ixs[ixs.length - 1];
+    expect(fee.programId.equals(SystemProgram.programId)).toBe(true);
+    expect(Number(fee.data.readBigUInt64LE(4))).toBe(44_906);
+  });
+
   it("chunks N candidates into ceil(N / 9) approvals (47 -> 6, the honest count)", () => {
     expect(MAX_BURN_PAIRS_PER_TX).toBe(9);
     expect(chunkInstructions(batchOf(47), MAX_BURN_PAIRS_PER_TX)).toHaveLength(6);
