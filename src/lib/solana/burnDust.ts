@@ -19,7 +19,7 @@
  * No React in this file.
  */
 
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
   createBurnInstruction,
   createCloseAccountInstruction,
@@ -27,6 +27,7 @@ import {
 
 import { readNativeAccountState, type NativeAccountRead } from "./unwrapNative";
 import { readMintBurnBlockers, type MintBurnRead } from "./t22MintBurnBlockers";
+import { getFeeRecipient, isFeeEnabled } from "./fees";
 import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -155,6 +156,127 @@ export function buildBurnDustInstructions(
     programId
   );
   return [burn, close];
+}
+
+/* ------------------------------------------------------------------ */
+/* The batched burn-and-close (owner decision 2026-11-22, E424/E425).  */
+/* Multiple reviewed accounts ride one transaction: k burn+close pairs  */
+/* then ONE summed fee transfer riding LAST. N accounts cost           */
+/* ceil(N / MAX_BURN_PAIRS_PER_TX) approvals instead of N.             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Maximum burn+close pairs packed into one transaction, derived and
+ * measured with the repo's own serializer (E425, probe receipt
+ * .verify-tmp/batch-size-probe.mjs). A transaction is limited to 1232
+ * bytes. Measured facts this cap is built on:
+ *   fixed overhead (one 64-byte signature, message header, blockhash,
+ *     count prefixes):                        247 bytes
+ *   per burn+close pair (2 keys x 32 + burn ix 15 + close ix 7):
+ *                                              86 bytes
+ *   one extra program key when a chunk mixes SPL and Token-2022:
+ *                                              32 bytes
+ *   the measured wallet-appended worst (the E421 wire's 4 keyless
+ *     instructions; the first costs 44 with its program key, the
+ *     rest 12 each):                           80 bytes
+ *   the stated margin floor (E425):            69 bytes
+ * 1232 - (247 + 32 + 80 + 69) = 804; 804 / 86 = 9.35 -> 9 pairs.
+ * The four measured cells at this cap are pinned in tests:
+ * plain 1,021 (margin 211); mixed 1,053 (179); plain + append 1,101
+ * (131); mixed + append 1,133 (99) - the worst measured shape clears
+ * the 69-byte floor, so this cap holds uniformly and mixed chunks
+ * need no lower cap. Beyond the raw maximum (k=11, 1,193) the
+ * serializer itself refuses the transaction.
+ */
+export const MAX_BURN_PAIRS_PER_TX = 9;
+
+/**
+ * The batched fee arithmetic (owner decision 2026-11-22): the SUM of
+ * each account's own floor(1%), NOT floor(1% of the sum). This is
+ * byte-identical to what the same accounts cost burned one at a time,
+ * which is the consent property the batch ships under. The published
+ * fee-ledger rule accepts both exact readings of "1%, floored"; at
+ * this batch size they differ by at most k-1 = 8 lamports per
+ * transaction. fees.ts is frozen and untouched: this helper lives in
+ * the dust flow's own builder and mirrors the frozen rate (FEE_PERCENT
+ * = 1) exactly as the ledger's read-only mirror does.
+ */
+export function sumFloorFeeLamports(
+  accounts: Array<{ lamports: number }>
+): bigint {
+  return accounts.reduce(
+    (acc, a) => acc + (BigInt(a.lamports) * 1n) / 100n,
+    0n
+  );
+}
+
+/** One reviewed-and-gate-passed candidate for a batch: the current
+ *  truth from the gate read travels with it (the same fields the
+ *  single-account flow consents to). */
+export type BatchedBurnCandidate = BurnableDustAccount & {
+  amountBeforeAction: string;
+  lamportsBeforeAction: number;
+};
+
+/**
+ * Build ONE batched burn-and-close transaction for a chunk of reviewed
+ * candidates: each account contributes its [burn, close] pair (the
+ * same two instructions the single-account flow signs, the burn amount
+ * the GATE read's balance), then ONE summed fee transfer riding LAST
+ * carrying the chunk's sum of per-account floors. The fee rides only
+ * when the page's feeReady decision says the fee account exists AND
+ * the fee is enabled (the same guards the frozen buildFeeTransfer
+ * applies), and the recipient comes from the frozen module. Nothing
+ * else, ever: no transfer of the app's own beyond the disclosed fee,
+ * no compute-budget instruction of the app's own.
+ */
+export function buildBatchedBurnDustInstructions(
+  candidates: BatchedBurnCandidate[],
+  owner: PublicKey,
+  feeReady: boolean
+): TransactionInstruction[] {
+  if (candidates.length === 0) {
+    throw new Error("a batched burn needs at least one reviewed account");
+  }
+  if (candidates.length > MAX_BURN_PAIRS_PER_TX) {
+    throw new Error(
+      `a batched burn carries at most ${MAX_BURN_PAIRS_PER_TX} accounts per transaction`
+    );
+  }
+  const instructions: TransactionInstruction[] = [];
+  for (const candidate of candidates) {
+    const amount = BigInt(candidate.amountBeforeAction);
+    if (amount <= 0n) {
+      throw new Error(
+        "a reviewed balance is zero; there is nothing to burn on " +
+          candidate.pubkey
+      );
+    }
+    instructions.push(
+      ...buildBurnDustInstructions(candidate, owner)
+    );
+  }
+  if (feeReady && isFeeEnabled()) {
+    // The fee base is what each close RETURNS at gate time: the
+    // candidate's lamportsBeforeAction, NEVER the scan's lamports
+    // figure (the devnet rehearsal walk caught the drift: a
+    // Token-2022 account born at extension-era rent 1,513,840 was
+    // charged floor(1%) of the scan's 1,488,440 until the builder was
+    // pinned to the gate figure; receipt walk-chunk-2, 2026-11-23).
+    const lamports = sumFloorFeeLamports(
+      candidates.map((c) => ({ lamports: c.lamportsBeforeAction }))
+    );
+    if (lamports > 0n) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: owner,
+          toPubkey: getFeeRecipient(),
+          lamports,
+        })
+      );
+    }
+  }
+  return instructions;
 }
 
 /* ------------------------------------------------------------------ */

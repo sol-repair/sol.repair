@@ -93,13 +93,16 @@ export type FeeLedgerRow = {
    *  exactly floor(1%) of the SOL this transaction's fee-bearing
    *  instructions freed (closeAccount accounts, plus the metadata,
    *  token, and master edition accounts of every Metaplex BurnNft) —
-   *  the shape every real SOL.repair fee has. False when they differ:
-   *  the page marks the row (never hides it), because a crafted
-   *  transfer inside a repair-shaped transaction must not display as
-   *  ordinary revenue. Null when the rent cannot be computed from the
-   *  response — no verdict, no accusation, no tag. Encodes today's 1%
-   *  rate (FEE_PERCENT); if the fee ever changes, this must become
-   *  era-aware. */
+   *  arm 1, the shape every repair row has always satisfied — OR
+   *  exactly the sum of each account's own floor(1%), the rule the
+   *  batched burn-and-close charges (arm 2, owner decision
+   *  2026-11-22). Both arms are exact; one lamport off both flags.
+   *  False when they differ: the page marks the row (never hides it),
+   *  because a crafted transfer inside a repair-shaped transaction
+   *  must not display as ordinary revenue. Null when the rent cannot
+   *  be computed from the response — no verdict, no accusation, no
+   *  tag. Encodes today's 1% rate (FEE_PERCENT); if the fee ever
+   *  changes, this must become era-aware. */
   onePercentMatch: boolean | null;
 };
 
@@ -223,6 +226,44 @@ const MPL_BURN_NFT_CLOSED_KEYS = [0, 3, 4] as const;
  * Both put the lamports u64 at byte offset 4. */
 const SYSTEM_TRANSFER_TAG = 2;
 const SYSTEM_TRANSFER_WITH_SEED_TAG = 11;
+// The rest of the value-moving System instruction set - ONE unified
+// definition across all three implementations (this ledger, the
+// anomaly bell, the weekly counter): tags verified against the
+// installed @solana/web3.js 1.99.0 source
+// (node_modules/@solana/web3.js/src/programs/system.ts,
+// SYSTEM_INSTRUCTION_LAYOUTS): Create index 0, Assign 1, Transfer 2,
+// CreateWithSeed 3, AdvanceNonceAccount 4, WithdrawNonceAccount 5,
+// InitializeNonceAccount 6, AuthorizeNonceAccount 7, Allocate 8,
+// AllocateWithSeed 9, AssignWithSeed 10, TransferWithSeed 11.
+// Explicit owner nonce ruling 2026-11-24: WithdrawNonceAccount (5)
+// is genuinely value-moving - it empties the nonce account to a
+// destination; InitializeNonceAccount (6) is IN as a DELIBERATELY
+// PROHIBITED STATE-INITIALIZATION INSTRUCTION, stricter than
+// value-inertness requires: it transfers NO lamports (the account
+// must already be rent-exempt; the instruction only initializes the
+// authorized state) and the owner chose to forbid it after the fee
+// anyway. AdvanceNonceAccount (4) and AuthorizeNonceAccount (7) are
+// OUT - no lamports move, no state an attacker wants. The tag-6
+// prohibition stands; the earlier "moves lamports" rationale was
+// wrong and is corrected here (auditor round 4, 2026-11-24).
+const SYSTEM_CREATE_TAG = 0;
+const SYSTEM_CREATE_WITH_SEED_TAG = 3;
+const SYSTEM_WITHDRAW_NONCE_TAG = 5;
+const SYSTEM_INITIALIZE_NONCE_TAG = 6;
+// Tag 13, CreateAccountAllowPrefund (SIMD-0312, status Activated;
+// mainnet activation 2026-05-29 in the Agave 4.0 cycle): identical
+// to CreateAccount (tag 0) except the discriminant is 13 and the
+// funding account is OPTIONAL (account index 1, required only when
+// lamports > 0 - it then transfers those lamports to the new
+// account). Added in auditor round 4, 2026-11-24. HONEST NOTE: an
+// unfunded variant (lamports 0) is classified value-moving anyway,
+// by choice, on the stricter side - classifying only the funded case
+// would be a thinner rule for no benefit. The installed
+// @solana/web3.js 1.99.0 does not know this instruction (zero
+// AllowPrefund references), so the recognition is hand-rolled from
+// the SIMD's wire layout: u32 tag + u64 lamports + u64 space +
+// Pubkey owner.
+const SYSTEM_CREATE_ALLOW_PREFUND_TAG = 13;
 
 function readU32LE(data: Uint8Array): number {
   return new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
@@ -291,6 +332,7 @@ function decodeV1Transaction(
 ): {
   blockTime: number | null;
   instructions: DecodedInstruction[];
+  outerInstructionCount: number;
   accountKeys: string[];
 } | null {
   try {
@@ -361,6 +403,7 @@ function decodeV1Transaction(
     return {
       blockTime: typeof raw.blockTime === "number" ? raw.blockTime : null,
       instructions: [...top, ...inner],
+      outerInstructionCount: top.length,
       accountKeys: keys.map((k) => k.toBase58()),
     };
   } catch {
@@ -384,6 +427,12 @@ export function decodeRawTransaction(raw: RawTransaction): {
    *  keys, then loaded writable, then loaded readonly), so a decoded
    *  instruction's account can be mapped to its pre-tx lamports. */
   accountKeys: string[];
+  /** Outer (top-level) wire instructions: the first
+   *  outerInstructionCount entries of `instructions`. The structural
+   *  fee-rule check reads only these - CPI closes are the BurnNft
+   *  program's own business and were never part of the wire-order
+   *  census. */
+  outerInstructionCount: number;
 } | null {
   const txData = raw.transaction;
   if (
@@ -419,6 +468,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
 
   let instructions: DecodedInstruction[];
   let accountKeys: string[];
+  let outerInstructionCount = 0;
   if (message.version === "legacy") {
     const keys: readonly (PublicKey | undefined)[] = message.accountKeys;
     const top = message.instructions
@@ -430,6 +480,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
         .filter((ix): ix is DecodedInstruction => ix !== null)
     );
     instructions = [...top, ...inner];
+    outerInstructionCount = top.length;
     accountKeys = message.accountKeys.map((k) => k.toBase58());
   } else {
     // Versioned transactions resolve some accounts through address
@@ -481,6 +532,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
           .filter((ix): ix is DecodedInstruction => ix !== null)
       );
       instructions = [...top, ...inner];
+      outerInstructionCount = top.length;
       // preBalances index order: static keys, then loaded writable, then
       // loaded readonly — the wire order the RPC documents.
       accountKeys = [
@@ -496,6 +548,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
   return {
     blockTime: typeof raw.blockTime === "number" ? raw.blockTime : null,
     instructions,
+    outerInstructionCount,
     accountKeys,
   };
 }
@@ -551,20 +604,183 @@ function inboundTransferLamports(
   return Number.isSafeInteger(lamports) && lamports > 0 ? lamports : 0;
 }
 
-/** Total rent the transaction's fee-bearing instructions freed (the
- *  closed accounts' pre-tx lamports): each token-program closeAccount
- *  contributes its closed account's preBalance, and each Metaplex
- *  BurnNft contributes the preBalances of its metadata, token, and
- *  master edition accounts (keys 0, 3, 4 - the three closes the
- *  instruction performs by CPI). Null when it cannot be computed from
- *  the response — a missing/truncated preBalances array, an
+/** True when the instruction is an inbound System transfer INTO the
+ *  fee wallet, regardless of its amount (owner ruling 2026-11-24:
+ *  the literal rule counts transfer INSTRUCTIONS - a zero-lamport
+ *  transfer to the fee wallet counts toward exactly-one; the amount
+ *  check itself is unchanged and still reads lamports). Exported so
+ *  the decoder-to-facts mapping tests (tests/feeWireFacts.test.ts)
+ *  can pin this decoder's actual output. */
+export function isInboundFeeTransferInstruction(
+  ix: DecodedInstruction,
+  feeWallet: string
+): boolean {
+  if (ix.programId !== SystemProgram.programId.toBase58()) return false;
+  if (ix.data.length < 12) return false;
+  const tag = readU32LE(ix.data);
+  const destination =
+    tag === SYSTEM_TRANSFER_TAG
+      ? ix.accountPubkeys[1]
+      : tag === SYSTEM_TRANSFER_WITH_SEED_TAG
+        ? ix.accountPubkeys[2]
+        : undefined;
+  return destination === feeWallet;
+}
+
+/** Per-account rent the transaction's fee-bearing instructions freed
+ *  (the closed accounts' pre-tx lamports): each token-program
+ *  closeAccount contributes its closed account's preBalance, and each
+ *  Metaplex BurnNft contributes the preBalances of its metadata,
+ *  token, and master edition accounts (keys 0, 3, 4 - the three closes
+ *  the instruction performs by CPI). Null when it cannot be computed
+ *  from the response — a missing/truncated preBalances array, an
  *  unresolvable account index, or a BurnNft with fewer than the five
- *  keys the rule reads means no verdict rather than a guess. */
+ *  keys the rule reads means no verdict rather than a guess. The
+ *  per-account list is what the dual-arm conformance comparison needs
+ *  (onePercentArms below); total is their sum. */
+/** The structural half of the fee rule (audit finding 3, escalated;
+ *  owner ruling 2026-11-23, option e - value-inert tail). The fee is
+ *  ONE transfer riding LAST. A fee-bearing transaction conforms
+ *  structurally when exactly one inbound transfer to the fee wallet
+ *  exists, it is positioned after every close/burn/BurnNft
+ *  instruction, and every instruction positioned after it is
+ *  VALUE-INERT: nothing that moves lamports or destroys accounts.
+ *  The value-moving set is the unified one (auditor rounds 3-4,
+ *  2026-11-24): a system transfer, funded account creation
+ *  (CreateAccount/CreateAccountWithSeed/CreateAccountAllowPrefund),
+ *  the nonce account's WithdrawNonceAccount, the deliberately
+ *  prohibited InitializeNonceAccount (transfers no lamports; see
+ *  isValueMovingInstruction below for the corrected rationale), a
+ *  token close, a token burn or BurnChecked, or a BurnNft.
+ *  Exactly-one is counted in INSTRUCTIONS regardless of amount
+ *  (owner ruling 2026-11-24): a zero-lamport transfer to the fee
+ *  wallet counts toward the one, so a stray second zero-amount
+ *  transfer is a split, never a pass. Keyless wallet-appended
+ *  instructions (compute budget) pass; third-party assertion
+ *  instructions that move nothing (the Lighthouse security tool's
+ *  checks, census 463 of 463) pass. Runs on OUTER instructions only:
+ *  CPI closes are the BurnNft program's own business and were never
+ *  part of the wire-order census. Honest boundary, on the record:
+ *  this polices the detectable lamport-movement and
+ *  account-destruction shapes only, not arbitrary behavior of an
+ *  upgradable third-party program; the wallet's pre-signature
+ *  display remains the first line of defense. */
+export function structuralConformance(
+  instructions: DecodedInstruction[],
+  feeWallet: string
+): { conform: boolean; reason: string } {
+  let feeTransferCount = 0;
+  let feeTransferIndex = -1;
+  let lastValueBearing = -1;
+  let firstMovingAfter = -1;
+  for (let i = 0; i < instructions.length; i++) {
+    const ix = instructions[i];
+    if (isInboundFeeTransferInstruction(ix, feeWallet)) {
+      feeTransferCount += 1;
+      feeTransferIndex = i;
+    }
+    if (isValueMovingInstruction(ix)) {
+      lastValueBearing = i;
+      if (feeTransferCount > 0 && i > feeTransferIndex && firstMovingAfter === -1) {
+        firstMovingAfter = i;
+      }
+    }
+  }
+  if (feeTransferCount === 0) {
+    return { conform: false, reason: "no inbound fee transfer" };
+  }
+  if (feeTransferCount > 1) {
+    return {
+      conform: false,
+      reason: `${feeTransferCount} inbound fee transfers (split)`,
+    };
+  }
+  if (lastValueBearing > feeTransferIndex) {
+    return {
+      conform: false,
+      reason: "a close or burn rides after the fee transfer",
+    };
+  }
+  if (firstMovingAfter !== -1) {
+    return {
+      conform: false,
+      reason: `instruction ${firstMovingAfter} moves value after the fee transfer`,
+    };
+  }
+  return {
+    conform: true,
+    reason: "one transfer, last among value-bearing instructions",
+  };
+}
+
+/** The value-moving shapes the tail rule polices - the ONE unified
+ *  definition across all three implementations (the app ledger, the
+ *  bell, and the weekly counter may differ in decoding but never in
+ *  verdict or facts; the mapping tests in tests/feeWireFacts.test.ts
+ *  pin every decoder's output): a system transfer to any destination
+ *  (tag 2 or 11), funded system account creation (CreateAccount tag
+ *  0, CreateAccountWithSeed tag 3, and CreateAccountAllowPrefund tag
+ *  13 - SIMD-0312, classified value-moving unconditionally, its
+ *  unfunded lamports-0 variant included by choice on the stricter
+ *  side), the nonce account's WithdrawNonceAccount (tag 5, genuinely
+ *  value-moving) and InitializeNonceAccount (tag 6 - it transfers NO
+ *  lamports; it is in the set as a DELIBERATELY PROHIBITED
+ *  STATE-INITIALIZATION INSTRUCTION, an owner ruling stricter than
+ *  value-inertness requires; AdvanceNonce tag 4 and
+ *  AuthorizeNonceAccount tag 7 are OUT), a token-program closeAccount
+ *  (tag 9), a token burn (tag 8) or BurnChecked (tag 15), and the
+ *  Metaplex BurnNft (tag 29). All System tags verified against the
+ *  installed @solana/web3.js 1.99.0 source (SYSTEM_INSTRUCTION_LAYOUTS
+ *  in src/programs/system.ts); the token tags against the installed
+ *  @solana/spl-token source (TokenInstruction in
+ *  src/instructions/types.ts). Exported for the mapping tests. */
+export function isValueMovingInstruction(ix: DecodedInstruction): boolean {
+  if (
+    ix.programId === SystemProgram.programId.toBase58() &&
+    ix.data.length >= 4
+  ) {
+    const tag = readU32LE(ix.data);
+    if (
+      tag === SYSTEM_TRANSFER_TAG ||
+      tag === SYSTEM_TRANSFER_WITH_SEED_TAG ||
+      tag === SYSTEM_CREATE_TAG ||
+      tag === SYSTEM_CREATE_WITH_SEED_TAG ||
+      tag === SYSTEM_WITHDRAW_NONCE_TAG ||
+      tag === SYSTEM_INITIALIZE_NONCE_TAG ||
+      tag === SYSTEM_CREATE_ALLOW_PREFUND_TAG
+    ) {
+      return true;
+    }
+  }
+  if (
+    (ix.programId === TOKEN_PROGRAM_ID.toBase58() ||
+      ix.programId === TOKEN_2022_PROGRAM_ID.toBase58()) &&
+    ix.data.length >= 1
+  ) {
+    // closeAccount: the tag byte alone. burn: tag + u64 amount.
+    // BurnChecked (tag 15, auditor round 3 2026-11-24): tag + u64
+    // amount + u8 decimals, exactly 10 bytes - verified against the
+    // installed @solana/spl-token source
+    // (src/instructions/types.ts: TokenInstruction.BurnChecked = 15;
+    // src/instructions/burnChecked.ts: u8 instruction, u64 amount,
+    // u8 decimals).
+    if (
+      ix.data[0] === 9 ||
+      (ix.data[0] === 8 && ix.data.length === 9) ||
+      (ix.data[0] === 15 && ix.data.length === 10)
+    ) {
+      return true;
+    }
+  }
+  if (isMplBurnNft(ix)) return true;
+  return false;
+}
+
 function closedRentLamports(
   decoded: { instructions: DecodedInstruction[]; accountKeys: string[] },
   preBalances: number[] | undefined,
   postBalances: number[] | undefined
-): number | null {
+): { total: number; perAccount: number[] } | null {
   if (!Array.isArray(preBalances)) return null;
   // UNIQUE closed accounts, deduplicated: the owner's Solflare wallet
   // appended its own closeAccount for the token account a BurnNft
@@ -591,7 +807,7 @@ function closedRentLamports(
     }
   }
   if (closed.size === 0) return null;
-  let total = 0;
+  const perAccount: number[] = [];
   for (const [closedAddr, sawBurnNft] of closed) {
     const index = decoded.accountKeys.indexOf(closedAddr);
     if (index < 0 || index >= preBalances.length) return null;
@@ -610,9 +826,32 @@ function closedRentLamports(
     if (!Number.isSafeInteger(postLamports) || postLamports < 0) return null;
     const contribution = lamports - postLamports;
     if (contribution < 0) return null;
-    total += contribution;
+    perAccount.push(contribution);
   }
-  return total;
+  return { total: perAccount.reduce((a, r) => a + r, 0), perAccount };
+}
+
+/** The two honest readings of "1 percent of the rent, floored", both
+ *  EXACT (owner decision 2026-11-22, the batched burn-and-close): arm 1
+ *  floors the batch total once — the rule every repair row has always
+ *  satisfied; arm 2 sums each account's own floor — the rule the
+ *  batched burn charges, byte-identical to what the same accounts cost
+ *  burned one at a time. A fee matching either arm conforms; one
+ *  lamport off both flags. The arms differ by less than one lamport
+ *  per account (at most k-1 lamports on a k-account transaction), and
+ *  both are exact comparisons: no tolerance, no slop. */
+function onePercentArms(perAccount: number[]): {
+  floorOfTotal: bigint;
+  sumOfFloors: bigint;
+} {
+  const total = perAccount.reduce((acc, r) => acc + BigInt(r), 0n);
+  return {
+    floorOfTotal: (total * BigInt(FEE_PERCENT)) / 100n,
+    sumOfFloors: perAccount.reduce(
+      (acc, r) => acc + (BigInt(r) * BigInt(FEE_PERCENT)) / 100n,
+      0n
+    ),
+  };
 }
 
 /**
@@ -640,16 +879,31 @@ export function feeRowsFromRawTransactions(
     if (lamports <= 0) continue;
     // Same arithmetic as the frozen fee builder (fees.ts): BigInt
     // division truncates, i.e. floor, with no float drift possible.
-    const rent = closedRentLamports(
+    // Dual-arm (owner decision 2026-11-22): a fee matching EITHER
+    // honest reading of "1%, floored" conforms, both compared exactly.
+    const rents = closedRentLamports(
       decoded,
       raw.meta?.preBalances,
       raw.meta?.postBalances
     );
-    const onePercentMatch =
-      rent === null
-        ? null
-        : BigInt(lamports) ===
-          (BigInt(rent) * BigInt(FEE_PERCENT)) / 100n;
+    let onePercentMatch: boolean | null = null;
+    if (rents !== null) {
+      // Dual-arm amount check AND the structural half (audit finding
+      // 3, owner ruling 2026-11-23): the fee must be exactly one
+      // transfer riding last among value-bearing instructions. The
+      // structural check runs on the OUTER wire only - CPI closes are
+      // the BurnNft program's own business and were never part of the
+      // wire-order census.
+      const structure = structuralConformance(
+        decoded.instructions.slice(0, decoded.outerInstructionCount),
+        feeWallet
+      );
+      const arms = onePercentArms(rents.perAccount);
+      const fee = BigInt(lamports);
+      onePercentMatch =
+        (fee === arms.floorOfTotal || fee === arms.sumOfFloors) &&
+        structure.conform;
+    }
     rows.push({ signature, blockTime: decoded.blockTime, lamports, onePercentMatch });
   }
   return rows;

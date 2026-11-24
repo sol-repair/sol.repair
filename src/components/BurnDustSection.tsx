@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useRpcConnection } from "@/hooks/useRpcConnection";
-import { VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, VersionedTransaction } from "@solana/web3.js";
 import { AwaitingSignatureHint } from "@/components/AwaitingSignatureHint";
 
 import { useBurnDust } from "@/hooks/useBurnDust";
@@ -28,15 +28,22 @@ import {
   ALREADY_EMPTY_COPY,
   ALREADY_GONE_COPY,
   BURN_GATE_ABORT_COPY,
+  MAX_BURN_PAIRS_PER_TX,
+  buildBatchedBurnDustInstructions,
   buildBurnDustInstructions,
   evaluateBurnGate,
   readMintBurnBlockers,
   readNativeAccountState,
   selectBurnableDustAccounts,
+  sumFloorFeeLamports,
   type BurnableDustAccount,
   type NativeAccountRead,
 } from "@/lib/solana/burnDust";
-import { buildTransaction, estimateNetworkFee } from "@/lib/solana/transactions";
+import {
+  buildTransaction,
+  chunkInstructions,
+  estimateNetworkFee,
+} from "@/lib/solana/transactions";
 import { buildFeeTransfer, feeAmountLamports } from "@/lib/solana/fees";
 import {
   SOLANA_NETWORK,
@@ -159,6 +166,249 @@ type GatePreview =
 
 const NO_SIM = { state: "idle" } as const;
 
+/** One batch-review entry list for the inspector: the exact
+ *  instructions of one transaction, built from the same builder the
+ *  hook signs with. */
+function batchPreviewEntries(
+  chunk: Parameters<typeof buildBatchedBurnDustInstructions>[0],
+  ownerBase58: string,
+  feeReady: boolean
+): Array<Record<string, string>> {
+  const owner = new PublicKey(ownerBase58);
+  const entries: Array<Record<string, string>> = [];
+  for (const ix of buildBatchedBurnDustInstructions(chunk, owner, feeReady)) {
+    if (ix.programId.equals(SystemProgram.programId)) {
+      entries.push({
+        program: "System Program",
+        instruction: "transfer",
+        from: owner.toBase58(),
+        to: "the published fee address",
+        lamports: Number(ix.data.readBigUInt64LE(4)).toString(),
+        note: "the summed 1% service fee, one transfer riding last",
+      });
+      continue;
+    }
+    const program = ix.programId.equals(TOKEN_2022_PROGRAM_ID)
+      ? "Token-2022 Program"
+      : "SPL Token Program";
+    if (ix.data[0] === 9) {
+      entries.push({
+        program,
+        instruction: "closeAccount",
+        account: ix.keys[0].pubkey.toBase58(),
+        destination: ix.keys[1].pubkey.toBase58(),
+        authority: ix.keys[2].pubkey.toBase58(),
+        note: "every lamport the account holds goes to the destination",
+      });
+    } else {
+      entries.push({
+        program,
+        instruction: "burn",
+        account: ix.keys[0].pubkey.toBase58(),
+        mint: ix.keys[1].pubkey.toBase58(),
+        authority: ix.keys[2].pubkey.toBase58(),
+        note: "permanently destroys the whole token balance",
+      });
+    }
+  }
+  return entries;
+}
+
+/** The batch review card body (owner decision 2026-11-22). Counts,
+ *  fee arithmetic, and approval counts are the honest ones: the
+ *  passing accounts chunk into ceil(N / 9) transactions, one approval
+ *  each, and the fee each transaction carries is the SUM of that
+ *  chunk's per-account floors riding last. */
+function BatchReviewBody({
+  passing,
+  excluded,
+  feeReady,
+  ownerBase58,
+  onCancel,
+  onApprove,
+  approveDisabled,
+}: {
+  passing: Array<{
+    candidate: BurnableDustAccount;
+    freshBalance: string;
+    freshLamports: number;
+    delegate: string | null;
+  }>;
+  excluded: Array<{ candidate: BurnableDustAccount; sentence: string }>;
+  feeReady: boolean;
+  ownerBase58: string;
+  onCancel: () => void;
+  onApprove: () => void;
+  approveDisabled: boolean;
+}) {
+  if (passing.length < 2) {
+    return (
+      <>
+        <p className="mt-2 text-xs leading-relaxed text-amber-400">
+          Fewer than two of the selected accounts can burn right now, so
+          there is nothing to batch. The reasons are listed below. Use
+          the Burn and close button on a single row for one account.
+        </p>
+        {excluded.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {excluded.map(({ candidate, sentence }) => (
+              <li
+                key={candidate.pubkey}
+                className="text-xs leading-relaxed text-zinc-400"
+              >
+                <span className="font-mono">{short(candidate.pubkey)}</span>:{" "}
+                {sentence}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-3">
+          <button
+            onClick={onCancel}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+          >
+            Close
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  const chunked = chunkInstructions(
+    passing.map((p) => ({
+      ...p.candidate,
+      amountBeforeAction: p.freshBalance,
+      lamportsBeforeAction: p.freshLamports,
+    })),
+    MAX_BURN_PAIRS_PER_TX
+  );
+  const approvals = chunked.length;
+  const totalFee = sumFloorFeeLamports(
+    passing.map((p) => ({
+      lamports: p.freshLamports,
+    }))
+  );
+  const totalRent = passing.reduce((sum, p) => sum + p.freshLamports, 0);
+  const delegates = passing.filter((p) => p.delegate !== null);
+
+  return (
+    <>
+      <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+        You are about to approve {approvals}{" "}
+        {plural(approvals, "transaction", "transactions")}, one approval
+        each, burning {passing.length}{" "}
+        {plural(passing.length, "account", "accounts")} in total. The
+        accounts are grouped up to {MAX_BURN_PAIRS_PER_TX} per
+        transaction, the size the network&rsquo;s packet limit allows
+        with a tested margin for the instructions wallets add on their
+        own. A transaction that fails stops the run: the earlier
+        transactions stand, and the rest is not attempted.
+      </p>
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+        Every account was re-read just now. The burn is permanent, and
+        SOL.REPAIR cannot judge what a token is worth. Each close
+        returns everything the account holds to your wallet (
+        {short(ownerBase58)}), and each account will no longer exist.
+      </p>
+      {delegates.length > 0 && (
+        <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+          {delegates.length}{" "}
+          {plural(delegates.length, "account", "accounts")}{" "}
+          {plural(delegates.length, "has", "have")} a delegate holding a
+          spending permission. It does not block your burn, and the
+          delegation ends when the account closes.
+        </p>
+      )}
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+        Total rent returning: {groupCount(totalRent)} lamports.
+        {feeReady
+          ? ` Service fee: ~${lamportsToSol(totalFee)} SOL across all ${approvals} ${plural(approvals, "transaction", "transactions")}, the sum of 1 percent of what each close returns, floored per account, sent as one transfer per transaction riding last.`
+          : " No service fee (the fee account is not ready yet)."}{" "}
+        Network fee: ~{lamportsToSol(estimateNetworkFee())} SOL per
+        transaction, paid from your wallet. Your wallet may add its own
+        priority fee.
+      </p>
+      <ul className="mt-2 max-h-48 space-y-1 overflow-auto rounded-md border border-zinc-800 p-2">
+        {passing.map((p) => (
+          <li
+            key={p.candidate.pubkey}
+            className="font-mono text-[11px] leading-relaxed text-zinc-400"
+          >
+            <AccountLink address={p.candidate.pubkey} />,{" "}
+            {groupDigits(p.freshBalance)} base units,{" "}
+            {groupCount(p.freshLamports)} lamports
+            {p.candidate.program === "token-2022" && (
+              <span className="ml-1 rounded bg-sky-500/10 px-1 py-px text-sky-400/90">
+                Token-2022
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {excluded.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs leading-relaxed text-amber-400/90">
+            {excluded.length}{" "}
+            {plural(excluded.length, "account", "accounts")}{" "}
+            {plural(excluded.length, "was", "were")} excluded from the
+            batch before signing:
+          </p>
+          <ul className="mt-1 space-y-1">
+            {excluded.map(({ candidate, sentence }) => (
+              <li
+                key={candidate.pubkey}
+                className="text-xs leading-relaxed text-zinc-400"
+              >
+                <span className="font-mono">{short(candidate.pubkey)}</span>:{" "}
+                {sentence}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <details className="mt-2 rounded-md border border-zinc-800 p-2">
+        <summary className="cursor-pointer py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200">
+          Inspect exactly what you&rsquo;ll sign
+        </summary>
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+          Built from the same instructions the wallet will sign, grouped
+          by transaction.
+        </p>
+        {chunked.map((chunk, i) => (
+          <div key={i} className="mt-2">
+            <p className="font-mono text-[11px] text-zinc-500">
+              Transaction {i + 1} of {chunked.length} ({chunk.length}{" "}
+              {plural(chunk.length, "account", "accounts")})
+            </p>
+            <pre className="mt-1 max-h-48 overflow-auto rounded bg-black p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
+              {JSON.stringify(
+                batchPreviewEntries(chunk, ownerBase58, feeReady),
+                null,
+                2
+              )}
+            </pre>
+          </div>
+        ))}
+      </details>
+      <div className="mt-3 flex gap-3">
+        <button
+          onClick={onApprove}
+          disabled={approveDisabled}
+          className="flex-1 rounded-lg bg-[#14F195] px-4 py-2.5 font-medium text-black transition-colors hover:bg-[#0fd584] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Approve &amp; Burn {passing.length} accounts
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-lg border border-zinc-700 px-4 py-2.5 text-zinc-400 transition-colors hover:text-zinc-200"
+        >
+          Cancel
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function BurnDustSection({
   scan,
   rescan,
@@ -209,7 +459,13 @@ export function BurnDustSection({
     errorDetail,
     actionInFlight,
     burn,
+    burnBatch,
     reset,
+    batchProgress,
+    batchAccounts,
+    batchVerifiedCount,
+    batchExcluded,
+    batchUnverifiedCount,
   } = useBurnDust();
 
   const dust = useMemo(
@@ -347,12 +603,6 @@ export function BurnDustSection({
     setSim(NO_SIM);
   }, []);
 
-  const finishAction = useCallback(() => {
-    reset();
-    closeReview();
-    rescan();
-  }, [reset, closeReview, rescan]);
-
   const runSimulation = useCallback(async () => {
     if (!reviewing || !publicKey || gatePreview.state !== "pass") return;
     setSim({ state: "running" });
@@ -396,6 +646,134 @@ export function BurnDustSection({
       });
     }
   }, [connection, publicKey, reviewing, gatePreview, feeReady]);
+
+  /* ---------------------------------------------------------------- */
+  /* The batched path (owner decision 2026-11-22): checkboxes, one     */
+  /* review card for the whole selection, ceil(N/9) approvals. Nothing */
+  /* is selected by default; the per-row single-account flow above is  */
+  /* untouched. The pre-card reads here are presentation only; the     */
+  /* hook re-runs the gate for every account in-lock before chunking.  */
+  /* ---------------------------------------------------------------- */
+
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  type BatchPass = {
+    candidate: BurnableDustAccount;
+    freshBalance: string;
+    freshLamports: number;
+    delegate: string | null;
+  };
+  const [batchReview, setBatchReview] = useState<
+    | { state: "idle" }
+    | { state: "reading" }
+    | {
+        state: "ready";
+        passing: BatchPass[];
+        excluded: Array<{ candidate: BurnableDustAccount; sentence: string }>;
+      }
+  >({ state: "idle" });
+
+  const toggleSelected = useCallback((pubkey: string, on: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(pubkey);
+      else next.delete(pubkey);
+      return next;
+    });
+  }, []);
+
+  const closeBatchReview = useCallback(() => {
+    setBatchReview({ state: "idle" });
+  }, []);
+
+  const beginBatchReview = useCallback(() => {
+    const chosen = dust.filter((c) => selected.has(c.pubkey));
+    if (chosen.length < 2 || !publicKey) return;
+    setBatchReview({ state: "reading" });
+    // Presentation-only reads for every selected account, then the
+    // same gate verdicts the single card shows, per account.
+    (async () => {
+      const passing: BatchPass[] = [];
+      const excluded: Array<{
+        candidate: BurnableDustAccount;
+        sentence: string;
+      }> = [];
+      for (const c of chosen) {
+        try {
+          const read: NativeAccountRead = await readNativeAccountState(
+            connection,
+            c.pubkey
+          );
+          const mintRead =
+            c.program === "token-2022"
+              ? await readMintBurnBlockers(connection, c.mint)
+              : undefined;
+          const verdict = evaluateBurnGate(
+            read,
+            c.mint,
+            publicKey.toBase58(),
+            mintRead
+          );
+          if (verdict.kind === "pass") {
+            passing.push({
+              candidate: c,
+              freshBalance: verdict.balanceBeforeAction,
+              freshLamports: verdict.lamportsBeforeAction,
+              delegate: verdict.delegate,
+            });
+          } else if (verdict.kind === "already-gone") {
+            excluded.push({ candidate: c, sentence: ALREADY_GONE_COPY });
+          } else if (verdict.kind === "already-empty") {
+            excluded.push({ candidate: c, sentence: ALREADY_EMPTY_COPY });
+          } else {
+            excluded.push({
+              candidate: c,
+              sentence: BURN_GATE_ABORT_COPY[verdict.reason],
+            });
+          }
+        } catch {
+          excluded.push({
+            candidate: c,
+            sentence:
+              "The current account state could not be read. Nothing was signed.",
+          });
+        }
+      }
+      setBatchReview({ state: "ready", passing, excluded });
+    })();
+  }, [connection, publicKey, dust, selected]);
+
+  const approveBatch = useCallback(() => {
+    if (
+      batchReview.state !== "ready" ||
+      batchReview.passing.length < 2 ||
+      !publicKey
+    ) {
+      return;
+    }
+    const reviewed: Record<
+      string,
+      { balance: string; lamports: number }
+    > = {};
+    for (const p of batchReview.passing) {
+      reviewed[p.candidate.pubkey] = {
+        balance: p.freshBalance,
+        lamports: p.freshLamports,
+      };
+    }
+    void burnBatch(
+      batchReview.passing.map((p) => p.candidate),
+      feeReady,
+      reviewed
+    );
+  }, [batchReview, publicKey, burnBatch, feeReady]);
+
+  const finishAction = useCallback(() => {
+    reset();
+    closeReview();
+    closeBatchReview();
+    setSelected(new Set());
+    rescan();
+  }, [reset, closeReview, closeBatchReview, rescan]);
 
   // The raw preview, built from the same instruction objects the hook
   // signs.
@@ -550,13 +928,26 @@ export function BurnDustSection({
                   );
                 })()}
               </span>
-              <button
-                onClick={() => beginReview(c)}
-                disabled={otherActionInFlight || busy}
-                className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Burn and close
-              </button>
+              <span className="flex shrink-0 items-center gap-2">
+                <label className="flex items-center gap-1 text-[11px] text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.pubkey)}
+                    onChange={(e) => toggleSelected(c.pubkey, e.target.checked)}
+                    disabled={otherActionInFlight || busy}
+                    className="h-3.5 w-3.5 accent-emerald-500"
+                    aria-label={`Select ${short(c.pubkey)} for the batched burn`}
+                  />
+                  Batch
+                </label>
+                <button
+                  onClick={() => beginReview(c)}
+                  disabled={otherActionInFlight || busy}
+                  className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Burn and close
+                </button>
+              </span>
             </div>
             <details className="mt-1">
               <summary className="cursor-pointer py-1 text-[11px] text-zinc-400 transition-colors hover:text-zinc-300">
@@ -578,6 +969,63 @@ export function BurnDustSection({
           </div>
         ))}
       </div>
+
+      {/* The batch bar: visible only with two or more rows ticked.
+          Nothing is pre-selected; the single-account flow stays the
+          default path. */}
+      {selected.size >= 2 && (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-emerald-800/60 bg-emerald-950/20 p-2">
+          <p className="text-xs leading-relaxed text-zinc-300">
+            {selected.size} {plural(selected.size, "account", "accounts")}{" "}
+            selected for one batched burn. The review card groups them by
+            the network&rsquo;s transaction size limit, so this costs a
+            few approvals instead of one per account.
+          </p>
+          <button
+            onClick={beginBatchReview}
+            disabled={otherActionInFlight || busy}
+            className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Review the batch
+          </button>
+        </div>
+      )}
+
+      {/* Batch review card. Presentation reads only; the hook re-runs
+          the gate authoritatively for every account before chunking. */}
+      {batchReview.state !== "idle" && status === "idle" && (
+        <div
+          ref={(el) => {
+            if (el && !el.dataset.scrolled && typeof el.scrollIntoView === "function") {
+              el.dataset.scrolled = "1";
+              el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+          }}
+          className="mt-3 rounded-md border border-emerald-800 bg-zinc-950 p-3"
+        >
+          <p className="text-sm font-medium text-zinc-200">
+            Review the batched burn before you sign
+          </p>
+          {batchReview.state === "reading" && (
+            <p className="mt-2 text-xs text-zinc-400">
+              Reading the selected accounts&rsquo; current state...
+            </p>
+          )}
+          {batchReview.state === "ready" && (
+            <BatchReviewBody
+              passing={batchReview.passing}
+              excluded={batchReview.excluded}
+              feeReady={feeReady}
+              ownerBase58={publicKey ? publicKey.toBase58() : ""}
+              onCancel={() => {
+                closeBatchReview();
+              }}
+              onApprove={approveBatch}
+              approveDisabled={otherActionInFlight || busy}
+            />
+          )}
+        </div>
+      )}
 
       {otherActionInFlight && !busy && (
         <p className="mt-3 text-xs leading-relaxed text-amber-400/80">
@@ -803,10 +1251,17 @@ export function BurnDustSection({
               <BurnSpinner amber={AMBER_STATUSES.has(status)} />
               <p className="min-w-0 flex-1 text-sm text-zinc-300">
                 {status === "checking-current-state" &&
-                  "Checking the account's current state..."}
-                {status === "building" && "Building transaction..."}
+                  (batchAccounts && batchAccounts.length > 1
+                    ? `Checking the current state of all ${batchAccounts.length} selected accounts...`
+                    : "Checking the account's current state...")}
+                {status === "building" &&
+                  (batchProgress
+                    ? `Building transaction ${batchProgress.current} of ${batchProgress.total}...`
+                    : "Building transaction...")}
                 {status === "awaiting-signature" &&
-                  "Check your wallet. Approve to burn and close."}
+                  (batchProgress
+                    ? `Check your wallet. Approve transaction ${batchProgress.current} of ${batchProgress.total} to burn and close.`
+                    : "Check your wallet. Approve to burn and close.")}
                 {status === "sending" &&
                   "Approved. Sending to the network..."}
                 {status === "confirming" &&
@@ -830,23 +1285,67 @@ export function BurnDustSection({
       {/* Done cards */}
       {status === "done" && (
         <div className="mt-3 rounded-md border border-emerald-800 bg-emerald-950/30 p-3">
-          {outcome === "burn-verified" && (
+          {(outcome === "burn-verified" ||
+            outcome === "burn-unverified-reads") && (
             <>
               <p className="text-sm font-medium text-emerald-400">
                 Burn and close complete.
               </p>
-              <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                Token account{" "}
-                {accountPubkey ? short(accountPubkey) : ""} no longer
-                exists, confirmed by a fresh read after the transaction.
-                Its balance of{" "}
-                {balanceBeforeAction === null
-                  ? "figure unavailable"
-                  : `${groupDigits(balanceBeforeAction)} base units`}
-                , read just before the burn, was destroyed permanently.
-                Everything the account held went to your wallet as the
-                close&rsquo;s destination.
-              </p>
+              {batchAccounts !== null && batchAccounts.length > 1 ? (
+                <>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                    {batchVerifiedCount} of {batchAccounts.length}{" "}
+                    {plural(batchAccounts.length, "account", "accounts")}{" "}
+                    verified gone by fresh reads after the
+                    transactions. Their balances, read just before the
+                    burns, were destroyed permanently. Everything they
+                    held went to your wallet as the closes&rsquo;
+                    destination.
+                  </p>
+                  {outcome === "burn-unverified-reads" &&
+                    batchUnverifiedCount > 0 && (
+                      <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
+                        {batchUnverifiedCount}{" "}
+                        {plural(
+                          batchUnverifiedCount,
+                          "account",
+                          "accounts"
+                        )}{" "}
+                        {plural(batchUnverifiedCount, "was", "were")} closed
+                        by transactions the network confirmed, but the
+                        follow-up reads that would confirm each deletion
+                        could not be completed. The closures are on chain;
+                        the individual fresh-read confirmation is not.
+                      </p>
+                    )}
+                  {batchExcluded !== null && batchExcluded.length > 0 && (
+                    <p className="mt-1 text-xs leading-relaxed text-amber-400/90">
+                      {batchExcluded.length}{" "}
+                      {plural(batchExcluded.length, "account", "accounts")}{" "}
+                      {plural(batchExcluded.length, "was", "were")} excluded
+                      before signing:
+                      {batchExcluded.map((e) => (
+                        <span key={e.pubkey} className="block font-mono text-[11px] text-zinc-400">
+                          {short(e.pubkey)}: {e.reason}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                  Token account{" "}
+                  {accountPubkey ? short(accountPubkey) : ""} no longer
+                  exists, confirmed by a fresh read after the transaction.
+                  Its balance of{" "}
+                  {balanceBeforeAction === null
+                    ? "figure unavailable"
+                    : `${groupDigits(balanceBeforeAction)} base units`}
+                  , read just before the burn, was destroyed permanently.
+                  Everything the account held went to your wallet as the
+                  close&rsquo;s destination.
+                </p>
+              )}
             </>
           )}
           {outcome === "already-gone" && (
@@ -886,7 +1385,13 @@ export function BurnDustSection({
       {/* Error card */}
       {status === "error" && (
         <div className="mt-3 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-400">
-          <p className="font-medium">The burn did not go through</p>
+          <p className="font-medium">
+            {batchAccounts !== null &&
+            batchAccounts.length > 1 &&
+            (signatures.length > 0 || batchVerifiedCount > 0)
+              ? "The batched run stopped partway."
+              : "The burn did not go through"}
+          </p>
           <p className="mt-1 leading-relaxed text-red-400">{error}</p>
           {outcome === "on-chain-failure" &&
             accountPresentAfterAction === true && (
@@ -917,6 +1422,22 @@ export function BurnDustSection({
               Signature: {sig}
             </p>
           ))}
+          {batchExcluded !== null && batchExcluded.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs leading-relaxed text-red-300">
+                Accounts excluded before signing:
+              </p>
+              {batchExcluded.map((e) => (
+                <p
+                  key={e.pubkey}
+                  className="mt-1 text-xs leading-relaxed text-red-300"
+                >
+                  <span className="font-mono">{short(e.pubkey)}</span>:{" "}
+                  {e.reason}
+                </p>
+              ))}
+            </div>
+          )}
           {errorDetail && (
             <details className="mt-2">
               <summary className="cursor-pointer py-1 text-xs text-red-400">

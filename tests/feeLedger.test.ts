@@ -20,6 +20,11 @@ import {
 } from "@solana/web3.js";
 import fc from "fast-check";
 import { describe, expect, it, vi, afterEach } from "vitest";
+import {
+  createBurnInstruction,
+  createCloseAccountInstruction,
+  TOKEN_2022_PROGRAM_ID,
+} from "@solana/spl-token";
 
 import {
   BLOCK_TIME,
@@ -45,6 +50,7 @@ import {
   formatBlockTime,
   formatLamportsSol,
   isKnownTestFee,
+  structuralConformance,
   type RawTransaction,
 } from "@/lib/solana/feeLedger";
 import { TOKEN_PROGRAM_ID } from "@/lib/solana/tokenAccounts";
@@ -309,6 +315,97 @@ describe("feeRowsFromRawTransactions 1% conformance (onePercentMatch)", () => {
     };
     const rows = feeRowsFromRawTransactions([{ signature: "v0check", raw }], FEE_WALLET);
     expect(rows[0].onePercentMatch).toBe(true);
+  });
+});
+
+describe("feeRowsFromRawTransactions batched burn-and-close (the dual-arm 1% rule, E425)", () => {
+  // The batched burn-and-close charges ONE summed transfer: the SUM of
+  // each account's floor(1%), riding last (owner decision 2026-11-22).
+  // The published rule becomes dual-arm and BOTH ARMS ARE EXACT: a row
+  // conforms when the fee equals floor(1% of total rent) (arm 1, the
+  // repair rule every historical row satisfied) OR the sum of
+  // per-account floors (arm 2, the batched burn rule). One lamport off
+  // both arms must still flag. Fixture conditions from the owner:
+  // UNEQUAL rents (identical rents cannot catch a per-account
+  // attribution bug) and a Token-2022 account in the batch.
+  const RENTS = [1_488_440, 1_513_840, 2_039_280]; // SPL, SPL, Token-2022
+  const ARM1 = 50_415; // floor(5,041,560 / 100)
+  const ARM2 = 50_414; // 14,884 + 15,138 + 20,392
+
+  /** One real burn+close pair on a KNOWN token account, so the test can
+   *  place that account's rent into meta.preBalances. */
+  function burnClosePair(
+    programId: PublicKey
+  ): { instructions: TransactionInstruction[]; account: PublicKey } {
+    const account = Keypair.generate().publicKey;
+    const mint = Keypair.generate().publicKey;
+    const authority = Keypair.generate().publicKey;
+    return {
+      instructions: [
+        createBurnInstruction(account, mint, authority, 1000n, [], programId),
+        createCloseAccountInstruction(account, authority, authority, [], programId),
+      ],
+      account,
+    };
+  }
+
+  function batchedRaw(fee: number): RawTransaction {
+    const pairs = [
+      burnClosePair(TOKEN_PROGRAM_ID),
+      burnClosePair(TOKEN_PROGRAM_ID),
+      burnClosePair(TOKEN_2022_PROGRAM_ID),
+    ];
+    const instructions = pairs.flatMap((p) => p.instructions);
+    instructions.push(systemTransfer(new PublicKey(FEE_WALLET), fee));
+    const { raw, message } = buildLegacyRaw(instructions);
+    raw.meta!.preBalances = message.accountKeys.map((k) => {
+      const i = pairs.findIndex((p) => p.account.equals(k));
+      return i >= 0 ? RENTS[i] : 1;
+    });
+    return raw;
+  }
+
+  function singleRaw(fee: number): { raw: RawTransaction; account: PublicKey } {
+    const pair = burnClosePair(TOKEN_PROGRAM_ID);
+    const { raw, message } = buildLegacyRaw([
+      ...pair.instructions,
+      systemTransfer(new PublicKey(FEE_WALLET), fee),
+    ]);
+    raw.meta!.preBalances = message.accountKeys.map((k) =>
+      k.equals(pair.account) ? RENTS[0] : 1
+    );
+    return { raw, account: pair.account };
+  }
+
+  it("verdict 1: a single-account row conforms on arm 1 unchanged (14,884 of 1,488,440)", () => {
+    const { raw } = singleRaw(14_884);
+    const rows = feeRowsFromRawTransactions([{ signature: "single", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("verdict 2: a batched sum-of-floors row (50,414) conforms on arm 2", () => {
+    const raw = batchedRaw(ARM2);
+    const rows = feeRowsFromRawTransactions([{ signature: "batched", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("verdict 3: a repair-style floor-of-total row (50,415) conforms on arm 1 unchanged", () => {
+    const raw = batchedRaw(ARM1);
+    const rows = feeRowsFromRawTransactions([{ signature: "repair-style", raw }], FEE_WALLET);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("verdict 4: a fee one lamport off either arm flags (50,416 and 50,413 both false)", () => {
+    const above = feeRowsFromRawTransactions(
+      [{ signature: "above", raw: batchedRaw(ARM1 + 1) }],
+      FEE_WALLET
+    );
+    expect(above[0].onePercentMatch).toBe(false);
+    const below = feeRowsFromRawTransactions(
+      [{ signature: "below", raw: batchedRaw(ARM2 - 1) }],
+      FEE_WALLET
+    );
+    expect(below[0].onePercentMatch).toBe(false);
   });
 });
 
@@ -1482,4 +1579,549 @@ describe("decodeRawTransaction v1 property tests (fast-check)", () => {
       { numRuns: 250 }
     );
   });
+});
+
+describe("the structural half of the fee rule (finding 3, escalated; value-inert tail)", () => {
+  const AUDIT_OWNER = Keypair.generate().publicKey;
+  const LIGHTHOUSE = new PublicKey(
+    "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"
+  );
+
+  function preBalancesLocal(message: Message, accounts: PublicKey[], rents: number[]): number[] {
+    return message.accountKeys.map((k) => {
+      const i = accounts.findIndex((a) => a.equals(k));
+      return i >= 0 ? rents[i] : 1;
+    });
+  }
+
+  function closeIxFor(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+  }
+
+  function burnIxFor(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([8, 1, 0, 0, 0, 0, 0, 0, 0]),
+    });
+  }
+
+  function burnNftIx(): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+      ],
+      programId: new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"),
+      data: Buffer.from([29]),
+    });
+  }
+
+  /** The keyless wallet-appended shape: compute-budget style, zero
+   *  account keys, 9 bytes of data (the E421 measured shape). */
+  function keylessAppend(): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: new PublicKey(
+        "ComputeBudget111111111111111111111111111111"
+      ),
+      keys: [],
+      data: Buffer.from([0x02, 0x40, 0x0d, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00]),
+    });
+  }
+
+  /** The Lighthouse assertion shape from the coordinator census: one
+   *  account key after the fee transfer, no lamports moved. */
+  function lighthouseAssert(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: LIGHTHOUSE,
+      keys: [{ pubkey: account, isSigner: false, isWritable: false }],
+      data: Buffer.from([1, 2, 3, 4]),
+    });
+  }
+
+  /** The recorded historical shapes: single close, two-close repair
+   *  batch, dust burn-and-close, BurnNft (closes ride as CPI, so the
+   *  outer wire is burn-then-transfer). Exact historical fees. */
+  function historicalWire(shape: "single" | "repair" | "dust" | "burnnft"): {
+    raw: RawTransaction;
+    fee: number;
+  } {
+    if (shape === "single") {
+      const account = Keypair.generate().publicKey;
+      const { raw, message } = buildLegacyRaw([
+        closeIxFor(account),
+        systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      ]);
+      raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+      return { raw, fee: 20_392 };
+    }
+    if (shape === "repair") {
+      const a = Keypair.generate().publicKey;
+      const b = Keypair.generate().publicKey;
+      const { raw, message } = buildLegacyRaw([
+        closeIxFor(a),
+        closeIxFor(b),
+        systemTransfer(new PublicKey(FEE_WALLET), 37_428),
+      ]);
+      raw.meta!.preBalances = preBalancesLocal(message, [a, b], [1_856_000, 1_886_803]);
+      return { raw, fee: 37_428 };
+    }
+    if (shape === "dust") {
+      const pair = burnClosePair(TOKEN_PROGRAM_ID);
+      const { raw, message } = buildLegacyRaw([
+        ...pair,
+        systemTransfer(new PublicKey(FEE_WALLET), 14_884),
+      ]);
+      raw.meta!.preBalances = preBalancesLocal(message, [pair[0].keys[0].pubkey], [1_488_440]);
+      return { raw, fee: 14_884 };
+    }
+    const burnIx = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      burnIx,
+      systemTransfer(new PublicKey(FEE_WALLET), 59_740),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(
+      message,
+      [burnIx.keys[0].pubkey, burnIx.keys[3].pubkey, burnIx.keys[4].pubkey],
+      [1_488_440, 3_733_800, 751_840]
+    );
+    // real BurnNft rows carry postBalances (the husk-era rule reads
+    // pre - post); the three closed accounts report 0 after the burn
+    raw.meta!.postBalances = message.accountKeys.map((k) => {
+      const i = [burnIx.keys[0].pubkey, burnIx.keys[3].pubkey, burnIx.keys[4].pubkey].findIndex((a) =>
+        a.equals(k)
+      );
+      return i >= 0 ? 0 : 1;
+    });
+    return { raw, fee: 59_740 };
+  }
+
+  function burnClosePair(
+    programId: PublicKey
+  ): TransactionInstruction[] {
+    const acct = Keypair.generate().publicKey;
+    const m = Keypair.generate().publicKey;
+    const authority = AUDIT_OWNER;
+    return [
+      createBurnInstruction(acct, m, authority, 1000n, [], programId),
+      createCloseAccountInstruction(acct, authority, authority, [], programId),
+    ];
+  }
+
+  it("every recorded historical shape passes structurally", () => {
+    for (const shape of ["single", "repair", "dust", "burnnft"] as const) {
+      const { raw, fee } = historicalWire(shape);
+      const rows = feeRowsFromRawTransactions(
+        [{ signature: `hist-${shape}`, raw }],
+        FEE_WALLET
+      );
+      expect(rows).toHaveLength(1);
+      console.log("HIST2", shape, rows[0].lamports, String(rows[0].onePercentMatch));
+      expect(rows[0].lamports).toBe(fee);
+      expect(rows[0].onePercentMatch).toBe(true);
+    }
+  });
+
+  it("a keyless wallet append after the fee transfer passes", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      keylessAppend(),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "keyless-append", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("the Lighthouse assertion shape after the fee transfer passes (census shape)", () => {
+    const account = Keypair.generate().publicKey;
+    const assertTarget = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      lighthouseAssert(assertTarget),
+      lighthouseAssert(assertTarget),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "lighthouse", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("split fee transfers aggregating to the exact sum FAIL structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 10_196),
+      systemTransfer(new PublicKey(FEE_WALLET), 10_196),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "split", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].lamports).toBe(20_392); // summed, as always
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a fee transfer positioned before the close FAILS structurally (amount exact)", () => {
+    const account = Keypair.generate().publicKey;
+    // Amount is exact: one close, rent 2,039,280, fee 20,392. Only the
+    // position violates: the transfer rides before the close.
+    const { raw, message } = buildLegacyRaw([
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      closeIxFor(account),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "early", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].lamports).toBe(20_392);
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing system transfer to another destination FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const elsewhere = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      systemTransfer(elsewhere, 1),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-xfer", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing token burn FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      burnIxFor(account),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-burn", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing token close FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const victim = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      closeIxFor(victim),
+    ]);
+    // the trailing close's account contributes zero rent (pre 0) so
+    // the amount check stays exact and only structure can fail
+    raw.meta!.preBalances = preBalancesLocal(
+      message,
+      [account, victim],
+      [2_039_280, 0]
+    );
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-close", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing BurnNft FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const burnIx = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      burnIx,
+    ]);
+    // Real BurnNft rows carry postBalances; give the wire a consistent
+    // balance model so the amount half is computable and only the
+    // structural half can fail: the BurnNft's own accounts contribute
+    // zero net rent movement here.
+    const rentKeys = [burnIx.keys[0].pubkey, burnIx.keys[3].pubkey, burnIx.keys[4].pubkey];
+    raw.meta!.preBalances = message.accountKeys.map((k) => {
+      const i = rentKeys.findIndex((a) => a.equals(k));
+      return i >= 0 ? [1_488_440, 3_733_800, 751_840][i] : k.equals(account) ? 2_039_280 : 1;
+    });
+    raw.meta!.postBalances = message.accountKeys.map((k) => {
+      const i = rentKeys.findIndex((a) => a.equals(k));
+      return i >= 0 ? 0 : k.equals(account) ? 2_039_280 : 1;
+    });
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-burnnft", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  // ---- Auditor round 3 (2026-11-24): BurnChecked, the unified
+  // System Program value-moving set, and the zero-lamport ruling.
+
+  /** BurnChecked: tag 15 + u64 amount + u8 decimals, exactly 10 data
+   *  bytes. Verified against the installed @solana/spl-token source:
+   *  src/instructions/types.ts (TokenInstruction.BurnChecked = 15) and
+   *  src/instructions/burnChecked.ts (u8 instruction, u64 amount, u8
+   *  decimals). */
+  function burnCheckedIxFor(account: PublicKey, programId: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: false },
+      ],
+      programId,
+      data: Buffer.from([15, 1, 0, 0, 0, 0, 0, 0, 0, 9]),
+    });
+  }
+
+  function createAccountIx(): TransactionInstruction {
+    return SystemProgram.createAccount({
+      fromPubkey: AUDIT_OWNER,
+      newAccountPubkey: Keypair.generate().publicKey,
+      lamports: 1_000_000,
+      space: 165,
+      programId: SystemProgram.programId,
+    });
+  }
+
+  function createWithSeedIx(): TransactionInstruction {
+    return SystemProgram.createAccountWithSeed({
+      fromPubkey: AUDIT_OWNER,
+      basePubkey: AUDIT_OWNER,
+      seed: "sol-repair",
+      newAccountPubkey: Keypair.generate().publicKey,
+      lamports: 1_000_000,
+      space: 165,
+      programId: SystemProgram.programId,
+    });
+  }
+
+  function withdrawNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceWithdraw({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+      toPubkey: Keypair.generate().publicKey,
+      lamports: 1_000_000,
+    });
+  }
+
+  function initializeNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceInitialize({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+    });
+  }
+
+  function advanceNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceAdvance({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+    });
+  }
+
+  function authorizeNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceAuthorize({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+      newAuthorizedPubkey: Keypair.generate().publicKey,
+    });
+  }
+
+  /** The trailing-instruction wires all share one base: one close with
+   *  rent 2,039,280, the exact fee 20,392, then the instruction under
+   *  test. Non-close riders contribute no rent, so the amount half
+   *  stays exact and only the structural half can fail. */
+  function trailingRiderRow(
+    rider: TransactionInstruction,
+    label: string
+  ): { lamports: number; onePercentMatch: boolean | null } {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      rider,
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions([{ signature: label, raw }], FEE_WALLET);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lamports).toBe(20_392);
+    return rows[0];
+  }
+
+  it("a trailing BurnChecked on the Token program FAILS structurally", () => {
+    const row = trailingRiderRow(
+      burnCheckedIxFor(Keypair.generate().publicKey, TOKEN_PROGRAM_ID),
+      "trailing-burnchecked"
+    );
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing BurnChecked on Token-2022 FAILS structurally", () => {
+    const row = trailingRiderRow(
+      burnCheckedIxFor(Keypair.generate().publicKey, TOKEN_2022_PROGRAM_ID),
+      "trailing-burnchecked-t22"
+    );
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a BurnChecked BEFORE the fee passes (a legitimate pre-fee operation)", () => {
+    // The shipped dust flow itself burns then closes: a burn riding
+    // before the fee is the product's own honest shape, never a flag.
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      burnCheckedIxFor(account, TOKEN_PROGRAM_ID),
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "burnchecked-before-fee", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].lamports).toBe(20_392);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("a funded trailing CreateAccount FAILS structurally", () => {
+    const row = trailingRiderRow(createAccountIx(), "trailing-create");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing CreateAccountWithSeed FAILS structurally", () => {
+    const row = trailingRiderRow(createWithSeedIx(), "trailing-create-seed");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing WithdrawNonceAccount FAILS structurally", () => {
+    const row = trailingRiderRow(withdrawNonceIx(), "trailing-nonce-withdraw");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing InitializeNonceAccount FAILS structurally", () => {
+    const row = trailingRiderRow(initializeNonceIx(), "trailing-nonce-init");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("AdvanceNonceAccount and AuthorizeNonceAccount after the fee pass (owner ruling 2026-11-24: no lamports move)", () => {
+    const advanceRow = trailingRiderRow(advanceNonceIx(), "after-advance-nonce");
+    expect(advanceRow.onePercentMatch).toBe(true);
+    const authorizeRow = trailingRiderRow(authorizeNonceIx(), "after-authorize-nonce");
+    expect(authorizeRow.onePercentMatch).toBe(true);
+  });
+
+  it("a zero-lamport transfer to the fee wallet counts as THE fee transfer (owner ruling 2026-11-24: count instructions, not amounts)", () => {
+    // The literal rule is exactly one inbound transfer INSTRUCTION. A
+    // zero-amount transfer to the fee wallet is one; before this
+    // ruling it was invisible, so a close followed only by a
+    // zero-amount transfer read as having no fee transfer at all.
+    const account = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 0),
+    ]);
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const structure = structuralConformance(
+      decoded!.instructions.slice(0, decoded!.outerInstructionCount),
+      FEE_WALLET
+    );
+    expect(structure.conform).toBe(true);
+  });
+
+  it("a second, zero-lamport transfer to the fee wallet breaks exact-one (split by instruction count)", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      systemTransfer(new PublicKey(FEE_WALLET), 0),
+    ]);
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const structure = structuralConformance(
+      decoded!.instructions.slice(0, decoded!.outerInstructionCount),
+      FEE_WALLET
+    );
+    expect(structure.conform).toBe(false);
+    expect(structure.reason).toContain("2 inbound fee transfers");
+  });
+
+  it("a trailing zero-amount fee transfer fails the row verdict (pin)", () => {
+    // End-to-end pin of the same ruling: the amount half is exact, the
+    // structural half sees two inbound fee-transfer instructions.
+    const row = trailingRiderRow(
+      systemTransfer(new PublicKey(FEE_WALLET), 0),
+      "trailing-zero-fee-xfer"
+    );
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  // ---- Auditor round 4 (2026-11-24): tag 13 CreateAccountAllowPrefund
+  // (SIMD-0312, live on mainnet) and the TransferWithSeed pin.
+
+  /** CreateAccountAllowPrefund, hand-rolled: SIMD-0312 (status
+   *  Activated) gives it discriminant 13 with CreateAccount's data
+   *  layout (u32 tag + u64 lamports + u64 space + Pubkey owner = 52
+   *  bytes) and an OPTIONAL funding account at index 1, required only
+   *  when lamports > 0 - it transfers those lamports to the new
+   *  account. The installed @solana/web3.js 1.99.0 does not know this
+   *  instruction (zero AllowPrefund references); mainnet activation
+   *  2026-05-29 (Agave 4.0 cycle). */
+  function allowPrefundIx(lamports: number): TransactionInstruction {
+    const data = Buffer.alloc(52);
+    data.writeUInt32LE(13, 0);
+    data.writeBigUInt64LE(BigInt(lamports), 4);
+    data.writeBigUInt64LE(BigInt(165), 12);
+    Buffer.from(Keypair.generate().publicKey.toBytes()).copy(data, 20);
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+      ],
+      programId: SystemProgram.programId,
+      data,
+    });
+  }
+
+  it("a trailing funded CreateAccountAllowPrefund FAILS structurally (SIMD-0312 tag 13)", () => {
+    const row = trailingRiderRow(allowPrefundIx(1_000_000), "trailing-allow-prefund");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing UNFUNDED CreateAccountAllowPrefund FAILS structurally too (lamports 0, classified value-moving by choice, stricter side)", () => {
+    const row = trailingRiderRow(allowPrefundIx(0), "trailing-allow-prefund-unfunded");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing system TransferWithSeed to another destination FAILS structurally (pin)", () => {
+    const row = trailingRiderRow(systemTransferWithSeed(SOMEONE_ELSE, 1), "trailing-xfer-seed");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
 });

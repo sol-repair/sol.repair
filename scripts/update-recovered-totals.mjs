@@ -11,7 +11,10 @@
 // and master edition closes ride as CPI inner instructions) AND a
 // System transfer INTO the fee wallet; the fee must equal exactly
 // floor(1%) of the rent the closes freed (for a BurnNft: the
-// preBalances of its account keys 0, 3, 4). Known operator-test
+// preBalances of its account keys 0, 3, 4), or, since the batched
+// burn-and-close (owner decision 2026-11-22), the sum of each
+// account's own floor(1%) - the dual-arm comparison in
+// ./fee-verdict-arms.mjs, both arms exact. Known operator-test
 // signatures and the
 // wallet's own funding transfer are excluded, every exclusion is
 // printed with its signature, and nothing is ever silently skipped: a
@@ -34,8 +37,18 @@ import { readFileSync, writeFileSync } from "node:fs";
 import bs58 from "bs58";
 import { Connection, PublicKey } from "@solana/web3.js";
 
+import { feeConforms, feeRowStructureConforms } from "./fee-verdict-arms.mjs";
+// The parsed-shape facts builder and the fee-transfer selection share
+// ./fee-wire-facts.mjs with the bell's raw-wire decoder (the same
+// shared-helper pattern as the verdict arithmetic above): the two
+// scripts may never drift apart, and tests/feeWireFacts.test.ts pins
+// both decoders to identical facts.
+import {
+  parsedInboundFeeTransfer,
+  parsedInstructionFacts,
+} from "./fee-wire-facts.mjs";
+
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
-const SYSTEM_PROGRAM = "1".repeat(32);
 // The Metaplex Token Metadata program and its BurnNft instruction tag
 // (29, one data byte): the dead-NFT burn-and-close whose three closes
 // (metadata PDA, token account, master edition PDA - the instruction's
@@ -178,9 +191,15 @@ for (const s of uniqueSigs) {
     try { bytes = bs58.decode(i.data ?? ""); } catch { return false; }
     return bytes.length === 1 && bytes[0] === MPL_BURN_NFT_TAG;
   });
-  const feeXfers = ix.filter(
-    (i) => String(i.programId) === SYSTEM_PROGRAM && i.parsed?.type === "transfer" && i.parsed?.info?.destination === FEE_WALLET
-  );
+  // The fee-transfer selection shares ONE predicate with the
+  // structural facts below (parsedInboundFeeTransfer in
+  // ./fee-wire-facts.mjs): "transfer" and, since auditor round 4
+  // (2026-11-24), "transferWithSeed" - agave's parsed name for System
+  // tag 11, whose parsed info carries destination and lamports
+  // exactly like "transfer" - into the fee wallet, whatever the
+  // amount (owner ruling 2026-11-24: count instructions, not
+  // amounts).
+  const feeXfers = ix.filter((i) => parsedInboundFeeTransfer(i, FEE_WALLET));
   if (closesIx.length + mplBurns.length === 0 || feeXfers.length === 0) {
     nonFee.push({
       signature: s.signature,
@@ -210,6 +229,10 @@ for (const s of uniqueSigs) {
       if (src !== undefined) closedAccounts.set(src, true);
     }
   }
+  // Per-account rents: what the dual-arm conformance comparison (the
+  // shared helper) needs alongside the total. Previously only the
+  // total was accumulated.
+  const perAccount = [];
   for (const [src] of closedAccounts) {
     const idx = keys.indexOf(src);
     if (idx < 0) continue;
@@ -223,10 +246,21 @@ for (const s of uniqueSigs) {
     const pre = BigInt(t.meta.preBalances[idx]);
     const post = BigInt(t.meta.postBalances?.[idx] ?? 0);
     freed += pre - post;
+    perAccount.push(pre - post);
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
   organicRows++;
-  if (feeAmt !== freed / 100n) {
+  // The structural facts come from the SHARED wire-facts module (the
+  // same parsed-shape decoder the bell's sibling facts builder is
+  // pinned against - see ./fee-wire-facts.mjs for the unified
+  // definition, the parsed-name citations, and the corrected tag-6
+  // rationale). This counter's row loop previously carried its own
+  // inline mapping; the auditor's round-4 decoder-to-facts tests
+  // (tests/feeWireFacts.test.ts) pin the module's output instead, so
+  // a shape this path forgets now fails a test instead of waiting for
+  // an auditor.
+  const rowFacts = ix.map((i) => parsedInstructionFacts(i, FEE_WALLET));
+  if (!feeConforms(feeAmt, perAccount) || !feeRowStructureConforms(rowFacts)) {
     violations++;
     console.log("CONFORMANCE VIOLATION", s.signature, "fee", feeAmt.toString(), "freed", freed.toString());
     continue;

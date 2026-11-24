@@ -5,9 +5,12 @@
 // NOT an import of feeLedger.ts on purpose: this is a second
 // implementation of the same published rule (repair-shaped transaction =
 // token-program closeAccount + System transfer INTO the fee wallet;
-// fee must equal exactly floor(1%) of the rent the closes freed). If
-// this script and the product page ever disagree, that disagreement is
-// itself a finding. Run from the repo root: node scripts/check-fee-ledger.mjs
+// fee must equal exactly floor(1%) of the rent the closes freed, or,
+// since the batched burn-and-close (owner decision 2026-11-22), the
+// sum of each account's own floor(1%) - the dual-arm comparison in
+// ./fee-verdict-arms.mjs, both arms exact). If this script and the
+// product page ever disagree, that disagreement is itself a finding.
+// Run from the repo root: node scripts/check-fee-ledger.mjs
 //
 // The signature walk paginates with the before cursor until exhausted
 // (the pattern scripts/update-recovered-totals.mjs installed), so
@@ -30,7 +33,14 @@
 
 import { readFileSync } from "node:fs";
 
-import bs58 from "bs58";
+import { feeConforms, feeRowStructureConforms } from "./fee-verdict-arms.mjs";
+// The raw-wire decoder and facts builder are shared with the weekly
+// counter through ./fee-wire-facts.mjs (the same shared-helper
+// pattern as the verdict arithmetic above): the two scripts may
+// never drift apart. The app's TS decode in
+// src/lib/solana/feeLedger.ts stays deliberately separate - this
+// bell's independence from the product code is the point.
+import { decodeIx, ixFacts } from "./fee-wire-facts.mjs";
 
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 
@@ -166,19 +176,10 @@ async function rpc(method, params, attempt = 1) {
 }
 
 // One decoded instruction: programId, account pubkeys, raw data.
-function decodeIx(ix, accountKeys) {
-  const programId = accountKeys[ix.programIdIndex];
-  if (!programId) return null;
-  const accounts = (ix.accounts ?? []).map((i) => accountKeys[i]);
-  if (accounts.some((a) => !a)) return null;
-  let data;
-  try {
-    data = Buffer.from(bs58.decode(ix.data ?? ""));
-  } catch {
-    return null;
-  }
-  return { programId, accounts, data };
-}
+// decodeIx and ixFacts live in ./fee-wire-facts.mjs (shared with the
+// weekly counter; see the import above and the unified definition in
+// that module's header). inboundLamports below stays local: it is
+// this bell's AMOUNT arithmetic, not the wire facts.
 
 // Lamports moved INTO the fee wallet by one instruction, or 0.
 function inboundLamports(ix) {
@@ -292,9 +293,13 @@ for (const entry of sigs) {
     typeof k === "string" ? k : k.pubkey
   );
   const ixs = [];
+  const outerIxs = [];
   for (const ix of tx.transaction.message.instructions ?? []) {
     const d = decodeIx(ix, accountKeys);
-    if (d) ixs.push(d);
+    if (d) {
+      ixs.push(d);
+      outerIxs.push(d);
+    }
   }
   for (const group of tx.meta?.innerInstructions ?? []) {
     for (const ix of group.instructions ?? []) {
@@ -333,6 +338,10 @@ for (const entry of sigs) {
     checked += 1;
     fees += lamports;
     let rent = 0;
+    // Per-account rents: what the dual-arm conformance comparison (the
+    // shared helper) needs alongside the total. This path previously
+    // accumulated only the total; the list carries the same deltas.
+    const perAccount = [];
     let verdictPossible = true;
     const pre = tx.meta?.preBalances;
     const post = tx.meta?.postBalances;
@@ -352,6 +361,7 @@ for (const entry of sigs) {
             break;
           }
           rent += delta;
+          perAccount.push(delta);
         }
         if (!verdictPossible) break;
       }
@@ -361,7 +371,8 @@ for (const entry of sigs) {
       continue;
     }
     const expected = Math.floor(rent / 100);
-    if (lamports !== expected) {
+    if (!feeConforms(lamports, perAccount) ||
+        !feeRowStructureConforms(outerIxs.map((ix) => ixFacts(ix, FEE_WALLET)))) {
       violations.push({ signature: entry.signature, lamports, rent, expected });
     }
     await sleep(TX_PACING_MS);
@@ -382,6 +393,10 @@ for (const entry of sigs) {
   // actual return (owner ruling 2026-11-13). closeAccount rows have
   // post 0, so pre - post = pre — the figure the bell always counted.
   let rent = 0;
+  // Per-account rents: what the dual-arm conformance comparison (the
+  // shared helper) needs alongside the total. This path previously
+  // accumulated only the total; the list carries the same deltas.
+  const perAccount = [];
   let verdictPossible = true;
   const closedAccounts = new Map();
   for (const close of closes) {
@@ -404,7 +419,9 @@ for (const entry of sigs) {
         verdictPossible = false;
         break;
       }
-      rent += pre[index] - post[index];
+      const delta = pre[index] - post[index];
+      rent += delta;
+      perAccount.push(delta);
     }
   }
   if (!verdictPossible) {
@@ -412,7 +429,8 @@ for (const entry of sigs) {
     continue;
   }
   const expected = Math.floor(rent / 100);
-  if (lamports !== expected) {
+  if (!feeConforms(lamports, perAccount) ||
+      !feeRowStructureConforms(outerIxs.map((ix) => ixFacts(ix, FEE_WALLET)))) {
     violations.push({ signature: entry.signature, lamports, rent, expected });
   }
   await sleep(TX_PACING_MS);

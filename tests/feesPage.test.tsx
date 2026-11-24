@@ -102,12 +102,33 @@ describe("fees page 1% conformance marker", () => {
     expect(screen.queryByText("not a 1% fee")).toBeNull();
   });
 
-  it("states the 1% rule in the intro copy", () => {
+  it("states the 1% rule in the intro copy, including the structural half", () => {
     mockHook([]);
     render(<FeesPage />);
 
     expect(
       screen.getByText(/not exactly 1% of the SOL/i)    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /exactly one transfer positioned after every close/i
+      )
+    ).toBeTruthy();
+  });
+
+  it("states the value-inert tail: nothing that moves lamports or destroys accounts may ride after the fee, with the two named exceptions (auditor round 3)", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /Nothing may ride after the fee that could move lamports or destroy accounts/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /wallet-added compute instructions and third-party security-tool assertions, which move nothing/i
+      )
+    ).toBeTruthy();
   });
 });
 
@@ -172,6 +193,25 @@ describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive
     render(<FeesPage />);
 
     expect(screen.getByText(/not exactly 1% of the SOL/i)).toBeTruthy();
+  });
+
+  it("states the batched burn fee sentence (the dual-arm rule, owner decision 2026-11-22)", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /the fee is the sum of each account.s own 1 percent, floored/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /the same lamports burning them one at a time would charge/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/differ by at most 8 lamports per transaction/i)
+    ).toBeTruthy();
   });
 });
 

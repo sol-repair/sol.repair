@@ -111,8 +111,13 @@ export default function FeesPage() {
           produces: token-account closes with a transfer to the published
           fee address. Every row is checked against the fee rule: when the
           transferred amount is not exactly 1% of the SOL its closes
-          returned, the row is marked, not hidden. The signature is the
-          receipt; judge for yourself.
+          returned, or when the fee does not ride as exactly one transfer
+          positioned after every close the transaction makes, the row is
+          marked, not hidden. Nothing may ride after the fee that could
+          move lamports or destroy accounts; the only riders allowed there
+          are wallet-added compute instructions and third-party
+          security-tool assertions, which move nothing. The signature is
+          the receipt; judge for yourself.
         </p>
 
         {/* The fee rules, side by side (G.3 spec §7.7 + the dust rule
@@ -149,7 +154,14 @@ export default function FeesPage() {
             balance permanently and is charged nothing; the fee covers
             the same service as the empty-account repair. SOL.REPAIR
             cannot judge what a token is worth, and burning is not
-            undoable.
+            undoable. When several dust accounts burn together in one
+            batched transaction, the fee is the sum of each
+            account&rsquo;s own 1 percent, floored: the same lamports
+            burning them one at a time would charge, sent as one
+            transfer riding last. The ledger below accepts both exact
+            readings of the 1 percent rule (the whole-batch floor the
+            repair uses, and this per-account sum); at this batch size
+            they differ by at most 8 lamports per transaction.
           </p>
           <p className="mt-2">
             <span className="text-zinc-300">NFT burn-and-close</span>{" "}
