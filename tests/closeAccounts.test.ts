@@ -18,6 +18,7 @@ import {
   type ClosableAccount,
 } from "../src/lib/solana/tokenAccounts";
 import {
+  IncompleteVerificationError,
   buildCloseAccountInstructions,
   verifyAccountsClosed,
 } from "../src/lib/solana/closeAccounts";
@@ -231,5 +232,71 @@ describe("verifyAccountsClosed", () => {
     // the chain reports gone are closed, the other 243 still open.
     expect(closedPubkeys).toEqual(accounts.slice(0, 7).map((a) => a.pubkey));
     expect(stillOpenPubkeys).toHaveLength(243);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Fail closed on an incomplete response (whole-repository audit      */
+  /* 2026-11-24, finding 2). The loop maps each returned entry onto the  */
+  /* requested chunk by index. That is sound only while the response    */
+  /* carries exactly one entry per requested pubkey. A response that    */
+  /* left accounts out put them in NEITHER list: the repair's retry was */
+  /* then rebuilt without them, and when it landed the run booked the   */
+  /* whole batch closed - open accounts reported as closed.             */
+  /* ------------------------------------------------------------------ */
+
+  it("refuses a response with fewer results than requested accounts, classifying nothing", async () => {
+    const accounts = Array.from({ length: 20 }, (_, i) => account(200 + i));
+    const connection = {
+      async getMultipleAccountsInfo(pks: PublicKey[]) {
+        // 19 results for 20 accounts: the last requested account is
+        // simply absent. All 19 say "closed" - the classification a
+        // caller would most want to believe.
+        return pks.slice(0, -1).map(() => null);
+      },
+    } as unknown as Connection;
+    const attempt = verifyAccountsClosed(connection, accounts);
+    await expect(attempt).rejects.toBeInstanceOf(IncompleteVerificationError);
+    await expect(attempt).rejects.toThrow(/19 results for 20 requested/);
+  });
+
+  it("refuses a response with more results than requested accounts", async () => {
+    const accounts = Array.from({ length: 20 }, (_, i) => account(200 + i));
+    const connection = {
+      async getMultipleAccountsInfo(pks: PublicKey[]) {
+        return [...pks.map(() => null), null];
+      },
+    } as unknown as Connection;
+    await expect(
+      verifyAccountsClosed(connection, accounts)
+    ).rejects.toThrow(/21 results for 20 requested/);
+  });
+
+  it("refuses a response that is not an array", async () => {
+    const accounts = Array.from({ length: 20 }, (_, i) => account(200 + i));
+    const connection = {
+      async getMultipleAccountsInfo() {
+        return undefined;
+      },
+    } as unknown as Connection;
+    await expect(
+      verifyAccountsClosed(connection, accounts)
+    ).rejects.toThrow(/not an array/);
+  });
+
+  it("refuses a multi-chunk verification whose later chunk comes back short", async () => {
+    // The first chunk (100) is complete; only the second (50) is short.
+    // A complete earlier chunk must not let a partial answer through.
+    const accounts = Array.from({ length: 150 }, (_, i) => account(i));
+    const callSizes: number[] = [];
+    const connection = {
+      async getMultipleAccountsInfo(pks: PublicKey[]) {
+        callSizes.push(pks.length);
+        return pks.slice(0, pks.length === 100 ? 100 : -1).map(() => null);
+      },
+    } as unknown as Connection;
+    await expect(
+      verifyAccountsClosed(connection, accounts)
+    ).rejects.toThrow(/49 results for 50 requested/);
+    expect(callSizes).toEqual([100, 50]);
   });
 });

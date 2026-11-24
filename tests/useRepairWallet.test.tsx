@@ -1284,6 +1284,149 @@ describe("useRepairWallet", () => {
     expect(result.current.error).toMatch(/could not be read/);
     expect(result.current.error).not.toMatch(/Nothing was sent/);
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Fail closed on an incomplete verification (whole-repository audit  */
+  /* 2026-11-24, finding 2). verifyAccountsClosed used to loop over     */
+  /* whatever the RPC returned. A response shorter than the request put  */
+  /* the missing accounts in NEITHER list, so a retry was rebuilt       */
+  /* without them - and when it landed, the run booked the whole batch  */
+  /* closed. Open accounts, reported as closed.                         */
+  /* ------------------------------------------------------------------ */
+
+  it("stops with an explicit verification error when the chain check returns fewer results than requested", async () => {
+    const accounts = makeAccounts(20); // one batch of 20
+    const closedElsewhere = new Set(accounts.slice(0, 7).map((a) => a.pubkey));
+    // The account the RPC leaves out of every verification response.
+    const unreturned = accounts[19].pubkey;
+    let reads = 0;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => {
+        reads += 1;
+        // Read 1 is the gate before the first attempt: complete.
+        if (reads === 1) return pks.map(() => STILL_OPEN);
+        // Every verification read after the failed attempt reports 7
+        // closed elsewhere, 12 open - and omits one requested account.
+        return pks
+          .filter((pk) => pk.toBase58() !== unreturned)
+          .map((pk) =>
+            closedElsewhere.has(pk.toBase58()) ? null : STILL_OPEN
+          );
+      }
+    );
+    let pollCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      // The first attempt lands WITH an on-chain error (atomic).
+      if (pollCalls === 1) {
+        return {
+          value: [
+            {
+              err: { InstructionError: [0, { Custom: 311 }] },
+              confirmationStatus: "confirmed",
+            },
+          ],
+        };
+      }
+      // Anything signed after that lands - the path by which the false
+      // success used to complete.
+      return { value: [{ err: null, confirmationStatus: "confirmed" }] };
+    });
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    // The run STOPPED. No retry was built from a list the response left
+    // an account out of - so the wallet was asked to sign exactly once.
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    // The unreturned account - and nothing else - is counted closed.
+    expect(result.current.closedCount).toBe(0);
+    expect(result.current.recoveredLamports).toBe(0n);
+    // Explicit: the page says the check could not be completed. It must
+    // not claim the chain was checked and found nothing closed.
+    expect(result.current.error).toMatch(/could not be completed/);
+    expect(result.current.error).not.toMatch(
+      /No accounts were closed when we checked the chain/
+    );
+    // The verification error itself is kept as the detail.
+    expect(result.current.errorDetail).toMatch(/19 results for 20 requested/);
+  });
+
+  it("keeps a landed batch's progress and leaves an unverifiable batch uncounted", async () => {
+    // Batch 1 (20 accounts) lands. Batch 2 (4 accounts) fails on chain,
+    // and its verification omits one requested account while naming a
+    // proper subset closed - the exact shape that used to rebuild a
+    // retry without the omitted account and book all 24 closed.
+    const accounts = makeAccounts(24); // batches: 20 + 4
+    const unreturned = accounts[23].pubkey;
+    const closedElsewhere = accounts[20].pubkey;
+    let reads = 0;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => {
+        reads += 1;
+        // Reads 1 and 2 are the two batches' gates: complete.
+        if (reads <= 2) return pks.map(() => STILL_OPEN);
+        // Verification reads: 3 results for 4 requested accounts.
+        return pks
+          .filter((pk) => pk.toBase58() !== unreturned)
+          .map((pk) => (pk.toBase58() === closedElsewhere ? null : STILL_OPEN));
+      }
+    );
+    let pollCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) {
+        // Batch 1 lands cleanly.
+        return { value: [{ err: null, confirmationStatus: "confirmed" }] };
+      }
+      if (pollCalls === 2) {
+        // Batch 2 lands WITH an on-chain error (atomic).
+        return {
+          value: [
+            {
+              err: { InstructionError: [0, { Custom: 311 }] },
+              confirmationStatus: "confirmed",
+            },
+          ],
+        };
+      }
+      return { value: [{ err: null, confirmationStatus: "confirmed" }] };
+    });
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(2);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(2);
+    // Batch 1's receipt and progress stand; batch 2 is not counted.
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.closedCount).toBe(20);
+    expect(result.current.recoveredLamports).toBe(20n * 2039280n);
+    expect(result.current.error).toMatch(/stopped after 20 of 24/);
+    expect(result.current.error).toMatch(/verification could not be reached/);
+    expect(result.current.errorDetail).toMatch(/3 results for 4 requested/);
+  });
 });
 
 /* ------------------------------------------------------------------ */

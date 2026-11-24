@@ -38,7 +38,9 @@
  * "InvalidAccountData" because the accounts are ALREADY closed - a success,
  * not a failure. So before reporting any send/confirm error, we verify the
  * actual on-chain state via verifyAccountsClosed(). The chain is the only
- * source of truth.
+ * source of truth. A verification response that does not carry exactly one
+ * entry per requested account is refused outright: an account the RPC
+ * leaves out is never read as closed, and never left out of a retry.
  *
  * Stale scans get the same discipline: an on-chain failure whose batch shows
  * a proper subset already closed is reconciled like an expiry (rebuilt from
@@ -726,8 +728,11 @@ export function useRepairWallet() {
                   ? "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly."
                   : err instanceof FriendlyError
                     ? message
-                    : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open." +
-                      token22Hint,
+                    : verifyFailed
+                      ? "The repair stopped. The on-chain check could not be completed, so this run cannot confirm whether its last transaction went through, or which accounts, if any, it closed. Dismiss to refresh the scan - it shows the chain's current state - then run the repair again if accounts are still open." +
+                        token22Hint
+                      : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open." +
+                        token22Hint,
             errorDetail: rawDetail,
           });
         }
