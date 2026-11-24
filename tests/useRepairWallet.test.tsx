@@ -33,6 +33,7 @@ import {
   MAX_ACCOUNTS_PER_RUN,
   useRepairWallet,
 } from "../src/hooks/useRepairWallet";
+import { heldAction } from "../src/lib/actionMutex";
 import { MAX_CLOSE_INSTRUCTIONS_PER_TX } from "../src/lib/solana/transactions";
 import {
   TOKEN_2022_PROGRAM_ID,
@@ -72,9 +73,12 @@ const ACCOUNT: ClosableAccount = {
 };
 
 // On-chain state used by verifyAccountsClosed: every account is still
-// open, owned by the classic token program.
+// open, owned by the classic token program. The lamports figure is
+// load-bearing since the fresh-read gate: it is the fee base, so an open
+// fixture account holds the same 2,039,280 the scan recorded (a real
+// token account cannot exist at zero lamports).
 const STILL_OPEN = {
-  lamports: 0,
+  lamports: 2039280,
   owner: TOKEN_PROGRAM_ID,
   executable: false,
   data: Buffer.alloc(0),
@@ -89,6 +93,22 @@ function makeAccounts(count: number): ClosableAccount[] {
     program: i % 2 === 0 ? "spl" : "token-2022",
   }));
 }
+
+// A deterministic account carrying the SCAN's lamports figure.
+function accountAt(seed: number, lamports: number): ClosableAccount {
+  const bytes = new Uint8Array(32);
+  bytes[0] = seed;
+  return {
+    pubkey: new PublicKey(bytes).toBase58(),
+    mint: Keypair.generate().publicKey.toBase58(),
+    lamports,
+    program: "spl",
+  };
+}
+
+// A token account still open on-chain, holding the given lamports - the
+// figure a fresh read returns, and the fee base since the gate read exists.
+const openAt = (lamports: number) => ({ ...STILL_OPEN, lamports });
 
 describe("useRepairWallet", () => {
   beforeEach(() => {
@@ -406,13 +426,22 @@ describe("useRepairWallet", () => {
     });
 
     // Batch 1 confirms normally (no verification runs on the success
-    // path). The only getMultipleAccountsInfo caller in this scenario is the
-    // catch path's final verification - make it fail.
+    // path). getMultipleAccountsInfo is called for each batch's
+    // fresh-read gate and then twice for batch 2: the attempt-level
+    // verification and the catch path's final one. Both gates answer
+    // (the batches can be built); from the first verification on the
+    // RPC is down, so BOTH reads fail - as they did before the gate
+    // existed, when every call rejected.
     mocks.conn.getSignatureStatuses.mockResolvedValue({
       value: [{ err: null, confirmationStatus: "confirmed" }],
     });
-    mocks.conn.getMultipleAccountsInfo.mockRejectedValue(
-      new Error("RPC unavailable")
+    let reads = 0;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => {
+        reads += 1;
+        if (reads >= 3) throw new Error("RPC unavailable");
+        return pks.map(() => STILL_OPEN);
+      }
     );
 
     const { result } = renderHook(() => useRepairWallet());
@@ -996,7 +1025,10 @@ describe("useRepairWallet", () => {
     mocks.conn.getMultipleAccountsInfo.mockImplementation(
       async (pks: PublicKey[]) => {
         verifyCalls += 1;
-        if (verifyCalls === 1) throw new Error("RPC unavailable");
+        // Reads 1 and 2 are the two batches' fresh-read gates. Read 3 is
+        // the attempt-level verification, which runs while the RPC is
+        // down. Read 4 is the outer catch's, after the RPC recovers.
+        if (verifyCalls === 3) throw new Error("RPC unavailable");
         return pks.map((pk) =>
           pk.toBase58() === accounts[20].pubkey ? null : STILL_OPEN
         );
@@ -1023,6 +1055,234 @@ describe("useRepairWallet", () => {
     expect(result.current.closedCount).toBe(21);
     expect(result.current.recoveredLamports).toBe(21n * 2039280n);
     expect(result.current.error).toMatch(/stopped after 21 of 21/);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* The fresh-read fee base (whole-repository audit 2026-11-24,         */
+  /* finding 1). The classic repair built its 1% fee and its recovered   */
+  /* figure from the SCAN's lamports. The dust flow was fixed for the    */
+  /* same defect in b9e0c40 (its fee base became the gate read's         */
+  /* lamports); these pin the classic flow to that standard.             */
+  /* Calibration: the fee ledger's mainnet history shows zero fee        */
+  /* violations ever - the gap was latent, never seen on a live row.     */
+  /* ------------------------------------------------------------------ */
+
+  it("charges the fee and reports recovery from the gate-time lamports, never the scan's", async () => {
+    // The scan saw both accounts at one figure; the chain moved before
+    // the run. A top-up landed on one (+1,000,000) and 988,440 lamports
+    // left the other. The close returns what each account holds NOW, so
+    // the 1% fee and the recovered figure must be built from a fresh
+    // read: an under- or overcharged fee and a recovered figure the
+    // wallet's own balance contradicts are the same defect.
+    const toppedUp = accountAt(1, 1488440);
+    const reduced = accountAt(2, 2488440);
+    const gate = new Map<string, number>([
+      [toppedUp.pubkey, 2488440],
+      [reduced.pubkey, 1500000],
+    ]);
+    const events: string[] = [];
+    const held: Array<string | null> = [];
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => {
+        events.push("read");
+        held.push(heldAction());
+        return pks.map((pk) => openAt(gate.get(pk.toBase58()) ?? -1));
+      }
+    );
+    let feeLamports: bigint | null = null;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      events.push("sign");
+      const last = tx.instructions[tx.instructions.length - 1];
+      feeLamports = last.programId.equals(SystemProgram.programId)
+        ? last.data.readBigUInt64LE(4)
+        : null;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair([toppedUp, reduced], true);
+    });
+
+    expect(result.current.status).toBe("done");
+    // floor(1% of 2,488,440 + 1,500,000 = 3,988,440) = 39,884. The
+    // scan's figures would have charged floor(1% of 3,976,880) = 39,768.
+    expect(feeLamports).toBe(39884n);
+    // The recovered figure is the same fresh sum, not the scan's 3,976,880.
+    expect(result.current.recoveredLamports).toBe(3988440n);
+    expect(result.current.closedCount).toBe(2);
+    // The read happened BEFORE the wallet was asked to sign, and under
+    // the action lock (the dust flow's in-lock gate discipline).
+    expect(events[0]).toBe("read");
+    expect(events.indexOf("read")).toBeLessThan(events.indexOf("sign"));
+    expect(held).toEqual(["repair"]);
+    // At confirmed commitment: the view the repair's confirmation
+    // waits on, the same one verification reads at.
+    expect(mocks.conn.getMultipleAccountsInfo).toHaveBeenCalledWith(
+      expect.any(Array),
+      "confirmed"
+    );
+  });
+
+  it("recalculates a reconciled retry's fee from a fresh read at retry time", async () => {
+    // Approval 1 expires while the user sits on the popup, and a top-up
+    // lands on one still-open account in the meantime. The rebuilt retry
+    // closes the 13 accounts the chain still reports open - and its fee
+    // must be floor(1%) of what THOSE hold when the retry is built, not
+    // the scan's stale figures.
+    const accounts = Array.from({ length: 20 }, (_, i) =>
+      accountAt(10 + i, 2039280)
+    );
+    const lateTopUp = accounts[7].pubkey;
+    // Chain state, content-addressed (never call-order): 7 accounts were
+    // closed by something else before the run; the rest are open at the
+    // scan figure.
+    const chain = new Map<string, number | null>(
+      accounts.map((a, i) => [a.pubkey, i < 7 ? null : 2039280])
+    );
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) =>
+        pks.map((pk) => {
+          const lamports = chain.get(pk.toBase58()) ?? null;
+          return lamports === null ? null : openAt(lamports);
+        })
+    );
+    let signCalls = 0;
+    const approvals: Array<{ closes: number; feeLamports: bigint | null }> =
+      [];
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      const closes = tx.instructions.filter(
+        (ix) => ix.data.length === 1 && ix.data[0] === 9
+      ).length;
+      const feeIx = tx.instructions.find((ix) =>
+        ix.programId.equals(SystemProgram.programId)
+      );
+      approvals.push({
+        closes,
+        feeLamports: feeIx ? feeIx.data.readBigUInt64LE(4) : null,
+      });
+      // The top-up lands while the first approval popup is open.
+      if (signCalls === 1) chain.set(lateTopUp, 3039280);
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+    let pollCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) return { value: [null] };
+      return { value: [{ err: null, confirmationStatus: "confirmed" }] };
+    });
+    mocks.conn.getBlockHeight.mockResolvedValue(1001);
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(approvals).toHaveLength(2);
+    // Approval 1 was built before the top-up existed.
+    expect(approvals[0].closes).toBe(20);
+    expect(approvals[0].feeLamports).toBe(407856n); // floor(20 x 2,039,280 / 100)
+    // Approval 2: floor(1% of 12 x 2,039,280 + 3,039,280 = 27,510,640)
+    // = 275,106. The scan's figures would have charged 265,106.
+    expect(approvals[1].closes).toBe(13);
+    expect(approvals[1].feeLamports).toBe(275106n);
+    // 19 accounts at the scan figure, plus the topped-up one.
+    expect(result.current.recoveredLamports).toBe(19n * 2039280n + 3039280n);
+  });
+
+  const unreadableGate: Array<
+    [string, () => Promise<unknown>, string | null]
+  > = [
+    [
+      "the RPC rejects the read",
+      () => Promise.reject(new Error("HTTP 429 after retries")),
+      // The transport error's own text is kept, as the detail.
+      "HTTP 429 after retries",
+    ],
+    ["the response is shorter than the request", () => Promise.resolve([]), null],
+    [
+      "a lamports figure is not a whole number",
+      () => Promise.resolve([{ ...STILL_OPEN, lamports: "2039280" }]),
+      null,
+    ],
+  ];
+
+  it.each(unreadableGate)(
+    "stops before signing when the current balances cannot be read: %s",
+    async (_label, respond, rawDetail) => {
+      // A fee base the run could not read is never replaced by the
+      // scan's figure: that is the stale-base defect wearing a fallback's
+      // clothes. Nothing is built, so nothing reaches the wallet.
+      mocks.conn.getMultipleAccountsInfo.mockImplementation(respond);
+      const signer = vi.fn(async (tx: Transaction) => {
+        tx.sign(KEYPAIR_A);
+        return tx;
+      });
+      mocks.holder.signTransaction = signer;
+
+      const { result } = renderHook(() => useRepairWallet());
+
+      await act(async () => {
+        await result.current.repair([ACCOUNT], true);
+      });
+
+      expect(signer).not.toHaveBeenCalled();
+      expect(mocks.conn.getLatestBlockhash).not.toHaveBeenCalled();
+      expect(mocks.conn.sendRawTransaction).not.toHaveBeenCalled();
+      expect(result.current.status).toBe("error");
+      expect(result.current.closedCount).toBe(0);
+      expect(result.current.recoveredLamports).toBe(0n);
+      expect(result.current.error).toMatch(/could not be read/);
+      // Raw RPC text stays out of the main line (FriendlyError copy) and
+      // is preserved, not hidden, in the collapsed detail.
+      expect(result.current.error).not.toMatch(/HTTP 429/);
+      expect(result.current.errorDetail).toBe(rawDetail);
+    }
+  );
+
+  it("reports landed batches honestly when a later batch's balances cannot be read", async () => {
+    // Batch 1 (20 accounts) lands. Batch 2's read fails: the run must
+    // stop BEFORE building it, and say so without claiming nothing was
+    // sent - batch 1 provably was, and its progress stands.
+    const accounts = makeAccounts(21); // batches: 20 + 1
+    let reads = 0;
+    mocks.conn.getMultipleAccountsInfo.mockImplementation(
+      async (pks: PublicKey[]) => {
+        reads += 1;
+        // Read 1: batch 1's gate. Read 2: batch 2's gate - unreadable.
+        // Read 3: the outer catch's scoped re-verification of batch 2.
+        if (reads === 2) throw new Error("HTTP 429 after retries");
+        return pks.map(() => openAt(2039280));
+      }
+    );
+    let signCalls = 0;
+    mocks.holder.signTransaction = vi.fn(async (tx: Transaction) => {
+      signCalls += 1;
+      tx.sign(KEYPAIR_A);
+      return tx;
+    });
+
+    const { result } = renderHook(() => useRepairWallet());
+
+    await act(async () => {
+      await result.current.repair(accounts, true);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(signCalls).toBe(1);
+    expect(mocks.conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(result.current.signatures).toHaveLength(1);
+    expect(result.current.closedCount).toBe(20);
+    expect(result.current.recoveredLamports).toBe(20n * 2039280n);
+    expect(result.current.error).toMatch(/stopped after 20 of 21/);
+    expect(result.current.error).toMatch(/could not be read/);
+    expect(result.current.error).not.toMatch(/Nothing was sent/);
   });
 });
 

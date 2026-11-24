@@ -138,6 +138,19 @@ beforeEach(() => {
   // Default resolution: confirmed on the first poll, window open.
   mocks.conn.getSignatureStatuses.mockResolvedValue(CONFIRMED);
   mocks.conn.getBlockHeight.mockResolvedValue(WINDOW - 10);
+  // Default chain for the repair hook's fresh-read gate (the fee base),
+  // when a mutex test runs the real repair alongside the revoke: every
+  // account it asks about is still open, holding the scan's figure.
+  mocks.conn.getMultipleAccountsInfo.mockImplementation(
+    async (pks: PublicKey[]) =>
+      pks.map(() => ({
+        lamports: 2039280,
+        owner: TOKEN_PROGRAM_ID,
+        executable: false,
+        data: Buffer.alloc(0),
+        rentEpoch: 0,
+      }))
+  );
 });
 
 afterEach(() => {
