@@ -1157,7 +1157,7 @@ export function useBurnDust() {
               status: "done",
               outcome: "close-unattributed",
               error:
-                "The account is gone. Whether this app's transaction closed it could not be established.",
+                `${progressLine()}The account is gone. Whether this app's transaction closed it could not be established.`,
             });
             return;
           }
@@ -1168,7 +1168,7 @@ export function useBurnDust() {
               status: "error",
               outcome: "state-changed-since-review",
               error:
-                "The transaction expired without landing, and the account changed since you reviewed it. " +
+                `${progressLine()}The transaction expired without landing, and the account changed since you reviewed it. ` +
                 `When we checked, the balance was ${changed.observedBalance} base units and the account held ` +
                 `${changed.observedLamports} lamports. Nothing more will be sent automatically. ` +
                 "Start a fresh review to see the current state.",
@@ -1185,7 +1185,7 @@ export function useBurnDust() {
                 ? `${resolution.detail}; the submission itself failed with: ${sendFailure}`
                 : resolution.detail,
               error:
-                "We could not verify whether the transaction landed. Its outcome could not be established. It may still land. Nothing more will be sent automatically.",
+                `${progressLine()}We could not verify whether the transaction landed. Its outcome could not be established. It may still land. Nothing more will be sent automatically.`,
             });
             return;
           }

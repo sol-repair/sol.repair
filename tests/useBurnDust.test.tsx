@@ -1538,8 +1538,82 @@ describe("useBurnDust burnBatch (the batched burn-and-close, owner decision 2026
     expect(result.current.batchVerifiedCount).toBe(0);
     expect(result.current.error ?? "").not.toContain("destroyed permanently");
   });
+
+  function gateThenGonePhased(candidates: ReturnType<typeof makeCandidates>) {
+    const mintByPubkey = new Map(candidates.map((c) => [c.pubkey, c.mint]));
+    let gateCalls = 0;
+    mocks.conn.getParsedAccountInfo.mockImplementation(async (address: unknown) => {
+      const b58 =
+        typeof address === "string"
+          ? address
+          : (address as { toBase58?: () => string })?.toBase58?.();
+      gateCalls += 1;
+      if (gateCalls <= candidates.length) {
+        return readShape({
+          lamports: 1_488_440,
+          ...infoBody(mintByPubkey.get(b58 ?? "") ?? MINT.toBase58(), "1000", "initialized"),
+        });
+      }
+      // every post-gate read: the account is gone (chunk verifies pass;
+      // a canary corroboration read reports missing -> account-gone)
+      return { value: null };
+    });
+  }
+
+  it("account-gone at chunk 2 of 3 reports the standing chunk", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(20);
+    gateThenGonePhased(candidates);
+    // chunk 1: statuses resolve confirmed. chunk 2: status unobserved
+    // past the window -> corroboration reads the canary gone ->
+    // account-gone.
+    let statusCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      statusCalls += 1;
+      if (statusCalls === 1) return confirmedStatus();
+      return { value: [null] };
+    });
+    mocks.conn.getBlockHeight.mockResolvedValue(2000); // past window 1000
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+    expect(result.current.outcome).toBe("close-unattributed");
+    expect(result.current.error).toContain(
+      "1 of 3 transactions stand verified"
+    );
+    expect(result.current.error).toContain("9 of 20 accounts confirmed gone");
+    // both submissions went out; only chunk 1 verified before the
+    // canary corroboration reported the account gone
+    expect(result.current.signatures).toHaveLength(2);
+  });
+
+  it("unresolved at chunk 2 of 3 reports the standing chunk and the submitted-but-unresolved state", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(20);
+    gateThenGonePhased(candidates);
+    let statusCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      statusCalls += 1;
+      if (statusCalls === 1) return confirmedStatus();
+      throw new Error("rpc down");
+    });
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+    expect(result.current.status).toBe("unverified");
+    expect(result.current.outcome).toBe("unresolved-outcome");
+    expect(result.current.error).toContain(
+      "1 of 3 transactions stand verified"
+    );
+    expect(result.current.error).toContain("9 of 20 accounts confirmed gone");
+    // chunk 2's unresolved submission is accounted for in the detail
+    expect(result.current.errorDetail).toContain(
+      "the RPC could not be reached to establish the outcome"
+    );
+  });
 });
 
 const TOKEN_OWNER_PLACEHOLDER = new PublicKey(
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 );
+

@@ -985,3 +985,61 @@ describe("the batched burn done card with unverified reads (audit finding 2)", (
     }
   });
 });
+
+describe("the batched run error-card heading (audit R1 residue)", () => {
+  function renderErrorWithProgress() {
+    setHook(
+      {
+        status: "error",
+        outcome: "close-unattributed",
+        batchAccounts: Array.from({ length: 20 }, (_, i) => `acc${i}`),
+        batchVerifiedCount: 9,
+        batchProgress: { current: 2, total: 3 },
+        error:
+          "1 of 3 transactions stand verified (9 of 20 accounts confirmed gone). The account is gone. Whether this app's transaction closed it could not be established.",
+      },
+      false
+    );
+    render(
+      <BurnDustSection
+        scan={scanWith([dustEntry()])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={true}
+      />
+    );
+  }
+
+  it("uses a partial-run heading when progress exists", () => {
+    renderErrorWithProgress();
+    expect(
+      screen.getByText("The batched run stopped partway.")
+    ).toBeTruthy();
+    expect(screen.queryByText("The burn did not go through")).toBeNull();
+  });
+
+  it("keeps the plain heading when no progress exists", () => {
+    setHook(
+      {
+        status: "error",
+        outcome: "close-unattributed",
+        error: "The account is gone. Whether this app's transaction closed it could not be established.",
+      },
+      false
+    );
+    render(
+      <BurnDustSection
+        scan={scanWith([dustEntry()])}
+        rescan={() => {}}
+        repairInFlight={false}
+        revokeInFlight={false}
+        unwrapInFlight={false}
+        feeReady={true}
+      />
+    );
+    expect(screen.getByText("The burn did not go through")).toBeTruthy();
+    expect(screen.queryByText("The batched run stopped partway.")).toBeNull();
+  });
+});

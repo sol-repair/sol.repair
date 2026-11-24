@@ -1385,7 +1385,13 @@ export function BurnDustSection({
       {/* Error card */}
       {status === "error" && (
         <div className="mt-3 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-400">
-          <p className="font-medium">The burn did not go through</p>
+          <p className="font-medium">
+            {batchAccounts !== null &&
+            batchAccounts.length > 1 &&
+            (signatures.length > 0 || batchVerifiedCount > 0)
+              ? "The batched run stopped partway."
+              : "The burn did not go through"}
+          </p>
           <p className="mt-1 leading-relaxed text-red-400">{error}</p>
           {outcome === "on-chain-failure" &&
             accountPresentAfterAction === true && (
