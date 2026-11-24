@@ -92,7 +92,14 @@ the transaction destroys the account's whole token balance permanently
 and then closes the account, returning everything it held to your
 wallet. SOL.REPAIR cannot judge what a token is worth, nothing is
 selected by default, and the same 1% fee applies to the recovered
-deposit. Frozen accounts cannot be burned.
+deposit. Several selected accounts can also burn together in one
+approval: accounts group up to nine pairs per transaction (a size
+derived from the network's packet limit, with a tested margin for the
+instructions wallets add), so an 11-account cleanup costs 2 approvals
+instead of 11, and each transaction's fee is the sum of those accounts'
+own 1 percent, sent as one transfer riding last. A transaction that
+fails stops the run: the earlier transactions stand, the rest is not
+attempted. Frozen accounts cannot be burned.
 
 Dead NFTs get their own burn: a dead NFT is a one-of-one token whose
 mint, metadata, and master edition accounts are all that is left of it,
