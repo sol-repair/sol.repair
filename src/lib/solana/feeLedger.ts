@@ -294,6 +294,7 @@ function decodeV1Transaction(
 ): {
   blockTime: number | null;
   instructions: DecodedInstruction[];
+  outerInstructionCount: number;
   accountKeys: string[];
 } | null {
   try {
@@ -364,6 +365,7 @@ function decodeV1Transaction(
     return {
       blockTime: typeof raw.blockTime === "number" ? raw.blockTime : null,
       instructions: [...top, ...inner],
+      outerInstructionCount: top.length,
       accountKeys: keys.map((k) => k.toBase58()),
     };
   } catch {
@@ -387,6 +389,12 @@ export function decodeRawTransaction(raw: RawTransaction): {
    *  keys, then loaded writable, then loaded readonly), so a decoded
    *  instruction's account can be mapped to its pre-tx lamports. */
   accountKeys: string[];
+  /** Outer (top-level) wire instructions: the first
+   *  outerInstructionCount entries of `instructions`. The structural
+   *  fee-rule check reads only these - CPI closes are the BurnNft
+   *  program's own business and were never part of the wire-order
+   *  census. */
+  outerInstructionCount: number;
 } | null {
   const txData = raw.transaction;
   if (
@@ -422,6 +430,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
 
   let instructions: DecodedInstruction[];
   let accountKeys: string[];
+  let outerInstructionCount = 0;
   if (message.version === "legacy") {
     const keys: readonly (PublicKey | undefined)[] = message.accountKeys;
     const top = message.instructions
@@ -433,6 +442,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
         .filter((ix): ix is DecodedInstruction => ix !== null)
     );
     instructions = [...top, ...inner];
+    outerInstructionCount = top.length;
     accountKeys = message.accountKeys.map((k) => k.toBase58());
   } else {
     // Versioned transactions resolve some accounts through address
@@ -484,6 +494,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
           .filter((ix): ix is DecodedInstruction => ix !== null)
       );
       instructions = [...top, ...inner];
+      outerInstructionCount = top.length;
       // preBalances index order: static keys, then loaded writable, then
       // loaded readonly — the wire order the RPC documents.
       accountKeys = [
@@ -499,6 +510,7 @@ export function decodeRawTransaction(raw: RawTransaction): {
   return {
     blockTime: typeof raw.blockTime === "number" ? raw.blockTime : null,
     instructions,
+    outerInstructionCount,
     accountKeys,
   };
 }
@@ -565,6 +577,103 @@ function inboundTransferLamports(
  *  keys the rule reads means no verdict rather than a guess. The
  *  per-account list is what the dual-arm conformance comparison needs
  *  (onePercentArms below); total is their sum. */
+/** The structural half of the fee rule (audit finding 3, escalated;
+ *  owner ruling 2026-11-23, option e - value-inert tail). The fee is
+ *  ONE transfer riding LAST. A fee-bearing transaction conforms
+ *  structurally when exactly one inbound transfer to the fee wallet
+ *  exists, it is positioned after every close/burn/BurnNft
+ *  instruction, and every instruction positioned after it is
+ *  VALUE-INERT: no system transfer to any destination, no token
+ *  close, no token burn, no BurnNft - nothing that moves lamports or
+ *  destroys accounts. Keyless wallet-appended instructions
+ *  (compute budget) pass; third-party assertion instructions that
+ *  move nothing (the Lighthouse security tool's checks, census 463
+ *  of 463) pass. Runs on OUTER instructions only: CPI closes are
+ *  the BurnNft program's own business and were never part of the
+ *  wire-order census. Honest boundary, on the record: this polices
+ *  the detectable lamport-movement and account-destruction shapes
+ *  only, not arbitrary behavior of an upgradable third-party
+ *  program; the wallet's pre-signature display remains the first
+ *  line of defense. */
+export function structuralConformance(
+  instructions: DecodedInstruction[],
+  feeWallet: string
+): { conform: boolean; reason: string } {
+  let feeTransferCount = 0;
+  let feeTransferIndex = -1;
+  let lastValueBearing = -1;
+  let firstMovingAfter = -1;
+  for (let i = 0; i < instructions.length; i++) {
+    const ix = instructions[i];
+    if (inboundTransferLamports(ix, feeWallet) > 0) {
+      feeTransferCount += 1;
+      feeTransferIndex = i;
+    }
+    if (isValueMovingInstruction(ix)) {
+      lastValueBearing = i;
+      if (feeTransferCount > 0 && i > feeTransferIndex && firstMovingAfter === -1) {
+        firstMovingAfter = i;
+      }
+    }
+  }
+  if (feeTransferCount === 0) {
+    return { conform: false, reason: "no inbound fee transfer" };
+  }
+  if (feeTransferCount > 1) {
+    return {
+      conform: false,
+      reason: `${feeTransferCount} inbound fee transfers (split)`,
+    };
+  }
+  if (lastValueBearing > feeTransferIndex) {
+    return {
+      conform: false,
+      reason: "a close or burn rides after the fee transfer",
+    };
+  }
+  if (firstMovingAfter !== -1) {
+    return {
+      conform: false,
+      reason: `instruction ${firstMovingAfter} moves value after the fee transfer`,
+    };
+  }
+  return {
+    conform: true,
+    reason: "one transfer, last among value-bearing instructions",
+  };
+}
+
+/** The value-moving shapes the tail rule polices, per the ruling's
+ *  enumerated list: a system transfer to any destination (tag 2 or
+ *  11), a token-program closeAccount (tag 9) or burn (tag 8), and
+ *  the Metaplex BurnNft (tag 29). */
+function isValueMovingInstruction(ix: DecodedInstruction): boolean {
+  if (
+    ix.programId === SystemProgram.programId.toBase58() &&
+    ix.data.length >= 4
+  ) {
+    const tag = readU32LE(ix.data);
+    if (
+      tag === SYSTEM_TRANSFER_TAG ||
+      tag === SYSTEM_TRANSFER_WITH_SEED_TAG
+    ) {
+      return true;
+    }
+  }
+  if (
+    (ix.programId === TOKEN_PROGRAM_ID.toBase58() ||
+      ix.programId === TOKEN_2022_PROGRAM_ID.toBase58()) &&
+    ix.data.length >= 1
+  ) {
+    // closeAccount: the tag byte alone. burn: tag + u64 amount.
+    if (ix.data[0] === 9 || (ix.data[0] === 8 && ix.data.length === 9)) {
+      return true;
+    }
+  }
+  if (isMplBurnNft(ix)) return true;
+  return false;
+}
+
 function closedRentLamports(
   decoded: { instructions: DecodedInstruction[]; accountKeys: string[] },
   preBalances: number[] | undefined,
@@ -677,9 +786,21 @@ export function feeRowsFromRawTransactions(
     );
     let onePercentMatch: boolean | null = null;
     if (rents !== null) {
+      // Dual-arm amount check AND the structural half (audit finding
+      // 3, owner ruling 2026-11-23): the fee must be exactly one
+      // transfer riding last among value-bearing instructions. The
+      // structural check runs on the OUTER wire only - CPI closes are
+      // the BurnNft program's own business and were never part of the
+      // wire-order census.
+      const structure = structuralConformance(
+        decoded.instructions.slice(0, decoded.outerInstructionCount),
+        feeWallet
+      );
       const arms = onePercentArms(rents.perAccount);
       const fee = BigInt(lamports);
-      onePercentMatch = fee === arms.floorOfTotal || fee === arms.sumOfFloors;
+      onePercentMatch =
+        (fee === arms.floorOfTotal || fee === arms.sumOfFloors) &&
+        structure.conform;
     }
     rows.push({ signature, blockTime: decoded.blockTime, lamports, onePercentMatch });
   }

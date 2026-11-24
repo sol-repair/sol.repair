@@ -102,12 +102,17 @@ describe("fees page 1% conformance marker", () => {
     expect(screen.queryByText("not a 1% fee")).toBeNull();
   });
 
-  it("states the 1% rule in the intro copy", () => {
+  it("states the 1% rule in the intro copy, including the structural half", () => {
     mockHook([]);
     render(<FeesPage />);
 
     expect(
       screen.getByText(/not exactly 1% of the SOL/i)    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /exactly one transfer positioned after every close/i
+      )
+    ).toBeTruthy();
   });
 });
 

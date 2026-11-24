@@ -37,7 +37,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import bs58 from "bs58";
 import { Connection, PublicKey } from "@solana/web3.js";
 
-import { feeConforms } from "./fee-verdict-arms.mjs";
+import { feeConforms, feeRowStructureConforms } from "./fee-verdict-arms.mjs";
 
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 const SYSTEM_PROGRAM = "1".repeat(32);
@@ -236,7 +236,28 @@ for (const s of uniqueSigs) {
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
   organicRows++;
-  if (!feeConforms(feeAmt, perAccount)) {
+  const rowFacts = ix.map((i) => ({
+    isInboundFeeTransfer:
+      String(i.programId) === SYSTEM_PROGRAM &&
+      i.parsed?.type === "transfer" &&
+      i.parsed?.info?.destination === FEE_WALLET,
+    isValueMoving:
+      (String(i.programId) === SYSTEM_PROGRAM &&
+        (i.parsed?.type === "transfer" || i.parsed?.type === "createAccount" ||
+          i.parsed?.type === "createAccountWithSeed")) ||
+      i.parsed?.type === "closeAccount" ||
+      i.parsed?.type === "burn" ||
+      (String(i.programId) === MPL_TOKEN_METADATA_PROGRAM &&
+        (() => {
+          try {
+            const bytes = bs58.decode(i.data ?? "");
+            return bytes.length === 1 && bytes[0] === MPL_BURN_NFT_TAG;
+          } catch {
+            return false;
+          }
+        })()),
+  }));
+  if (!feeConforms(feeAmt, perAccount) || !feeRowStructureConforms(rowFacts)) {
     violations++;
     console.log("CONFORMANCE VIOLATION", s.signature, "fee", feeAmt.toString(), "freed", freed.toString());
     continue;

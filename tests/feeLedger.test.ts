@@ -1579,3 +1579,306 @@ describe("decodeRawTransaction v1 property tests (fast-check)", () => {
     );
   });
 });
+
+describe("the structural half of the fee rule (finding 3, escalated; value-inert tail)", () => {
+  const AUDIT_OWNER = Keypair.generate().publicKey;
+  const LIGHTHOUSE = new PublicKey(
+    "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"
+  );
+
+  function preBalancesLocal(message: Message, accounts: PublicKey[], rents: number[]): number[] {
+    return message.accountKeys.map((k) => {
+      const i = accounts.findIndex((a) => a.equals(k));
+      return i >= 0 ? rents[i] : 1;
+    });
+  }
+
+  function closeIxFor(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([9]),
+    });
+  }
+
+  function burnIxFor(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: false },
+      ],
+      programId: TOKEN_PROGRAM_ID,
+      data: Buffer.from([8, 1, 0, 0, 0, 0, 0, 0, 0]),
+    });
+  }
+
+  function burnNftIx(): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
+      ],
+      programId: new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"),
+      data: Buffer.from([29]),
+    });
+  }
+
+  /** The keyless wallet-appended shape: compute-budget style, zero
+   *  account keys, 9 bytes of data (the E421 measured shape). */
+  function keylessAppend(): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: new PublicKey(
+        "ComputeBudget111111111111111111111111111111"
+      ),
+      keys: [],
+      data: Buffer.from([0x02, 0x40, 0x0d, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00]),
+    });
+  }
+
+  /** The Lighthouse assertion shape from the coordinator census: one
+   *  account key after the fee transfer, no lamports moved. */
+  function lighthouseAssert(account: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: LIGHTHOUSE,
+      keys: [{ pubkey: account, isSigner: false, isWritable: false }],
+      data: Buffer.from([1, 2, 3, 4]),
+    });
+  }
+
+  /** The recorded historical shapes: single close, two-close repair
+   *  batch, dust burn-and-close, BurnNft (closes ride as CPI, so the
+   *  outer wire is burn-then-transfer). Exact historical fees. */
+  function historicalWire(shape: "single" | "repair" | "dust" | "burnnft"): {
+    raw: RawTransaction;
+    fee: number;
+  } {
+    if (shape === "single") {
+      const account = Keypair.generate().publicKey;
+      const { raw, message } = buildLegacyRaw([
+        closeIxFor(account),
+        systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      ]);
+      raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+      return { raw, fee: 20_392 };
+    }
+    if (shape === "repair") {
+      const a = Keypair.generate().publicKey;
+      const b = Keypair.generate().publicKey;
+      const { raw, message } = buildLegacyRaw([
+        closeIxFor(a),
+        closeIxFor(b),
+        systemTransfer(new PublicKey(FEE_WALLET), 37_428),
+      ]);
+      raw.meta!.preBalances = preBalancesLocal(message, [a, b], [1_856_000, 1_886_803]);
+      return { raw, fee: 37_428 };
+    }
+    if (shape === "dust") {
+      const pair = burnClosePair(TOKEN_PROGRAM_ID);
+      const { raw, message } = buildLegacyRaw([
+        ...pair,
+        systemTransfer(new PublicKey(FEE_WALLET), 14_884),
+      ]);
+      raw.meta!.preBalances = preBalancesLocal(message, [pair[0].keys[0].pubkey], [1_488_440]);
+      return { raw, fee: 14_884 };
+    }
+    const burnIx = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      burnIx,
+      systemTransfer(new PublicKey(FEE_WALLET), 59_740),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(
+      message,
+      [burnIx.keys[0].pubkey, burnIx.keys[3].pubkey, burnIx.keys[4].pubkey],
+      [1_488_440, 3_733_800, 751_840]
+    );
+    // real BurnNft rows carry postBalances (the husk-era rule reads
+    // pre - post); the three closed accounts report 0 after the burn
+    raw.meta!.postBalances = message.accountKeys.map((k) => {
+      const i = [burnIx.keys[0].pubkey, burnIx.keys[3].pubkey, burnIx.keys[4].pubkey].findIndex((a) =>
+        a.equals(k)
+      );
+      return i >= 0 ? 0 : 1;
+    });
+    return { raw, fee: 59_740 };
+  }
+
+  function burnClosePair(
+    programId: PublicKey
+  ): TransactionInstruction[] {
+    const acct = Keypair.generate().publicKey;
+    const m = Keypair.generate().publicKey;
+    const authority = AUDIT_OWNER;
+    return [
+      createBurnInstruction(acct, m, authority, 1000n, [], programId),
+      createCloseAccountInstruction(acct, authority, authority, [], programId),
+    ];
+  }
+
+  it("every recorded historical shape passes structurally", () => {
+    for (const shape of ["single", "repair", "dust", "burnnft"] as const) {
+      const { raw, fee } = historicalWire(shape);
+      const rows = feeRowsFromRawTransactions(
+        [{ signature: `hist-${shape}`, raw }],
+        FEE_WALLET
+      );
+      expect(rows).toHaveLength(1);
+      console.log("HIST2", shape, rows[0].lamports, String(rows[0].onePercentMatch));
+      expect(rows[0].lamports).toBe(fee);
+      expect(rows[0].onePercentMatch).toBe(true);
+    }
+  });
+
+  it("a keyless wallet append after the fee transfer passes", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      keylessAppend(),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "keyless-append", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("the Lighthouse assertion shape after the fee transfer passes (census shape)", () => {
+    const account = Keypair.generate().publicKey;
+    const assertTarget = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      lighthouseAssert(assertTarget),
+      lighthouseAssert(assertTarget),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "lighthouse", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("split fee transfers aggregating to the exact sum FAIL structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 10_196),
+      systemTransfer(new PublicKey(FEE_WALLET), 10_196),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "split", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].lamports).toBe(20_392); // summed, as always
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a fee transfer positioned before the close FAILS structurally (amount exact)", () => {
+    const account = Keypair.generate().publicKey;
+    // Amount is exact: one close, rent 2,039,280, fee 20,392. Only the
+    // position violates: the transfer rides before the close.
+    const { raw, message } = buildLegacyRaw([
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      closeIxFor(account),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "early", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].lamports).toBe(20_392);
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing system transfer to another destination FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const elsewhere = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      systemTransfer(elsewhere, 1),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-xfer", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing token burn FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      burnIxFor(account),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-burn", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing token close FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const victim = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      closeIxFor(victim),
+    ]);
+    // the trailing close's account contributes zero rent (pre 0) so
+    // the amount check stays exact and only structure can fail
+    raw.meta!.preBalances = preBalancesLocal(
+      message,
+      [account, victim],
+      [2_039_280, 0]
+    );
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-close", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  it("a trailing BurnNft FAILS structurally", () => {
+    const account = Keypair.generate().publicKey;
+    const burnIx = burnNftIx();
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      burnIx,
+    ]);
+    // Real BurnNft rows carry postBalances; give the wire a consistent
+    // balance model so the amount half is computable and only the
+    // structural half can fail: the BurnNft's own accounts contribute
+    // zero net rent movement here.
+    const rentKeys = [burnIx.keys[0].pubkey, burnIx.keys[3].pubkey, burnIx.keys[4].pubkey];
+    raw.meta!.preBalances = message.accountKeys.map((k) => {
+      const i = rentKeys.findIndex((a) => a.equals(k));
+      return i >= 0 ? [1_488_440, 3_733_800, 751_840][i] : k.equals(account) ? 2_039_280 : 1;
+    });
+    raw.meta!.postBalances = message.accountKeys.map((k) => {
+      const i = rentKeys.findIndex((a) => a.equals(k));
+      return i >= 0 ? 0 : k.equals(account) ? 2_039_280 : 1;
+    });
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "trailing-burnnft", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+});

@@ -38,7 +38,11 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       "accepts both exact readings of the 1 percent rule: the " +
       "whole-batch floor the repair has always used, and the " +
       "per-account sum a batch charges. The two readings differ by at " +
-      "most 8 lamports per transaction at this batch size. Dead NFT " +
+      "most 8 lamports per transaction at this batch size. The public " +
+      "fee ledger now also checks the fee's shape: exactly one fee " +
+      "transfer, riding last after every close, with only wallet-added " +
+      "compute instructions riding after it. Every recorded row already " +
+      "satisfies this; nothing about past fees changed. Dead NFT " +
       "burns keep their own flow, one transaction per NFT.",
   },
   {

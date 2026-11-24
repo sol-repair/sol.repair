@@ -11,7 +11,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { feeConforms, feeVerdictArms } from "../scripts/fee-verdict-arms.mjs";
+import {
+  feeConforms,
+  feeRowStructureConforms,
+  feeVerdictArms,
+} from "../scripts/fee-verdict-arms.mjs";
 
 describe("fee-verdict-arms (the dual-arm 1% rule)", () => {
   it("single-account rows: both arms agree, exact fee conforms, off-by-one flags", () => {
@@ -73,5 +77,80 @@ describe("fee-verdict-arms (the dual-arm 1% rule)", () => {
     expect(feeConforms(133_956, rents)).toBe(true);
     expect(feeConforms(133_959, rents)).toBe(true);
     expect(Number(arms.floorOfTotal - arms.sumOfFloors)).toBeLessThanOrEqual(8);
+  });
+});
+
+describe("the structural half of the fee rule (helper mirror)", () => {
+  const facts = (specs: Array<[boolean, boolean]>) =>
+    specs.map(([isInboundFeeTransfer, isValueMoving]) => ({
+      isInboundFeeTransfer,
+      isValueMoving,
+    }));
+
+  it("one transfer, nothing value-moving after: conforms", () => {
+    // close, fee transfer
+    expect(feeRowStructureConforms(facts([[false, true], [true, false]]))).toBe(true);
+  });
+
+  it("keyless and Lighthouse-style instructions after the transfer pass", () => {
+    // close, fee transfer, keyless, lighthouse (1-acct assertion)
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [false, true],
+          [true, false],
+          [false, false],
+          [false, false],
+        ])
+      )
+    ).toBe(true);
+  });
+
+  it("split fee transfers fail structurally even when the sum is exact", () => {
+    const rents = [1_488_440, 1_488_440];
+    const arms = feeVerdictArms(rents);
+    expect(arms.floorOfTotal).toBe(29_768n);
+    // two transfers of 14,884 each sum exactly - but there are TWO
+    expect(feeConforms(29_768, rents)).toBe(true); // amount half passes
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [false, true],
+          [true, false],
+          [true, false],
+        ])
+      )
+    ).toBe(false); // structural half fails
+  });
+
+  it("a value-moving instruction riding after the transfer fails", () => {
+    // close, fee transfer, trailing close (the E405 wallet-appended
+    // close shape - value-moving, not keyless)
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [false, true],
+          [true, false],
+          [false, true],
+        ])
+      )
+    ).toBe(false);
+  });
+
+  it("the transfer riding BEFORE the closes fails", () => {
+    // fee transfer first, then closes: the transfer is not last
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [true, false],
+          [false, true],
+          [false, true],
+        ])
+      )
+    ).toBe(false);
+  });
+
+  it("no fee transfer at all fails", () => {
+    expect(feeRowStructureConforms(facts([[false, true]]))).toBe(false);
   });
 });

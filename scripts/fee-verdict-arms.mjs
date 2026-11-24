@@ -36,3 +36,54 @@ export function feeConforms(lamports, perAccountRents) {
   const fee = BigInt(lamports);
   return fee === arms.floorOfTotal || fee === arms.sumOfFloors;
 }
+
+// The structural half of the fee rule (audit finding 3, escalated;
+// owner ruling 2026-11-23, option e - value-inert tail): the fee is
+// ONE transfer riding LAST. A fee-bearing transaction conforms
+// structurally when exactly one inbound transfer to the fee wallet
+// exists, positioned after every close/burn/BurnNft instruction, with
+// nothing value-moving after it: no system transfer to any
+// destination, no token close, no token burn, no BurnNft - nothing
+// that moves lamports or destroys accounts. Keyless wallet-appended
+// instructions (compute budget) pass; third-party assertion
+// instructions that move nothing (the Lighthouse security tool's
+// checks, census 463 of 463) pass. Runs on OUTER instructions only:
+// CPI closes are the BurnNft program's own business. Honest boundary,
+// on the record: this polices the detectable lamport-movement and
+// account-destruction shapes only, not arbitrary behavior of an
+// upgradable third-party program; the wallet's pre-signature display
+// remains the first line of defense.
+//
+// Mirrors the TS copy in src/lib/solana/feeLedger.ts
+// (structuralConformance), the same deliberate two-implementation
+// pattern as the rest of the operator tooling: scripts and product
+// code agree on the rule, each written for its own decoding pipeline.
+
+/**
+ * @param feeTransferIndexes - wire-order indexes of inbound System
+ *   transfers INTO the fee wallet
+ * @param valueMovingIndexes - wire-order indexes of the value-moving
+ *   shapes (system transfer to any destination, token close, token
+ *   burn, Metaplex BurnNft)
+ * @returns true when exactly one fee transfer exists and no
+ *   value-moving instruction rides after it
+ */
+export function structuralConforms(feeTransferIndexes, valueMovingIndexes) {
+  if (feeTransferIndexes.length !== 1) return false;
+  const feeIdx = feeTransferIndexes[0];
+  return !valueMovingIndexes.some((i) => i > feeIdx);
+}
+
+/**
+ * Convenience wrapper: takes per-instruction facts in wire order.
+ * @param ixFacts - array of { isInboundFeeTransfer, isValueMoving }
+ */
+export function feeRowStructureConforms(ixFacts) {
+  const feeIdxs = [];
+  const moving = [];
+  ixFacts.forEach((f, i) => {
+    if (f.isInboundFeeTransfer) feeIdxs.push(i);
+    if (f.isValueMoving) moving.push(i);
+  });
+  return structuralConforms(feeIdxs, moving);
+}

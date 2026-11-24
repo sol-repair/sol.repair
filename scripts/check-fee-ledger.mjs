@@ -35,7 +35,7 @@ import { readFileSync } from "node:fs";
 
 import bs58 from "bs58";
 
-import { feeConforms } from "./fee-verdict-arms.mjs";
+import { feeConforms, feeRowStructureConforms } from "./fee-verdict-arms.mjs";
 
 const FEE_WALLET = "6qhajWTtUKadkMaumpADGBkmPkASiwXRqGtqd8ypL74K";
 
@@ -185,6 +185,34 @@ function decodeIx(ix, accountKeys) {
   return { programId, accounts, data };
 }
 
+// Per-instruction facts for the structural check (finding 3,
+// escalated): is this instruction an inbound fee transfer, and is it
+// value-moving (a system transfer to any destination, a token
+// close/burn, or a Metaplex BurnNft)?
+function ixFacts(ix) {
+  let dataLen = 0;
+  let firstByte = null;
+  if (ix.data && ix.data.length > 0) {
+    dataLen = ix.data.length;
+    firstByte = ix.data[0];
+  }
+  const isTokenProgram =
+    ix.programId === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" ||
+    ix.programId === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+  return {
+    isInboundFeeTransfer: inboundLamports(ix) > 0,
+    isValueMoving:
+      (ix.programId === "11111111111111111111111111111111" &&
+        dataLen >= 4 &&
+        (ix.data.readUInt32LE(0) === 2 || ix.data.readUInt32LE(0) === 11)) ||
+      (isTokenProgram && firstByte === 9) ||
+      (isTokenProgram && firstByte === 8 && dataLen === 9) ||
+      (ix.programId === "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s" &&
+        dataLen === 1 &&
+        firstByte === 29),
+  };
+}
+
 // Lamports moved INTO the fee wallet by one instruction, or 0.
 function inboundLamports(ix) {
   if (ix.programId !== SYSTEM_PROGRAM || ix.data.length < 12) return 0;
@@ -297,9 +325,13 @@ for (const entry of sigs) {
     typeof k === "string" ? k : k.pubkey
   );
   const ixs = [];
+  const outerIxs = [];
   for (const ix of tx.transaction.message.instructions ?? []) {
     const d = decodeIx(ix, accountKeys);
-    if (d) ixs.push(d);
+    if (d) {
+      ixs.push(d);
+      outerIxs.push(d);
+    }
   }
   for (const group of tx.meta?.innerInstructions ?? []) {
     for (const ix of group.instructions ?? []) {
@@ -371,7 +403,8 @@ for (const entry of sigs) {
       continue;
     }
     const expected = Math.floor(rent / 100);
-    if (!feeConforms(lamports, perAccount)) {
+    if (!feeConforms(lamports, perAccount) ||
+        !feeRowStructureConforms(outerIxs.map((ix) => ixFacts(ix)))) {
       violations.push({ signature: entry.signature, lamports, rent, expected });
     }
     await sleep(TX_PACING_MS);
@@ -428,7 +461,8 @@ for (const entry of sigs) {
     continue;
   }
   const expected = Math.floor(rent / 100);
-  if (!feeConforms(lamports, perAccount)) {
+  if (!feeConforms(lamports, perAccount) ||
+      !feeRowStructureConforms(outerIxs.map((ix) => ixFacts(ix)))) {
     violations.push({ signature: entry.signature, lamports, rent, expected });
   }
   await sleep(TX_PACING_MS);

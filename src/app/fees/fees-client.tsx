@@ -111,7 +111,10 @@ export default function FeesPage() {
           produces: token-account closes with a transfer to the published
           fee address. Every row is checked against the fee rule: when the
           transferred amount is not exactly 1% of the SOL its closes
-          returned, the row is marked, not hidden. The signature is the
+          returned, or when the fee does not ride as exactly one transfer
+          positioned after every close the transaction makes, the row is
+          marked, not hidden. Wallet-added compute instructions may ride
+          after the fee; they move nothing. The signature is the
           receipt; judge for yourself.
         </p>
 
