@@ -44,15 +44,24 @@ export function feeConforms(lamports, perAccountRents) {
 // exists, positioned after every close/burn/BurnNft instruction, with
 // nothing value-moving after it - nothing that moves lamports or
 // destroys accounts. The value-moving set is the ONE unified
-// definition across all three implementations (auditor round 3,
+// definition across all three implementations (auditor rounds 3-4,
 // 2026-11-24; the app ledger, the bell, and the weekly counter may
-// differ in decoding but never in verdict): a system transfer to any
-// destination, funded system account creation (CreateAccount and
-// CreateAccountWithSeed), the nonce account's lamport-moving
-// instructions (WithdrawNonceAccount and InitializeNonceAccount - IN
-// per the explicit owner nonce ruling 2026-11-24; AdvanceNonce and
-// AuthorizeNonceAccount are OUT, no lamports move), a token close, a
-// token burn or BurnChecked (tag 15), and a Metaplex BurnNft.
+// differ in decoding but never in verdict or facts, pinned by
+// tests/feeWireFacts.test.ts): a system transfer to any destination
+// (tag 2 or 11), funded system account creation (CreateAccount,
+// CreateAccountWithSeed, and CreateAccountAllowPrefund - SIMD-0312
+// tag 13, value-moving unconditionally, its unfunded lamports-0
+// variant included by choice on the stricter side), the nonce
+// account's WithdrawNonceAccount (genuinely value-moving - it
+// empties the nonce account to a destination), and
+// InitializeNonceAccount - which transfers NO lamports (the account
+// must already be rent-exempt; the instruction only initializes
+// state) and is in the set as a DELIBERATELY PROHIBITED
+// STATE-INITIALIZATION INSTRUCTION, an explicit owner ruling
+// stricter than value-inertness requires; AdvanceNonce and
+// AuthorizeNonceAccount are OUT (no lamports move). Plus a token
+// close, a token burn or BurnChecked (tag 15), and a Metaplex
+// BurnNft.
 // Exactly-one is counted in transfer INSTRUCTIONS regardless of
 // amount (owner ruling 2026-11-24): a zero-lamport transfer to the
 // fee wallet counts toward the one. Keyless wallet-appended
@@ -76,8 +85,9 @@ export function feeConforms(lamports, perAccountRents) {
  *   ruling 2026-11-24: count transfer INSTRUCTIONS, not lamports)
  * @param valueMovingIndexes - wire-order indexes of the unified
  *   value-moving shapes (system transfer to any destination, funded
- *   account creation, nonce withdraw/initialize, token close, token
- *   burn or BurnChecked, Metaplex BurnNft)
+ *   account creation including AllowPrefund, nonce withdraw and the
+ *   prohibited nonce initialize, token close, token burn or
+ *   BurnChecked, Metaplex BurnNft)
  * @returns true when exactly one fee transfer exists and no
  *   value-moving instruction rides after it
  */

@@ -2082,4 +2082,46 @@ describe("the structural half of the fee rule (finding 3, escalated; value-inert
     expect(row.onePercentMatch).toBe(false);
   });
 
+  // ---- Auditor round 4 (2026-11-24): tag 13 CreateAccountAllowPrefund
+  // (SIMD-0312, live on mainnet) and the TransferWithSeed pin.
+
+  /** CreateAccountAllowPrefund, hand-rolled: SIMD-0312 (status
+   *  Activated) gives it discriminant 13 with CreateAccount's data
+   *  layout (u32 tag + u64 lamports + u64 space + Pubkey owner = 52
+   *  bytes) and an OPTIONAL funding account at index 1, required only
+   *  when lamports > 0 - it transfers those lamports to the new
+   *  account. The installed @solana/web3.js 1.99.0 does not know this
+   *  instruction (zero AllowPrefund references); mainnet activation
+   *  2026-05-29 (Agave 4.0 cycle). */
+  function allowPrefundIx(lamports: number): TransactionInstruction {
+    const data = Buffer.alloc(52);
+    data.writeUInt32LE(13, 0);
+    data.writeBigUInt64LE(BigInt(lamports), 4);
+    data.writeBigUInt64LE(BigInt(165), 12);
+    Buffer.from(Keypair.generate().publicKey.toBytes()).copy(data, 20);
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+      ],
+      programId: SystemProgram.programId,
+      data,
+    });
+  }
+
+  it("a trailing funded CreateAccountAllowPrefund FAILS structurally (SIMD-0312 tag 13)", () => {
+    const row = trailingRiderRow(allowPrefundIx(1_000_000), "trailing-allow-prefund");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing UNFUNDED CreateAccountAllowPrefund FAILS structurally too (lamports 0, classified value-moving by choice, stricter side)", () => {
+    const row = trailingRiderRow(allowPrefundIx(0), "trailing-allow-prefund-unfunded");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing system TransferWithSeed to another destination FAILS structurally (pin)", () => {
+    const row = trailingRiderRow(systemTransferWithSeed(SOMEONE_ELSE, 1), "trailing-xfer-seed");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
 });
