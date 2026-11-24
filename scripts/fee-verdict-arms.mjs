@@ -42,9 +42,20 @@ export function feeConforms(lamports, perAccountRents) {
 // ONE transfer riding LAST. A fee-bearing transaction conforms
 // structurally when exactly one inbound transfer to the fee wallet
 // exists, positioned after every close/burn/BurnNft instruction, with
-// nothing value-moving after it: no system transfer to any
-// destination, no token close, no token burn, no BurnNft - nothing
-// that moves lamports or destroys accounts. Keyless wallet-appended
+// nothing value-moving after it - nothing that moves lamports or
+// destroys accounts. The value-moving set is the ONE unified
+// definition across all three implementations (auditor round 3,
+// 2026-11-24; the app ledger, the bell, and the weekly counter may
+// differ in decoding but never in verdict): a system transfer to any
+// destination, funded system account creation (CreateAccount and
+// CreateAccountWithSeed), the nonce account's lamport-moving
+// instructions (WithdrawNonceAccount and InitializeNonceAccount - IN
+// per the explicit owner nonce ruling 2026-11-24; AdvanceNonce and
+// AuthorizeNonceAccount are OUT, no lamports move), a token close, a
+// token burn or BurnChecked (tag 15), and a Metaplex BurnNft.
+// Exactly-one is counted in transfer INSTRUCTIONS regardless of
+// amount (owner ruling 2026-11-24): a zero-lamport transfer to the
+// fee wallet counts toward the one. Keyless wallet-appended
 // instructions (compute budget) pass; third-party assertion
 // instructions that move nothing (the Lighthouse security tool's
 // checks, census 463 of 463) pass. Runs on OUTER instructions only:
@@ -61,10 +72,12 @@ export function feeConforms(lamports, perAccountRents) {
 
 /**
  * @param feeTransferIndexes - wire-order indexes of inbound System
- *   transfers INTO the fee wallet
- * @param valueMovingIndexes - wire-order indexes of the value-moving
- *   shapes (system transfer to any destination, token close, token
- *   burn, Metaplex BurnNft)
+ *   transfers INTO the fee wallet, regardless of amount (owner
+ *   ruling 2026-11-24: count transfer INSTRUCTIONS, not lamports)
+ * @param valueMovingIndexes - wire-order indexes of the unified
+ *   value-moving shapes (system transfer to any destination, funded
+ *   account creation, nonce withdraw/initialize, token close, token
+ *   burn or BurnChecked, Metaplex BurnNft)
  * @returns true when exactly one fee transfer exists and no
  *   value-moving instruction rides after it
  */

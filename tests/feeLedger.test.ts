@@ -50,6 +50,7 @@ import {
   formatBlockTime,
   formatLamportsSol,
   isKnownTestFee,
+  structuralConformance,
   type RawTransaction,
 } from "@/lib/solana/feeLedger";
 import { TOKEN_PROGRAM_ID } from "@/lib/solana/tokenAccounts";
@@ -1879,6 +1880,206 @@ describe("the structural half of the fee rule (finding 3, escalated; value-inert
       FEE_WALLET
     );
     expect(rows[0].onePercentMatch).toBe(false);
+  });
+
+  // ---- Auditor round 3 (2026-11-24): BurnChecked, the unified
+  // System Program value-moving set, and the zero-lamport ruling.
+
+  /** BurnChecked: tag 15 + u64 amount + u8 decimals, exactly 10 data
+   *  bytes. Verified against the installed @solana/spl-token source:
+   *  src/instructions/types.ts (TokenInstruction.BurnChecked = 15) and
+   *  src/instructions/burnChecked.ts (u8 instruction, u64 amount, u8
+   *  decimals). */
+  function burnCheckedIxFor(account: PublicKey, programId: PublicKey): TransactionInstruction {
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: AUDIT_OWNER, isSigner: true, isWritable: false },
+      ],
+      programId,
+      data: Buffer.from([15, 1, 0, 0, 0, 0, 0, 0, 0, 9]),
+    });
+  }
+
+  function createAccountIx(): TransactionInstruction {
+    return SystemProgram.createAccount({
+      fromPubkey: AUDIT_OWNER,
+      newAccountPubkey: Keypair.generate().publicKey,
+      lamports: 1_000_000,
+      space: 165,
+      programId: SystemProgram.programId,
+    });
+  }
+
+  function createWithSeedIx(): TransactionInstruction {
+    return SystemProgram.createAccountWithSeed({
+      fromPubkey: AUDIT_OWNER,
+      basePubkey: AUDIT_OWNER,
+      seed: "sol-repair",
+      newAccountPubkey: Keypair.generate().publicKey,
+      lamports: 1_000_000,
+      space: 165,
+      programId: SystemProgram.programId,
+    });
+  }
+
+  function withdrawNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceWithdraw({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+      toPubkey: Keypair.generate().publicKey,
+      lamports: 1_000_000,
+    });
+  }
+
+  function initializeNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceInitialize({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+    });
+  }
+
+  function advanceNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceAdvance({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+    });
+  }
+
+  function authorizeNonceIx(): TransactionInstruction {
+    return SystemProgram.nonceAuthorize({
+      noncePubkey: Keypair.generate().publicKey,
+      authorizedPubkey: AUDIT_OWNER,
+      newAuthorizedPubkey: Keypair.generate().publicKey,
+    });
+  }
+
+  /** The trailing-instruction wires all share one base: one close with
+   *  rent 2,039,280, the exact fee 20,392, then the instruction under
+   *  test. Non-close riders contribute no rent, so the amount half
+   *  stays exact and only the structural half can fail. */
+  function trailingRiderRow(
+    rider: TransactionInstruction,
+    label: string
+  ): { lamports: number; onePercentMatch: boolean | null } {
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      rider,
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions([{ signature: label, raw }], FEE_WALLET);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lamports).toBe(20_392);
+    return rows[0];
+  }
+
+  it("a trailing BurnChecked on the Token program FAILS structurally", () => {
+    const row = trailingRiderRow(
+      burnCheckedIxFor(Keypair.generate().publicKey, TOKEN_PROGRAM_ID),
+      "trailing-burnchecked"
+    );
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing BurnChecked on Token-2022 FAILS structurally", () => {
+    const row = trailingRiderRow(
+      burnCheckedIxFor(Keypair.generate().publicKey, TOKEN_2022_PROGRAM_ID),
+      "trailing-burnchecked-t22"
+    );
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a BurnChecked BEFORE the fee passes (a legitimate pre-fee operation)", () => {
+    // The shipped dust flow itself burns then closes: a burn riding
+    // before the fee is the product's own honest shape, never a flag.
+    const account = Keypair.generate().publicKey;
+    const { raw, message } = buildLegacyRaw([
+      burnCheckedIxFor(account, TOKEN_PROGRAM_ID),
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+    ]);
+    raw.meta!.preBalances = preBalancesLocal(message, [account], [2_039_280]);
+    const rows = feeRowsFromRawTransactions(
+      [{ signature: "burnchecked-before-fee", raw }],
+      FEE_WALLET
+    );
+    expect(rows[0].lamports).toBe(20_392);
+    expect(rows[0].onePercentMatch).toBe(true);
+  });
+
+  it("a funded trailing CreateAccount FAILS structurally", () => {
+    const row = trailingRiderRow(createAccountIx(), "trailing-create");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing CreateAccountWithSeed FAILS structurally", () => {
+    const row = trailingRiderRow(createWithSeedIx(), "trailing-create-seed");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing WithdrawNonceAccount FAILS structurally", () => {
+    const row = trailingRiderRow(withdrawNonceIx(), "trailing-nonce-withdraw");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("a trailing InitializeNonceAccount FAILS structurally", () => {
+    const row = trailingRiderRow(initializeNonceIx(), "trailing-nonce-init");
+    expect(row.onePercentMatch).toBe(false);
+  });
+
+  it("AdvanceNonceAccount and AuthorizeNonceAccount after the fee pass (owner ruling 2026-11-24: no lamports move)", () => {
+    const advanceRow = trailingRiderRow(advanceNonceIx(), "after-advance-nonce");
+    expect(advanceRow.onePercentMatch).toBe(true);
+    const authorizeRow = trailingRiderRow(authorizeNonceIx(), "after-authorize-nonce");
+    expect(authorizeRow.onePercentMatch).toBe(true);
+  });
+
+  it("a zero-lamport transfer to the fee wallet counts as THE fee transfer (owner ruling 2026-11-24: count instructions, not amounts)", () => {
+    // The literal rule is exactly one inbound transfer INSTRUCTION. A
+    // zero-amount transfer to the fee wallet is one; before this
+    // ruling it was invisible, so a close followed only by a
+    // zero-amount transfer read as having no fee transfer at all.
+    const account = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 0),
+    ]);
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const structure = structuralConformance(
+      decoded!.instructions.slice(0, decoded!.outerInstructionCount),
+      FEE_WALLET
+    );
+    expect(structure.conform).toBe(true);
+  });
+
+  it("a second, zero-lamport transfer to the fee wallet breaks exact-one (split by instruction count)", () => {
+    const account = Keypair.generate().publicKey;
+    const { raw } = buildLegacyRaw([
+      closeIxFor(account),
+      systemTransfer(new PublicKey(FEE_WALLET), 20_392),
+      systemTransfer(new PublicKey(FEE_WALLET), 0),
+    ]);
+    const decoded = decodeRawTransaction(raw);
+    expect(decoded).not.toBeNull();
+    const structure = structuralConformance(
+      decoded!.instructions.slice(0, decoded!.outerInstructionCount),
+      FEE_WALLET
+    );
+    expect(structure.conform).toBe(false);
+    expect(structure.reason).toContain("2 inbound fee transfers");
+  });
+
+  it("a trailing zero-amount fee transfer fails the row verdict (pin)", () => {
+    // End-to-end pin of the same ruling: the amount half is exact, the
+    // structural half sees two inbound fee-transfer instructions.
+    const row = trailingRiderRow(
+      systemTransfer(new PublicKey(FEE_WALLET), 0),
+      "trailing-zero-fee-xfer"
+    );
+    expect(row.onePercentMatch).toBe(false);
   });
 
 });

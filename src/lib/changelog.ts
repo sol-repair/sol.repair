@@ -40,8 +40,11 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       "per-account sum a batch charges. The two readings differ by at " +
       "most 8 lamports per transaction at this batch size. The public " +
       "fee ledger now also checks the fee's shape: exactly one fee " +
-      "transfer, riding last after every close, with only wallet-added " +
-      "compute instructions riding after it. Every recorded row already " +
+      "transfer, riding last after every close, with nothing after it " +
+      "that could move lamports or destroy accounts; the only riders " +
+      "allowed there are wallet-added compute instructions and " +
+      "third-party security-tool assertions, which move nothing. Every " +
+      "recorded row already " +
       "satisfies this; nothing about past fees changed. Dead NFT " +
       "burns keep their own flow, one transaction per NFT.",
   },

@@ -1611,6 +1611,62 @@ describe("useBurnDust burnBatch (the batched burn-and-close, owner decision 2026
       "the RPC could not be reached to establish the outcome"
     );
   });
+
+  // The third batch-domain regression (auditor round 3, 2026-11-24):
+  // the expired-and-changed terminal carries the standing-chunk
+  // prefix too, like account-gone and unresolved above.
+  it("domain (expired, account changed) at chunk 2 of 3 reports the standing chunk", { timeout: 30000 }, async () => {
+    const candidates = makeCandidates(20);
+    const mintByPubkey = new Map(candidates.map((c) => [c.pubkey, c.mint]));
+    // Gate: all 20 pass. Chunk 1's verification reads: gone (verified).
+    // Chunk 2's canary corroboration read: the balance changed since
+    // the review (999 vs the reviewed 1000) -> the domain terminal.
+    let readCalls = 0;
+    mocks.conn.getParsedAccountInfo.mockImplementation(async (address: unknown) => {
+      const b58 =
+        typeof address === "string"
+          ? address
+          : (address as { toBase58?: () => string })?.toBase58?.();
+      readCalls += 1;
+      if (readCalls <= candidates.length) {
+        return readShape({
+          lamports: 1_488_440,
+          ...infoBody(mintByPubkey.get(b58 ?? "") ?? MINT.toBase58(), "1000", "initialized"),
+        });
+      }
+      if (readCalls <= candidates.length + 9) {
+        // chunk 1's per-account verification: the accounts are gone
+        return { value: null };
+      }
+      // chunk 2's corroboration: balance drifted from the review
+      return readShape({
+        lamports: 1_488_440,
+        ...infoBody(mintByPubkey.get(b58 ?? "") ?? MINT.toBase58(), "999", "initialized"),
+      });
+    });
+    // chunk 1: statuses resolve confirmed. chunk 2: status unobserved
+    // past the window -> corroboration judges the canary changed.
+    let statusCalls = 0;
+    mocks.conn.getSignatureStatuses.mockImplementation(async () => {
+      statusCalls += 1;
+      if (statusCalls === 1) return confirmedStatus();
+      return { value: [null] };
+    });
+    mocks.conn.getBlockHeight.mockResolvedValue(2000); // past window 1000
+    const { result } = renderHook(() => useBurnDust());
+    await act(async () => {
+      await result.current.burnBatch(candidates, false);
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.outcome).toBe("state-changed-since-review");
+    expect(result.current.error).toContain(
+      "1 of 3 transactions stand verified"
+    );
+    expect(result.current.error).toContain("9 of 20 accounts confirmed gone");
+    expect(result.current.error).toContain("changed since you reviewed it");
+    // chunk 1 landed and chunk 2 was submitted before the stop
+    expect(result.current.signatures).toHaveLength(2);
+  });
 });
 
 const TOKEN_OWNER_PLACEHOLDER = new PublicKey(

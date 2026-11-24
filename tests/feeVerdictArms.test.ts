@@ -153,4 +153,71 @@ describe("the structural half of the fee rule (helper mirror)", () => {
   it("no fee transfer at all fails", () => {
     expect(feeRowStructureConforms(facts([[false, true]]))).toBe(false);
   });
+
+  // ---- Auditor round 3 (2026-11-24) cross-implementation pins: the
+  // same synthetic wires as feeLedger.test.ts's round-3 block, stated
+  // as facts. The three implementations (app ledger, bell, counter)
+  // decode differently but must never differ in verdict.
+
+  it("trailing BurnChecked / CreateAccount / CreateAccountWithSeed / WithdrawNonceAccount / InitializeNonceAccount all fail (the unified value-moving set)", () => {
+    // close, fee transfer, then one unified-set rider. Mirrors
+    // feeLedger.test.ts's trailing-burnchecked, trailing-create,
+    // trailing-create-seed, trailing-nonce-withdraw, trailing-nonce-init.
+    const rider = facts([
+      [false, true],
+      [true, false],
+      [false, true],
+    ]);
+    expect(feeRowStructureConforms(rider)).toBe(false);
+  });
+
+  it("BurnChecked before the fee passes (facts mirror of the pre-fee wire)", () => {
+    // BurnChecked, close, fee transfer: the shipped flow's own
+    // burn-then-close shape.
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [false, true],
+          [false, true],
+          [true, false],
+        ])
+      )
+    ).toBe(true);
+  });
+
+  it("advance/authorize nonce facts after the transfer pass (owner ruling: no lamports move)", () => {
+    // close, fee transfer, advanceNonce or authorizeNonce. The owner's
+    // 2026-11-24 ruling keeps both OUT of the value-moving set.
+    const rider = facts([
+      [false, true],
+      [true, false],
+      [false, false],
+    ]);
+    expect(feeRowStructureConforms(rider)).toBe(true);
+  });
+
+  it("a zero-amount inbound transfer counts toward exact-one (owner ruling: count instructions, not amounts)", () => {
+    // close, zero-amount fee transfer: one inbound fee-transfer
+    // INSTRUCTION, nothing after it -> conforms (mirrors the
+    // structuralConformance zero-lamport test in feeLedger.test.ts).
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [false, true],
+          [true, false],
+        ])
+      )
+    ).toBe(true);
+    // close, exact fee, second zero-amount transfer to the fee wallet:
+    // two inbound fee-transfer instructions -> split -> fails.
+    expect(
+      feeRowStructureConforms(
+        facts([
+          [false, true],
+          [true, false],
+          [true, false],
+        ])
+      )
+    ).toBe(false);
+  });
 });

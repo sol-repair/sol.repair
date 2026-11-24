@@ -226,6 +226,23 @@ const MPL_BURN_NFT_CLOSED_KEYS = [0, 3, 4] as const;
  * Both put the lamports u64 at byte offset 4. */
 const SYSTEM_TRANSFER_TAG = 2;
 const SYSTEM_TRANSFER_WITH_SEED_TAG = 11;
+// The rest of the value-moving System instruction set (auditor round
+// 3, 2026-11-24 - ONE unified definition across all three
+// implementations: this ledger, the anomaly bell, the weekly counter).
+// Tags verified against the installed @solana/web3.js 1.99.0 source
+// (node_modules/@solana/web3.js/src/programs/system.ts,
+// SYSTEM_INSTRUCTION_LAYOUTS): Create index 0, Assign 1, Transfer 2,
+// CreateWithSeed 3, AdvanceNonceAccount 4, WithdrawNonceAccount 5,
+// InitializeNonceAccount 6, AuthorizeNonceAccount 7, Allocate 8,
+// AllocateWithSeed 9, AssignWithSeed 10, TransferWithSeed 11.
+// Explicit owner nonce ruling 2026-11-24: WithdrawNonceAccount (5)
+// and InitializeNonceAccount (6) are IN - they are part of moving
+// a nonce account's lamports; AdvanceNonceAccount (4) and
+// AuthorizeNonceAccount (7) are OUT - no lamports move.
+const SYSTEM_CREATE_TAG = 0;
+const SYSTEM_CREATE_WITH_SEED_TAG = 3;
+const SYSTEM_WITHDRAW_NONCE_TAG = 5;
+const SYSTEM_INITIALIZE_NONCE_TAG = 6;
 
 function readU32LE(data: Uint8Array): number {
   return new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
@@ -566,6 +583,27 @@ function inboundTransferLamports(
   return Number.isSafeInteger(lamports) && lamports > 0 ? lamports : 0;
 }
 
+/** True when the instruction is an inbound System transfer INTO the
+ *  fee wallet, regardless of its amount (owner ruling 2026-11-24:
+ *  the literal rule counts transfer INSTRUCTIONS - a zero-lamport
+ *  transfer to the fee wallet counts toward exactly-one; the amount
+ *  check itself is unchanged and still reads lamports). */
+function isInboundFeeTransferInstruction(
+  ix: DecodedInstruction,
+  feeWallet: string
+): boolean {
+  if (ix.programId !== SystemProgram.programId.toBase58()) return false;
+  if (ix.data.length < 12) return false;
+  const tag = readU32LE(ix.data);
+  const destination =
+    tag === SYSTEM_TRANSFER_TAG
+      ? ix.accountPubkeys[1]
+      : tag === SYSTEM_TRANSFER_WITH_SEED_TAG
+        ? ix.accountPubkeys[2]
+        : undefined;
+  return destination === feeWallet;
+}
+
 /** Per-account rent the transaction's fee-bearing instructions freed
  *  (the closed accounts' pre-tx lamports): each token-program
  *  closeAccount contributes its closed account's preBalance, and each
@@ -583,18 +621,25 @@ function inboundTransferLamports(
  *  structurally when exactly one inbound transfer to the fee wallet
  *  exists, it is positioned after every close/burn/BurnNft
  *  instruction, and every instruction positioned after it is
- *  VALUE-INERT: no system transfer to any destination, no token
- *  close, no token burn, no BurnNft - nothing that moves lamports or
- *  destroys accounts. Keyless wallet-appended instructions
- *  (compute budget) pass; third-party assertion instructions that
- *  move nothing (the Lighthouse security tool's checks, census 463
- *  of 463) pass. Runs on OUTER instructions only: CPI closes are
- *  the BurnNft program's own business and were never part of the
- *  wire-order census. Honest boundary, on the record: this polices
- *  the detectable lamport-movement and account-destruction shapes
- *  only, not arbitrary behavior of an upgradable third-party
- *  program; the wallet's pre-signature display remains the first
- *  line of defense. */
+ *  VALUE-INERT: nothing that moves lamports or destroys accounts.
+ *  The value-moving set is the unified one (auditor round 3,
+ *  2026-11-24): a system transfer, funded account creation
+ *  (CreateAccount/CreateAccountWithSeed), nonce-account
+ *  withdraw/initialize, a token close, a token burn or BurnChecked,
+ *  or a BurnNft - see isValueMovingInstruction below.
+ *  Exactly-one is counted in INSTRUCTIONS regardless of amount
+ *  (owner ruling 2026-11-24): a zero-lamport transfer to the fee
+ *  wallet counts toward the one, so a stray second zero-amount
+ *  transfer is a split, never a pass. Keyless wallet-appended
+ *  instructions (compute budget) pass; third-party assertion
+ *  instructions that move nothing (the Lighthouse security tool's
+ *  checks, census 463 of 463) pass. Runs on OUTER instructions only:
+ *  CPI closes are the BurnNft program's own business and were never
+ *  part of the wire-order census. Honest boundary, on the record:
+ *  this polices the detectable lamport-movement and
+ *  account-destruction shapes only, not arbitrary behavior of an
+ *  upgradable third-party program; the wallet's pre-signature
+ *  display remains the first line of defense. */
 export function structuralConformance(
   instructions: DecodedInstruction[],
   feeWallet: string
@@ -605,7 +650,7 @@ export function structuralConformance(
   let firstMovingAfter = -1;
   for (let i = 0; i < instructions.length; i++) {
     const ix = instructions[i];
-    if (inboundTransferLamports(ix, feeWallet) > 0) {
+    if (isInboundFeeTransferInstruction(ix, feeWallet)) {
       feeTransferCount += 1;
       feeTransferIndex = i;
     }
@@ -643,10 +688,22 @@ export function structuralConformance(
   };
 }
 
-/** The value-moving shapes the tail rule polices, per the ruling's
- *  enumerated list: a system transfer to any destination (tag 2 or
- *  11), a token-program closeAccount (tag 9) or burn (tag 8), and
- *  the Metaplex BurnNft (tag 29). */
+/** The value-moving shapes the tail rule polices - the ONE unified
+ *  definition across all three implementations (auditor round 3,
+ *  2026-11-24; the app ledger, the bell, and the weekly counter may
+ *  differ in decoding but never in verdict): a system transfer to any
+ *  destination (tag 2 or 11), funded system account creation
+ *  (CreateAccount tag 0, CreateAccountWithSeed tag 3), the nonce
+ *  account's lamport-moving instructions (WithdrawNonceAccount tag 5,
+ *  InitializeNonceAccount tag 6 - IN per the owner nonce ruling
+ *  2026-11-24; AdvanceNonce tag 4 and AuthorizeNonceAccount tag 7 are
+ *  OUT, no lamports move), a token-program closeAccount (tag 9), a
+ *  token burn (tag 8) or BurnChecked (tag 15), and the Metaplex
+ *  BurnNft (tag 29). All System tags verified against the installed
+ *  @solana/web3.js 1.99.0 source (SYSTEM_INSTRUCTION_LAYOUTS in
+ *  src/programs/system.ts); the token tags against the installed
+ *  @solana/spl-token source (TokenInstruction in
+ *  src/instructions/types.ts). */
 function isValueMovingInstruction(ix: DecodedInstruction): boolean {
   if (
     ix.programId === SystemProgram.programId.toBase58() &&
@@ -655,7 +712,11 @@ function isValueMovingInstruction(ix: DecodedInstruction): boolean {
     const tag = readU32LE(ix.data);
     if (
       tag === SYSTEM_TRANSFER_TAG ||
-      tag === SYSTEM_TRANSFER_WITH_SEED_TAG
+      tag === SYSTEM_TRANSFER_WITH_SEED_TAG ||
+      tag === SYSTEM_CREATE_TAG ||
+      tag === SYSTEM_CREATE_WITH_SEED_TAG ||
+      tag === SYSTEM_WITHDRAW_NONCE_TAG ||
+      tag === SYSTEM_INITIALIZE_NONCE_TAG
     ) {
       return true;
     }
@@ -666,7 +727,17 @@ function isValueMovingInstruction(ix: DecodedInstruction): boolean {
     ix.data.length >= 1
   ) {
     // closeAccount: the tag byte alone. burn: tag + u64 amount.
-    if (ix.data[0] === 9 || (ix.data[0] === 8 && ix.data.length === 9)) {
+    // BurnChecked (tag 15, auditor round 3 2026-11-24): tag + u64
+    // amount + u8 decimals, exactly 10 bytes - verified against the
+    // installed @solana/spl-token source
+    // (src/instructions/types.ts: TokenInstruction.BurnChecked = 15;
+    // src/instructions/burnChecked.ts: u8 instruction, u64 amount,
+    // u8 decimals).
+    if (
+      ix.data[0] === 9 ||
+      (ix.data[0] === 8 && ix.data.length === 9) ||
+      (ix.data[0] === 15 && ix.data.length === 10)
+    ) {
       return true;
     }
   }

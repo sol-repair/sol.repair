@@ -68,6 +68,21 @@ const TOKEN_PROGRAMS = new Set([
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
 ]);
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+// The value-moving System instruction tags - the ONE unified
+// definition across all three implementations (auditor round 3,
+// 2026-11-24; the app ledger, this bell, and the weekly counter may
+// differ in decoding but never in verdict). Tags verified against the
+// installed @solana/web3.js 1.99.0 source
+// (node_modules/@solana/web3.js/src/programs/system.ts,
+// SYSTEM_INSTRUCTION_LAYOUTS): Create index 0, Assign 1, Transfer 2,
+// CreateWithSeed 3, AdvanceNonceAccount 4, WithdrawNonceAccount 5,
+// InitializeNonceAccount 6, AuthorizeNonceAccount 7, Allocate 8,
+// AllocateWithSeed 9, AssignWithSeed 10, TransferWithSeed 11.
+// Explicit owner nonce ruling 2026-11-24: WithdrawNonceAccount (5)
+// and InitializeNonceAccount (6) are IN - they are part of moving a
+// nonce account's lamports; AdvanceNonceAccount (4) and
+// AuthorizeNonceAccount (7) are OUT - no lamports move.
+const SYSTEM_VALUE_MOVING_TAGS = new Set([0, 2, 3, 5, 6, 11]);
 // The Metaplex Token Metadata program and its BurnNft instruction (tag
 // 29, one data byte): the dead-NFT burn-and-close whose three closes
 // (metadata PDA, token account, master edition PDA - the instruction's
@@ -186,9 +201,11 @@ function decodeIx(ix, accountKeys) {
 }
 
 // Per-instruction facts for the structural check (finding 3,
-// escalated): is this instruction an inbound fee transfer, and is it
-// value-moving (a system transfer to any destination, a token
-// close/burn, or a Metaplex BurnNft)?
+// escalated; unified value-moving set, auditor round 3 2026-11-24):
+// is this instruction an inbound fee transfer, and is it value-moving
+// (a system transfer, funded system account creation, nonce-account
+// withdraw/initialize, a token close/burn/BurnChecked, or a Metaplex
+// BurnNft)?
 function ixFacts(ix) {
   let dataLen = 0;
   let firstByte = null;
@@ -200,17 +217,39 @@ function ixFacts(ix) {
     ix.programId === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" ||
     ix.programId === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
   return {
-    isInboundFeeTransfer: inboundLamports(ix) > 0,
+    // Owner ruling 2026-11-24: the literal rule counts inbound
+    // transfer INSTRUCTIONS regardless of amount - a zero-lamport
+    // transfer to the fee wallet counts toward exactly-one. The
+    // amount check itself (inboundLamports) is unchanged.
+    isInboundFeeTransfer: isInboundFeeTransferToWallet(ix),
     isValueMoving:
       (ix.programId === "11111111111111111111111111111111" &&
         dataLen >= 4 &&
-        (ix.data.readUInt32LE(0) === 2 || ix.data.readUInt32LE(0) === 11)) ||
+        SYSTEM_VALUE_MOVING_TAGS.has(ix.data.readUInt32LE(0))) ||
       (isTokenProgram && firstByte === 9) ||
       (isTokenProgram && firstByte === 8 && dataLen === 9) ||
+      // BurnChecked: tag 15 + u64 amount + u8 decimals, exactly 10
+      // bytes (auditor round 3 2026-11-24; verified against the
+      // installed @solana/spl-token source: TokenInstruction
+      // .BurnChecked = 15 in src/instructions/types.ts, the u8/u64/u8
+      // layout in src/instructions/burnChecked.ts).
+      (isTokenProgram && firstByte === 15 && dataLen === 10) ||
       (ix.programId === "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s" &&
         dataLen === 1 &&
         firstByte === 29),
   };
+}
+
+// True when the instruction transfers INTO the fee wallet, regardless
+// of amount (owner ruling 2026-11-24: count instructions, not
+// amounts). The lamports figure for the amount check keeps coming
+// from inboundLamports below.
+function isInboundFeeTransferToWallet(ix) {
+  if (ix.programId !== SYSTEM_PROGRAM || ix.data.length < 12) return false;
+  const tag = ix.data.readUInt32LE(0);
+  const destination =
+    tag === 2 ? ix.accounts[1] : tag === 11 ? ix.accounts[2] : undefined;
+  return destination === FEE_WALLET;
 }
 
 // Lamports moved INTO the fee wallet by one instruction, or 0.

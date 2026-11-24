@@ -113,9 +113,11 @@ export default function FeesPage() {
           transferred amount is not exactly 1% of the SOL its closes
           returned, or when the fee does not ride as exactly one transfer
           positioned after every close the transaction makes, the row is
-          marked, not hidden. Wallet-added compute instructions may ride
-          after the fee; they move nothing. The signature is the
-          receipt; judge for yourself.
+          marked, not hidden. Nothing may ride after the fee that could
+          move lamports or destroy accounts; the only riders allowed there
+          are wallet-added compute instructions and third-party
+          security-tool assertions, which move nothing. The signature is
+          the receipt; judge for yourself.
         </p>
 
         {/* The fee rules, side by side (G.3 spec §7.7 + the dust rule

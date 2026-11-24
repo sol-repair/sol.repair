@@ -236,6 +236,23 @@ for (const s of uniqueSigs) {
   }
   const feeAmt = feeXfers.reduce((acc, x) => acc + BigInt(x.parsed.info.lamports), 0n);
   organicRows++;
+  // The value-moving set - the ONE unified definition across all three
+  // implementations (auditor round 3, 2026-11-24; the app ledger, the
+  // bell, and this counter may differ in decoding but never in
+  // verdict). Parsed-type names verified against the authoritative
+  // RPC parser source (anza-xyz/agave
+  // transaction-status/src/parse_system.rs): createAccount,
+  // transfer, createAccountWithSeed, withdrawFromNonce,
+  // initializeNonce (the parser's names for WithdrawNonceAccount and
+  // InitializeNonceAccount); advanceNonce and authorizeNonce are NOT
+  // value-moving - explicit owner nonce ruling 2026-11-24, no
+  // lamports move. Token side (agave
+  // transaction-status/src/parse_token.rs): burn and burnChecked
+  // (BurnChecked tag 15 parsed as "burnChecked"; verified against the
+  // installed @solana/spl-token source, TokenInstruction.BurnChecked
+  // = 15). The inbound fee-transfer fact counts transfer INSTRUCTIONS
+  // regardless of amount (owner ruling 2026-11-24): parsed type
+  // "transfer" naming the fee wallet, whatever the lamports.
   const rowFacts = ix.map((i) => ({
     isInboundFeeTransfer:
       String(i.programId) === SYSTEM_PROGRAM &&
@@ -244,9 +261,12 @@ for (const s of uniqueSigs) {
     isValueMoving:
       (String(i.programId) === SYSTEM_PROGRAM &&
         (i.parsed?.type === "transfer" || i.parsed?.type === "createAccount" ||
-          i.parsed?.type === "createAccountWithSeed")) ||
+          i.parsed?.type === "createAccountWithSeed" ||
+          i.parsed?.type === "withdrawFromNonce" ||
+          i.parsed?.type === "initializeNonce")) ||
       i.parsed?.type === "closeAccount" ||
       i.parsed?.type === "burn" ||
+      i.parsed?.type === "burnChecked" ||
       (String(i.programId) === MPL_TOKEN_METADATA_PROGRAM &&
         (() => {
           try {

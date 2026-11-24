@@ -114,6 +114,22 @@ describe("fees page 1% conformance marker", () => {
       )
     ).toBeTruthy();
   });
+
+  it("states the value-inert tail: nothing that moves lamports or destroys accounts may ride after the fee, with the two named exceptions (auditor round 3)", () => {
+    mockHook([]);
+    render(<FeesPage />);
+
+    expect(
+      screen.getByText(
+        /Nothing may ride after the fee that could move lamports or destroy accounts/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /wallet-added compute instructions and third-party security-tool assertions, which move nothing/i
+      )
+    ).toBeTruthy();
+  });
 });
 
 describe("fees page: the unwrap rule beside the repair rule (G.3 §7.7, additive)", () => {
