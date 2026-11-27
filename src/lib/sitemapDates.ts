@@ -22,7 +22,7 @@
  */
 export const LAST_MODIFIED: Record<string, string> = {
   "/": "2026-11-14",
-  "/fees": "2026-11-24",
+  "/fees": "2026-11-27",
   "/understand": "2026-11-11",
   "/report": "2026-11-14",
   "/changelog": "2026-11-24",
