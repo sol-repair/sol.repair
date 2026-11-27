@@ -987,11 +987,28 @@ export type LedgerSignatureInfo = {
   blockTime: number | null;
 };
 
+/** One page of getSignaturesForAddress, hardened against failure shapes
+ *  that used to masquerade as data (whole-repository audit 2026-11-24,
+ *  finding 3): a null or non-array RPC result used to become a
+ *  valid-looking empty history - which both walk loops read as "wallet
+ *  history exhausted", caching an incomplete ledger as complete - and
+ *  records without a usable signature were silently filtered away,
+ *  invisible to the incomplete-history notice. Now the array shape is
+ *  required (anything else is an explicit RPC error), and malformed
+ *  records are rejected from the records but COUNTED, so the notice can
+ *  report them: data the RPC identified but this page cannot use is
+ *  never dropped silently. */
+export type LedgerSignaturePage = {
+  records: LedgerSignatureInfo[];
+  /** Records the RPC returned that carry no usable signature field. */
+  malformedRecordCount: number;
+};
+
 export async function fetchFeeSignatures(
   endpoint: string,
   feeWallet: string,
   before?: string
-): Promise<LedgerSignatureInfo[]> {
+): Promise<LedgerSignaturePage> {
   const params: unknown[] = [
     feeWallet,
     { limit: FEE_LEDGER_PAGE_SIZE, ...(before ? { before } : {}) },
@@ -1000,13 +1017,34 @@ export async function fetchFeeSignatures(
     endpoint,
     "getSignaturesForAddress",
     params
-  )) as Array<{ signature?: string; blockTime?: number | null }> | null;
-  return (result ?? [])
-    .filter((r) => typeof r.signature === "string")
-    .map((r) => ({
-      signature: r.signature as string,
-      blockTime: typeof r.blockTime === "number" ? r.blockTime : null,
-    }));
+  )) as unknown;
+  // An array response is required: a null (or any non-array) result is an
+  // RPC failure shape, never an empty page - an empty page means the walk
+  // stops and reports the history exhausted, so masking a failed read
+  // into one would cache an incomplete ledger as complete.
+  if (!Array.isArray(result)) {
+    throw new LedgerFetchError("rpc");
+  }
+  const records: LedgerSignatureInfo[] = [];
+  let malformedRecordCount = 0;
+  for (const record of result) {
+    const signature =
+      record !== null &&
+      typeof record === "object" &&
+      typeof (record as { signature?: unknown }).signature === "string"
+        ? ((record as { signature: string }).signature)
+        : null;
+    if (signature === null) {
+      malformedRecordCount += 1;
+      continue;
+    }
+    const blockTime = (record as { blockTime?: unknown }).blockTime;
+    records.push({
+      signature,
+      blockTime: typeof blockTime === "number" ? blockTime : null,
+    });
+  }
+  return { records, malformedRecordCount };
 }
 
 export async function fetchRawTransaction(
@@ -1099,6 +1137,13 @@ export type FeeLedgerPage = {
    *  counted. The page reports the count so the ledger can say its list
    *  can be incomplete instead of dropping rows silently. */
   unreadableSignatures: string[];
+  /** History entries the RPC returned that carry no usable signature
+   *  field (audit finding 3): rejected from the records, never silently
+   *  dropped - the incomplete-history notice reports this count. This
+   *  page is therefore never judged "history exhausted" while it is
+   *  nonzero: records the RPC identified but could not be used are not
+   *  the end of the wallet's history. */
+  malformedRecordCount: number;
 };
 
 /**
@@ -1111,7 +1156,11 @@ export async function fetchFeeLedgerPage(
   feeWallet: string,
   before?: string
 ): Promise<FeeLedgerPage> {
-  const signatures = await fetchFeeSignatures(endpoint, feeWallet, before);
+  const { records: signatures, malformedRecordCount } = await fetchFeeSignatures(
+    endpoint,
+    feeWallet,
+    before
+  );
   // A node can serve the same signature twice inside one page. Fetch and
   // decode each signature once (first occurrence wins, newest-first order
   // preserved) so a repeated fee never renders twice or double-counts.
@@ -1136,7 +1185,7 @@ export async function fetchFeeLedgerPage(
   );
   return {
     rows: feeRowsFromRawTransactions(entries, feeWallet),
-    rawSignatureCount: signatures.length,
+    rawSignatureCount: signatures.length + malformedRecordCount,
     lastRawSignature:
       signatures.length > 0
         ? signatures[signatures.length - 1].signature
@@ -1144,5 +1193,6 @@ export async function fetchFeeLedgerPage(
     unreadableSignatures: entries
       .filter(({ raw }) => raw === null || decodeRawTransaction(raw) === null)
       .map(({ signature }) => signature),
+    malformedRecordCount,
   };
 }

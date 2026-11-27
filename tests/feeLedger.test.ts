@@ -44,6 +44,7 @@ import {
 
 import {
   LedgerFetchError,
+  fetchFeeSignatures,
   decodeRawTransaction,
   feeRowsFromRawTransactions,
   fetchFeeLedgerPage,
@@ -2124,4 +2125,148 @@ describe("the structural half of the fee rule (finding 3, escalated; value-inert
     expect(row.onePercentMatch).toBe(false);
   });
 
+});
+
+describe("fetchFeeSignatures input hardening (whole-repo audit finding 3)", () => {
+  // The signature helper used to mask RPC failure shapes into a valid-looking
+  // empty history: a null result became [] (which the walk reads as "wallet
+  // history exhausted"), and records without a usable signature were silently
+  // filtered out - invisible to the incomplete-history notice. The hardened
+  // contract: an array response is required (anything else is an explicit RPC
+  // error), malformed records are rejected loudly and COUNTED (the page's
+  // incomplete-history notice reports them), and a conforming array behaves
+  // exactly as before.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubSigResult(result: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as { method: string };
+        if (body.method === "getSignaturesForAddress") {
+          return { ok: true, status: 200, json: async () => ({ result }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ result: null }) };
+      })
+    );
+  }
+
+  it("a null RPC result is an explicit RPC error, never an empty history", async () => {
+    stubSigResult(null);
+    await expect(
+      fetchFeeSignatures("https://rpc.example", FEE_WALLET)
+    ).rejects.toBeInstanceOf(LedgerFetchError);
+  });
+
+  it("a non-array RPC result is an explicit RPC error, never an empty history", async () => {
+    stubSigResult({ signature: "not-a-list" });
+    await expect(
+      fetchFeeSignatures("https://rpc.example", FEE_WALLET)
+    ).rejects.toBeInstanceOf(LedgerFetchError);
+  });
+
+  it("a conforming array behaves exactly as today", async () => {
+    stubSigResult([
+      { signature: "sig-a", blockTime: BLOCK_TIME },
+      { signature: "sig-b", blockTime: null },
+      { signature: "sig-c" },
+    ]);
+    const page = await fetchFeeSignatures("https://rpc.example", FEE_WALLET);
+    expect(page.records).toEqual([
+      { signature: "sig-a", blockTime: BLOCK_TIME },
+      { signature: "sig-b", blockTime: null },
+      { signature: "sig-c", blockTime: null },
+    ]);
+    expect(page.malformedRecordCount).toBe(0);
+  });
+
+  it("a malformed record is rejected loudly and counted, never silently dropped", async () => {
+    stubSigResult([
+      { signature: "sig-a", blockTime: BLOCK_TIME },
+      { blockTime: BLOCK_TIME }, // no signature field at all
+      { signature: 42, blockTime: BLOCK_TIME }, // signature is not a string
+    ]);
+    const page = await fetchFeeSignatures("https://rpc.example", FEE_WALLET);
+    expect(page.records).toEqual([{ signature: "sig-a", blockTime: BLOCK_TIME }]);
+    expect(page.malformedRecordCount).toBe(2);
+  });
+
+  it("a page of only malformed records counts them all and never reads as empty", async () => {
+    stubSigResult([{ blockTime: 1 }, { signature: null }, "garbage"]);
+    const page = await fetchFeeSignatures("https://rpc.example", FEE_WALLET);
+    expect(page.records).toEqual([]);
+    expect(page.malformedRecordCount).toBe(3);
+  });
+});
+
+describe("fetchFeeLedgerPage malformed-record accounting (whole-repo audit finding 3)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Stub fetch where getSignaturesForAddress returns the given RAW
+   *  records verbatim and getTransaction serves the fee fixtures. */
+  function stubRawRecords(
+    pages: { before?: string; records: unknown[]; fees: Record<string, number> }[]
+  ) {
+    const txs: Record<string, RawTransaction> = {};
+    for (const p of pages) {
+      for (const [sig, lamports] of Object.entries(p.fees)) {
+        txs[sig] = buildLegacyRaw([closeIx(), systemTransfer(new PublicKey(FEE_WALLET), lamports)]).raw;
+      }
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+        let result: unknown;
+        if (body.method === "getSignaturesForAddress") {
+          const before = (body.params[1] as { before?: string } | undefined)?.before;
+          const page = pages.find((p) => p.before === before);
+          result = page?.records ?? [];
+        } else {
+          result = txs[body.params[0] as string] ?? null;
+        }
+        return { ok: true, status: 200, json: async () => ({ result }) };
+      })
+    );
+  }
+
+  it("a page with a malformed record reports the count and keeps the conforming cursor", async () => {
+    // The malformed record sits OLDER than every conforming record on the
+    // page, so the cursor must come from the last CONFORMING record: the
+    // next page re-serves the malformed one rather than skipping past it.
+    stubRawRecords([
+      {
+        records: [
+          { signature: "s-1", blockTime: BLOCK_TIME },
+          { signature: "s-2", blockTime: BLOCK_TIME },
+          { blockTime: BLOCK_TIME }, // malformed: no usable signature
+        ],
+        fees: { "s-1": 20_392 },
+      },
+    ]);
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    expect(page.rows.map((r) => r.signature)).toEqual(["s-1"]);
+    expect(page.malformedRecordCount).toBe(1);
+    // Exactly what the RPC returned: two conforming + one malformed.
+    expect(page.rawSignatureCount).toBe(3);
+    expect(page.lastRawSignature).toBe("s-2");
+  });
+
+  it("an all-malformed page is judged by what the RPC returned, never as history exhausted", async () => {
+    stubRawRecords([
+      {
+        records: [{ signature: null }, { blockTime: 1 }],
+        fees: {},
+      },
+    ]);
+    const page = await fetchFeeLedgerPage("https://rpc.example", FEE_WALLET);
+    expect(page.rows).toEqual([]);
+    expect(page.malformedRecordCount).toBe(2);
+    expect(page.rawSignatureCount).toBe(2);
+    expect(page.lastRawSignature).toBeNull();
+  });
 });

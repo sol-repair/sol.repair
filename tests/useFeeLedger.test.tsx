@@ -427,7 +427,7 @@ describe("useFeeLedger unreadable accounting (audit F2)", () => {
     expect(result.current.unreadableCount).toBe(2);
   });
 
-  it("persists unreadable signatures in the v4 cache and rehydrates the count", async () => {
+  it("persists unreadable signatures in the cache and rehydrates the count", async () => {
     const jsonResponse = (result: unknown) => ({
       ok: true,
       status: 200,
@@ -472,7 +472,7 @@ describe("useFeeLedger unreadable accounting (audit F2)", () => {
     first.unmount();
 
     const cached = JSON.parse(
-      localStorage.getItem("solrepair:fee-ledger:v4:mainnet-beta") ?? "{}"
+      localStorage.getItem("solrepair:fee-ledger:v5:mainnet-beta") ?? "{}"
     );
     expect(cached.unreadableSignatures).toEqual(["m-2"]);
 
@@ -487,5 +487,152 @@ describe("useFeeLedger unreadable accounting (audit F2)", () => {
     });
     expect(second.result.current.unreadableCount).toBe(1);
     second.unmount();
+  });
+});
+
+describe("useFeeLedger malformed-record accounting (whole-repo audit finding 3)", () => {
+  // The signature page used to mask RPC failure shapes into a valid-looking
+  // empty history (a null result became [], which both walk loops read as
+  // "history exhausted" - a complete-looking ledger built from a failed
+  // read), and records without a usable signature were silently dropped,
+  // invisible to the incomplete-history notice. The hardened contract: the
+  // page reports what the RPC returned (records + malformed count), and the
+  // hook surfaces that count so the notice can report it.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const jsonResponse = (result: unknown) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ result }),
+  });
+
+  it("a page containing malformed records surfaces them to the notice count", async () => {
+    const txFor: Record<string, unknown> = {
+      "k-1": feeRawTx(MAINNET_WALLET, 20_392),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+          params: unknown[];
+        };
+        if (body.method === "getSignaturesForAddress") {
+          // One conforming record, one malformed (no usable signature).
+          return jsonResponse([
+            { signature: "k-1", blockTime: 1_755_577_001 },
+            { blockTime: 1_755_577_000 },
+          ]);
+        }
+        const sig = body.params[0] as string;
+        return jsonResponse(txFor[sig] ?? null);
+      })
+    );
+
+    const { result } = renderHook(() => useFeeLedger());
+    await act(async () => {
+      result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.rows.map((r) => r.signature)).toEqual(["k-1"]);
+    expect(result.current.malformedRecordCount).toBe(1);
+  });
+
+  it("an all-malformed page is never presented as a complete history", async () => {
+    // The RPC returned two records, both malformed: no rows, no usable
+    // cursor. The old contract turned this into [] - "wallet history
+    // exhausted" - a complete-looking ledger built from a failed read.
+    // The new contract keeps the page honest: the count reaches the
+    // notice, and the empty list is never the only story.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as { method: string };
+        if (body.method === "getSignaturesForAddress") {
+          return jsonResponse([{ signature: null }, { blockTime: 1 }]);
+        }
+        return jsonResponse(null);
+      })
+    );
+
+    const { result } = renderHook(() => useFeeLedger());
+    await act(async () => {
+      result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.rows).toEqual([]);
+    expect(result.current.malformedRecordCount).toBe(2);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("persists the malformed count in the cache and rehydrates it", async () => {
+    const txFor: Record<string, unknown> = {
+      "k-1": feeRawTx(MAINNET_WALLET, 20_392),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(String(init?.body)) as {
+          method: string;
+          params: unknown[];
+        };
+        if (body.method === "getSignaturesForAddress") {
+          const wallet = body.params[0] as string;
+          if (wallet === MAINNET_WALLET) {
+            return jsonResponse([
+              { signature: "k-1", blockTime: 1_755_577_001 },
+              { signature: 42 },
+            ]);
+          }
+          return jsonResponse([]);
+        }
+        const sig = body.params[0] as string;
+        return jsonResponse(txFor[sig] ?? null);
+      })
+    );
+
+    const first = renderHook(() => useFeeLedger());
+    await act(async () => {
+      first.result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(first.result.current.rows.map((r) => r.signature)).toEqual([
+        "k-1",
+      ]);
+    });
+    expect(first.result.current.malformedRecordCount).toBe(1);
+    first.unmount();
+
+    // A cached entry from before this field existed must never be read as
+    // "no malformed records": the cache version moves, so the stale entry
+    // is invalidated and the count comes back from a fresh fetch.
+    const second = renderHook(() => useFeeLedger());
+    await act(async () => {
+      second.result.current.setCluster("mainnet-beta");
+    });
+    await waitFor(() => {
+      expect(second.result.current.rows.map((r) => r.signature)).toEqual([
+        "k-1",
+      ]);
+    });
+    expect(second.result.current.malformedRecordCount).toBe(1);
+    second.unmount();
+
+    const cached = JSON.parse(
+      localStorage.getItem("solrepair:fee-ledger:v5:mainnet-beta") ?? "{}"
+    );
+    expect(cached.malformedRecordCount).toBe(1);
   });
 });

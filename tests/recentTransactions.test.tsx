@@ -91,10 +91,13 @@ describe("wallet recent transactions walk", () => {
 
   it("lists the wallet's newest signatures with dates when connected", async () => {
     mocks.wallet = connectedWallet();
-    mocks.fetchFeeSignatures.mockResolvedValue([
-      { signature: "SigOne1111111111111111111111111111111111111111", blockTime: 1789215763 },
-      { signature: "SigTwo2222222222222222222222222222222222222222", blockTime: null },
-    ]);
+    mocks.fetchFeeSignatures.mockResolvedValue({
+      records: [
+        { signature: "SigOne1111111111111111111111111111111111111111", blockTime: 1789215763 },
+        { signature: "SigTwo2222222222222222222222222222222222222222", blockTime: null },
+      ],
+      malformedRecordCount: 0,
+    });
     render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
     expect(
       await screen.findByText(/your most recent transactions/i)
@@ -114,9 +117,12 @@ describe("wallet recent transactions walk", () => {
 
   it("hands the chosen signature to the explainer and never signs anything", async () => {
     mocks.wallet = connectedWallet();
-    mocks.fetchFeeSignatures.mockResolvedValue([
-      { signature: "SigThree333333333333333333333333333333333333333", blockTime: 1789215763 },
-    ]);
+    mocks.fetchFeeSignatures.mockResolvedValue({
+      records: [
+        { signature: "SigThree333333333333333333333333333333333333333", blockTime: 1789215763 },
+      ],
+      malformedRecordCount: 0,
+    });
     render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
     const row = await screen.findByRole("button", { name: /SigThree…3333/ });
     fireEvent.click(row);
@@ -129,7 +135,7 @@ describe("wallet recent transactions walk", () => {
 
   it("says honestly when the wallet has no transactions on this network", async () => {
     mocks.wallet = connectedWallet();
-    mocks.fetchFeeSignatures.mockResolvedValue([]);
+    mocks.fetchFeeSignatures.mockResolvedValue({ records: [], malformedRecordCount: 0 });
     render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
     expect(
       await screen.findByText(/No transactions found for this wallet/i)
@@ -171,8 +177,8 @@ describe("wallet recent transactions walk", () => {
       },
     ];
     mocks.fetchFeeSignatures
-      .mockResolvedValueOnce(firstPage)
-      .mockResolvedValueOnce(secondPage);
+      .mockResolvedValueOnce({ records: firstPage, malformedRecordCount: 0 })
+      .mockResolvedValueOnce({ records: secondPage, malformedRecordCount: 0 });
     render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
 
     expect(await screen.findByRole("button", { name: /First000/ })).toBeTruthy();
@@ -191,13 +197,16 @@ describe("wallet recent transactions walk", () => {
 
   it("offers no load more button when the first page was short", async () => {
     mocks.wallet = connectedWallet();
-    mocks.fetchFeeSignatures.mockResolvedValue([
-      {
-        signature:
-          "OnlyOne000000000000000000000000000000000000000000000000",
-        blockTime: null,
-      },
-    ]);
+    mocks.fetchFeeSignatures.mockResolvedValue({
+      records: [
+        {
+          signature:
+            "OnlyOne000000000000000000000000000000000000000000000000",
+          blockTime: null,
+        },
+      ],
+      malformedRecordCount: 0,
+    });
     render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
     await screen.findByRole("button", { name: /OnlyOne0/ });
     expect(screen.queryByRole("button", { name: /load more/i })).toBeNull();
@@ -210,7 +219,7 @@ describe("wallet recent transactions walk", () => {
       blockTime: null,
     }));
     mocks.fetchFeeSignatures
-      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce({ records: firstPage, malformedRecordCount: 0 })
       .mockRejectedValueOnce(new Error("429 Connection rate limits exceeded"));
     render(<WalletRecentTransactions endpoint={ENDPOINT} onSelect={onSelect} />);
 
