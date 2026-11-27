@@ -100,6 +100,29 @@ export function buildCloseAccountInstructions(
 }
 
 /**
+ * Thrown by verifyAccountsClosed when the RPC's response cannot be
+ * trusted to describe every requested account: it is not an array, or it
+ * does not carry exactly one entry per requested pubkey. Nothing is
+ * classified on such a response. The index mapping in that function is
+ * only sound entry-for-pubkey; a response that left accounts out used to
+ * put them in neither list, so a caller rebuilding from "still open"
+ * dropped them from a retry while the run booked the whole batch closed
+ * (whole-repository audit 2026-11-24, finding 2).
+ */
+export class IncompleteVerificationError extends Error {
+  constructor(requested: number, returned: number | null) {
+    super(
+      `On-chain verification returned ${
+        returned === null
+          ? "a response that is not an array"
+          : `${returned} results`
+      } for ${requested} requested account${requested === 1 ? "" : "s"}; nothing was classified.`
+    );
+    this.name = "IncompleteVerificationError";
+  }
+}
+
+/**
  * Verify on-chain which token accounts are actually closed.
  *
  * Why this exists: some wallets (Phantom notably, when the user confirms a
@@ -139,9 +162,19 @@ export async function verifyAccountsClosed(
       // failure. Verify against the same view confirmation used.
       "confirmed"
     );
-    // getMultipleAccountsInfo returns one entry per input pubkey, in
-    // order (null where the account does not exist), so the chunk
-    // index maps straight back onto the accounts array.
+    // One entry per input pubkey, in order (null where the account does
+    // not exist) is the contract the index mapping below relies on. A
+    // conforming RPC always answers that way; verify it anyway BEFORE
+    // classifying anything, because the mapping silently misreads every
+    // other shape: an account missing from the response would land in
+    // neither list. An unreturned account is never read as closed, and
+    // never as safe to leave out of a retry.
+    if (!Array.isArray(infos) || infos.length !== chunk.length) {
+      throw new IncompleteVerificationError(
+        chunk.length,
+        Array.isArray(infos) ? infos.length : null
+      );
+    }
     infos.forEach((info, j) => {
       const account = accounts[i + j];
       // A closed token account either no longer exists (null - fully

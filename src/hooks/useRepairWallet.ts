@@ -38,7 +38,9 @@
  * "InvalidAccountData" because the accounts are ALREADY closed - a success,
  * not a failure. So before reporting any send/confirm error, we verify the
  * actual on-chain state via verifyAccountsClosed(). The chain is the only
- * source of truth.
+ * source of truth. A verification response that does not carry exactly one
+ * entry per requested account is refused outright: an account the RPC
+ * leaves out is never read as closed, and never left out of a retry.
  *
  * Stale scans get the same discipline: an on-chain failure whose batch shows
  * a proper subset already closed is reconciled like an expiry (rebuilt from
@@ -46,6 +48,14 @@
  * and the error report reads only the batch the run was executing - accounts
  * from batches the run never attempted are never credited to it, and the
  * report unions the confirmed bookkeeping instead of replacing it.
+ *
+ * The fee base is a fresh read, never the scan: immediately before each
+ * transaction is built (and again before a rebuilt retry), the batch's
+ * accounts are read in-lock and the 1% fee and the recovered figure follow
+ * the lamports the chain reports NOW. The scan's figure can age - a top-up,
+ * or a Token-2022 excess withdrawal, between scan and run - and a close
+ * returns what the account holds at execution. An unreadable read stops the
+ * run before anything is built; the scan's figure is never a fallback.
  *
  * This hook NEVER signs anything itself. It hands the unsigned transaction to
  * the wallet adapter, which hands it to Phantom for the user to approve.
@@ -56,7 +66,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 
 import { useRpcConnection } from "@/hooks/useRpcConnection";
 import bs58 from "bs58";
-import type { Connection } from "@solana/web3.js";
+import { PublicKey, type Connection } from "@solana/web3.js";
 
 import {
   buildCloseAccountInstructions,
@@ -221,6 +231,84 @@ class FriendlyError extends Error {}
  *  retry on it exactly as it does on an expiry. */
 class OnChainFailureError extends FriendlyError {}
 
+/** A FriendlyError thrown by the fresh-read gate: the batch's current
+ *  lamports could not be established, so nothing was built from a
+ *  guessed figure. Subclassed so the outer catch can name the cause on
+ *  the partial terminal too. `raw` is the underlying transport error's
+ *  text when there was one (null for a malformed response): it stays out
+ *  of the main line and reaches errorDetail, like every other raw text. */
+class GateUnreadableError extends FriendlyError {
+  constructor(readonly raw: string | null) {
+    super(
+      "The current account balances could not be read, so the repair stopped before building the next transaction. Run the repair again to finish the rest."
+    );
+  }
+}
+
+/** The same cause, as a suffix for the partial terminal, whose main line
+ *  ("stopped after N of M - run it again") would otherwise hide it. */
+const GATE_UNREADABLE_NOTE =
+  " The current account balances could not be read, so the repair stopped before building the next transaction.";
+
+/**
+ * The current lamports of each account in a batch, read in-lock
+ * immediately before the batch is built (whole-repository audit
+ * 2026-11-24, finding 1; the dust flow's gate discipline, and the fix
+ * b9e0c40 made there). A batch is at most MAX_CLOSE_INSTRUCTIONS_PER_TX
+ * accounts, under getMultipleAccountsInfo's 100-pubkey limit, so one
+ * request covers it.
+ *
+ * Reads at "confirmed": the view the repair's confirmation waits on and
+ * verification reads at.
+ *
+ * Returns pubkey -> lamports for every account the chain still has. An
+ * account the read reports gone has no current figure and is absent; the
+ * caller keeps the scan's, and its close fails atomically into the
+ * existing reconciliation.
+ *
+ * Throws GateUnreadableError - never a guessed or scan-era figure - when
+ * the response is not one entry per requested account, or an entry's
+ * lamports is not a non-negative whole number.
+ */
+async function readGateLamports(
+  connection: Connection,
+  accounts: ClosableAccount[]
+): Promise<Map<string, number>> {
+  // The response is validated as untrusted input, so it is held as
+  // unknown until each figure has been checked.
+  let infos: unknown;
+  try {
+    infos = await connection.getMultipleAccountsInfo(
+      accounts.map((a) => new PublicKey(a.pubkey)),
+      "confirmed"
+    );
+  } catch (error) {
+    // A rejected read is as unreadable as a malformed one. The raw
+    // transport text travels on the error for errorDetail, never for
+    // the main line.
+    throw new GateUnreadableError(
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+  if (!Array.isArray(infos) || infos.length !== accounts.length) {
+    throw new GateUnreadableError(null);
+  }
+  const lamports = new Map<string, number>();
+  infos.forEach((info: unknown, j: number) => {
+    if (info === null) return;
+    const figure = (info as { lamports?: unknown }).lamports;
+    if (
+      typeof figure !== "number" ||
+      !Number.isInteger(figure) ||
+      figure < 0
+    ) {
+      throw new GateUnreadableError(null);
+    }
+    lamports.set(accounts[j].pubkey, figure);
+  });
+  return lamports;
+}
+
 export function useRepairWallet() {
   const connection = useRpcConnection();
   const wallet = useWallet();
@@ -288,7 +376,8 @@ export function useRepairWallet() {
         const runAccounts = accounts.slice(0, MAX_ACCOUNTS_PER_RUN);
 
         // Rent per account pubkey, for computing recovered amounts from the
-        // set of accounts the chain says are actually closed.
+        // set of accounts the chain says are actually closed. Seeded from
+        // the scan; every gate read replaces a figure with the current one.
         const lamportsOf = new Map(
           runAccounts.map((a) => [a.pubkey, a.lamports])
         );
@@ -296,6 +385,24 @@ export function useRepairWallet() {
           let sum = 0n;
           for (const p of pubkeys) sum += BigInt(lamportsOf.get(p) ?? 0);
           return sum;
+        };
+
+        // The fresh-read gate: read a batch's current lamports in-lock (the
+        // action mutex is held for the whole run) and hand the builders the
+        // batch as the chain holds it NOW. The fee and the recovered figure
+        // follow these numbers, never the scan's. An account the read
+        // reports gone keeps its scan figure - there is no current one. An
+        // unreadable read throws and the run stops before anything is built.
+        const gateRead = async (
+          accounts: ClosableAccount[]
+        ): Promise<ClosableAccount[]> => {
+          const current = await readGateLamports(connection, accounts);
+          return accounts.map((a) => {
+            const lamports = current.get(a.pubkey);
+            if (lamports === undefined) return a;
+            lamportsOf.set(a.pubkey, lamports);
+            return { ...a, lamports };
+          });
         };
 
         const confirmed: string[] = [];
@@ -341,18 +448,22 @@ export function useRepairWallet() {
             // The batch this run is executing; the outer catch's
             // verification reads only this (see there).
             currentBatch = batch;
+            const progress = { current: b + 1, total: batches.length };
+            setRunState({ status: "building", progress });
+            // The fee base is the gate read, taken AFTER the identity check
+            // above so the figures belong to the same moment as the build.
+            const feeBatch = await gateRead(batch);
             let instructions = buildCloseAccountInstructions(
-              batch,
+              feeBatch,
               repairOwner
             );
             // The 1% fee rides in the same transaction, AFTER the closes, so
             // the rent they just returned covers it. It shows up in the wallet
             // as a plain transfer before the user approves.
             const fee = feeReady
-              ? buildFeeTransfer(repairOwner, batch)
+              ? buildFeeTransfer(repairOwner, feeBatch)
               : null;
             if (fee) instructions.push(fee);
-            const progress = { current: b + 1, total: batches.length };
             let batchLanded = false;
             // The signature that identifies the transaction this batch
             // actually landed with, when one exists. Null when the batch
@@ -474,13 +585,16 @@ export function useRepairWallet() {
                     const stillOpenBatch = batch.filter((account) =>
                       stillOpenPubkeys.includes(account.pubkey)
                     );
+                    // Fresh read again: the retry is a new transaction,
+                    // built now, so its figures must be current now.
+                    const retryBatch = await gateRead(stillOpenBatch);
                     instructions = buildCloseAccountInstructions(
-                      stillOpenBatch,
+                      retryBatch,
                       repairOwner
                     );
                     // The 1% fee rides on what the retry actually closes.
                     const retryFee = feeReady
-                      ? buildFeeTransfer(repairOwner, stillOpenBatch)
+                      ? buildFeeTransfer(repairOwner, retryBatch)
                       : null;
                     if (retryFee) instructions.push(retryFee);
                     // Nothing landed with the refused attempt's bytes; a
@@ -528,6 +642,10 @@ export function useRepairWallet() {
           const rejected = message.toLowerCase().includes("rejected");
           // A blockhash expiry is a dead transaction, never a lost one.
           const expired = isBlockhashExpiry(message);
+          // The fresh-read gate refused to build. Its own message is the
+          // whole story on the nothing-closed terminal; the partial
+          // terminal needs the cause named alongside its progress line.
+          const gateUnreadable = err instanceof GateUnreadableError;
 
           let closedPubkeys: string[] = [];
           let verifyFailed = false;
@@ -569,9 +687,13 @@ export function useRepairWallet() {
 
           // Raw library text only surfaces when the copy does not already
           // explain the cause (rejected, expired, or thrown by this hook).
+          // The gate's transport error is the one hook-thrown exception:
+          // its main line is plain words, and the raw text is the detail.
           const rawDetail =
             rejected || expired || err instanceof FriendlyError
-              ? null
+              ? gateUnreadable
+                ? err.raw
+                : null
               : message;
 
           // The post-scan withheld-fee race (audit M1): a Token-2022
@@ -599,15 +721,18 @@ export function useRepairWallet() {
             recoveredLamports: recoveredOf(reportClosed),
             progress: null,
             error: partial
-              ? `Repair stopped after ${closed} of ${runAccounts.length} accounts were closed (${lamportsToSol(recoveredOf(reportClosed))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}${verifyFailed ? " On-chain verification could not be reached, so this count is from the confirmed transactions - the linked signature is the receipt." : ""}${token22Hint}`
+              ? `Repair stopped after ${closed} of ${runAccounts.length} accounts were closed (${lamportsToSol(recoveredOf(reportClosed))} SOL recovered). Run the repair again to finish the rest - already-closed accounts are simply skipped.${rejected ? " You cancelled the remaining approvals." : ""}${walletChanged ? " The connected wallet changed during the run." : ""}${gateUnreadable ? GATE_UNREADABLE_NOTE : ""}${verifyFailed ? " On-chain verification could not be reached, so this count is from the confirmed transactions - the linked signature is the receipt." : ""}${token22Hint}`
               : rejected
                 ? "Transaction cancelled. Nothing was sent."
                 : expired
                   ? "The transaction expired while waiting for approval. The network moved on while the wallet window was open. Nothing was sent and nothing was lost. Please try again and approve promptly."
                   : err instanceof FriendlyError
                     ? message
-                    : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open." +
-                      token22Hint,
+                    : verifyFailed
+                      ? "The repair stopped. The on-chain check could not be completed, so this run cannot confirm whether its last transaction went through, or which accounts, if any, it closed. Dismiss to refresh the scan - it shows the chain's current state - then run the repair again if accounts are still open." +
+                        token22Hint
+                      : "The repair transaction did not go through. No accounts were closed when we checked the chain. Solana transactions are atomic, so nothing half-landed. Dismiss to refresh the scan, then run the repair again if accounts are still open." +
+                        token22Hint,
             errorDetail: rawDetail,
           });
         }

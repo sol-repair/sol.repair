@@ -64,6 +64,7 @@ const mocks = vi.hoisted(() => ({
   },
   conn: {
     getAccountInfo: vi.fn(),
+    getMultipleAccountsInfo: vi.fn(),
     getLatestBlockhash: vi.fn(),
     sendRawTransaction: vi.fn(),
     getSignatureStatuses: vi.fn(),
@@ -143,7 +144,8 @@ const SCAN_0: ScanResult = {
 };
 
 /** Wire mocks for a full repair run: fee wallet present, blockhash
- *  fresh, every send confirmed, signer approves. */
+ *  fresh, every account open at its scan figure, every send confirmed,
+ *  signer approves. */
 function wireHappyPath() {
   mocks.conn.getAccountInfo.mockResolvedValue({
     lamports: 1,
@@ -152,6 +154,19 @@ function wireHappyPath() {
     data: Buffer.alloc(0),
     rentEpoch: 0,
   });
+  // The repair hook's fresh-read gate (the fee base) asks the chain for
+  // each batch before building it: every account is still open, holding
+  // the figure the scan recorded.
+  mocks.conn.getMultipleAccountsInfo.mockImplementation(
+    async (pks: PublicKey[]) =>
+      pks.map(() => ({
+        lamports: RENT,
+        owner: TOKEN_PROGRAM_ID,
+        executable: false,
+        data: Buffer.alloc(0),
+        rentEpoch: 0,
+      }))
+  );
   mocks.conn.getLatestBlockhash.mockResolvedValue({
     blockhash: PublicKey.default.toBase58(),
     lastValidBlockHeight: 1000,
