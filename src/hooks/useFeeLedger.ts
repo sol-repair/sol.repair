@@ -31,15 +31,19 @@ type CacheEntry = {
   lastSignature: string | null;
   hasMore: boolean;
   unreadableSignatures: string[];
+  /** History entries the RPC returned in an unusable form (audit finding
+   *  3): reported by the notice, never silently dropped. */
+  malformedRecordCount: number;
 };
 
 function cacheKey(cluster: FeeLedgerCluster): string {
-  // v4: entries carry unreadableSignatures; a v3-cached entry lacks the
-  // field and would hide the incomplete-history notice for the cache's
-  // TTL, so those entries are invalidated rather than trusted. (v3 moved
-  // rows to onePercentMatch for the same reason; v2 moved pagination
-  // metadata from fee-row-based to raw-signature-based.)
-  return `solrepair:fee-ledger:v4:${cluster}`;
+  // v5: entries carry malformedRecordCount; a v4-cached entry lacks the
+  // field and would read as "no malformed records" for the cache's TTL -
+  // masking exactly the unreadable-entries evidence the notice exists to
+  // report - so those entries are invalidated rather than trusted. (v4
+  // carried unreadableSignatures; v3 moved rows to onePercentMatch; v2
+  // moved pagination metadata to raw-signature-based.)
+  return `solrepair:fee-ledger:v5:${cluster}`;
 }
 
 function readCache(cluster: FeeLedgerCluster): CacheEntry | null {
@@ -50,7 +54,9 @@ function readCache(cluster: FeeLedgerCluster): CacheEntry | null {
     if (
       typeof entry.fetchedAt !== "number" ||
       !Array.isArray(entry.rows) ||
-      !Array.isArray(entry.unreadableSignatures)
+      !Array.isArray(entry.unreadableSignatures) ||
+      typeof entry.malformedRecordCount !== "number" ||
+      entry.malformedRecordCount < 0
     ) {
       return null;
     }
@@ -98,6 +104,13 @@ export function useFeeLedger() {
   // be counted twice.
   const [unreadableCount, setUnreadableCount] = useState(0);
   const unreadableSeen = useRef<Set<string>>(new Set());
+  // How many history entries came back in a form the page cannot use
+  // (no usable signature field): summed across pages (audit finding 3).
+  // Unnamed records cannot be deduped by signature; a malformed record
+  // OLDER than its page's cursor re-serves once on the next page, so the
+  // cumulative count is bounded by twice the true distinct count on that
+  // abnormal path, and exact (once) for records newer than the cursor.
+  const [malformedRecordCount, setMalformedRecordCount] = useState(0);
   // Bumped by reload(); the effect treats it as a fresh fetch that
   // bypasses the cache (a retry must not re-show the failed view).
   const [reloadTick, setReloadTick] = useState(0);
@@ -162,6 +175,7 @@ export function useFeeLedger() {
       setLastSignature(cached.lastSignature);
       unreadableSeen.current = new Set(cached.unreadableSignatures);
       setUnreadableCount(cached.unreadableSignatures.length);
+      setMalformedRecordCount(cached.malformedRecordCount);
       setError(null);
       setLoading(false);
     } else {
@@ -171,6 +185,7 @@ export function useFeeLedger() {
       setLastSignature(null);
       unreadableSeen.current = new Set();
       setUnreadableCount(0);
+      setMalformedRecordCount(0);
       setError(null);
       setLoading(true);
     }
@@ -192,6 +207,7 @@ export function useFeeLedger() {
         setLastSignature(nextLast);
         setHasMore(nextHasMore);
         setUnreadableCount(unreadableSeen.current.size);
+        setMalformedRecordCount(page.malformedRecordCount);
         setFetchedAt(fetchedAt);
         setError(null);
         setLoading(false);
@@ -201,6 +217,7 @@ export function useFeeLedger() {
           lastSignature: nextLast,
           hasMore: nextHasMore,
           unreadableSignatures: [...unreadableSeen.current],
+          malformedRecordCount: page.malformedRecordCount,
         });
       } catch (e) {
         if (generation.current !== gen) return;
@@ -249,11 +266,18 @@ export function useFeeLedger() {
       if (generation.current !== gen) return;
       // Cursor and hasMore from the raw signature page: a page of 25 raw
       // signatures with zero fee rows must still advance the cursor, and
-      // only an empty RAW page means the history is exhausted.
+      // only an empty RAW page - the RPC genuinely returned nothing -
+      // means the history is exhausted. A page whose records were all
+      // malformed has a null cursor but is NOT the end of the history:
+      // its malformed count stands (below) and hasMore stops only
+      // because there is no usable cursor to continue from.
       const nextLast = page.lastRawSignature;
       const nextHasMore = page.rawSignatureCount === FEE_LEDGER_PAGE_SIZE;
       if (!nextLast) {
         setHasMore(false);
+        setMalformedRecordCount(
+          (count) => count + page.malformedRecordCount
+        );
         return;
       }
       // The next page can re-serve the boundary signature the cursor
@@ -270,6 +294,9 @@ export function useFeeLedger() {
         unreadableSeen.current.add(signature);
       }
       setUnreadableCount(unreadableSeen.current.size);
+      setMalformedRecordCount(
+        (count) => count + page.malformedRecordCount
+      );
       setFetchedAt(Date.now());
       writeCache(cluster, {
         rows: next,
@@ -277,6 +304,10 @@ export function useFeeLedger() {
         lastSignature: nextLast,
         hasMore: nextHasMore,
         unreadableSignatures: [...unreadableSeen.current],
+        malformedRecordCount:
+          // The cache carries the cumulative count; recompute from the
+          // previous cache-state baseline plus this page's evidence.
+          malformedRecordCount + page.malformedRecordCount,
       });
     } catch (e) {
       // The same generation discipline as the success path: a stale
@@ -287,7 +318,15 @@ export function useFeeLedger() {
     } finally {
       setLoadingMore(false);
     }
-  }, [cluster, endpoint, feeWallet, lastSignature, loadingMore, rows]);
+  }, [
+    cluster,
+    endpoint,
+    feeWallet,
+    lastSignature,
+    loadingMore,
+    malformedRecordCount,
+    rows,
+  ]);
 
   const totalLamports = rows.reduce((sum, row) => sum + row.lamports, 0);
 
@@ -306,5 +345,6 @@ export function useFeeLedger() {
     feeWallet,
     totalLamports,
     unreadableCount,
+    malformedRecordCount,
   };
 }

@@ -72,6 +72,7 @@ export default function FeesPage() {
     feeWallet,
     totalLamports,
     unreadableCount,
+    malformedRecordCount,
   } = useFeeLedger();
   const [copied, setCopied] = useState(false);
 
@@ -251,6 +252,24 @@ export default function FeesPage() {
                 {unreadableCount} transactions in this history could not be
                 read from the RPC. They are left out of the list, so the list
                 can be incomplete.
+              </p>
+            )}
+          </div>
+        )}
+
+        {!loading && malformedRecordCount > 0 && (
+          <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
+            {malformedRecordCount === 1 ? (
+              <p>
+                1 entry in this history came back from the RPC in a form this
+                page could not read. It is left out of the list, so the list
+                can be incomplete.
+              </p>
+            ) : (
+              <p>
+                {malformedRecordCount} entries in this history came back from
+                the RPC in a form this page could not read. They are left out
+                of the list, so the list can be incomplete.
               </p>
             )}
           </div>

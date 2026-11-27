@@ -38,7 +38,7 @@ function row(overrides: Partial<FeeLedgerRow>): FeeLedgerRow {
 function mockHook(
   rows: FeeLedgerRow[],
   unreadableCount = 0,
-  opts: { hasMore?: boolean } = {}
+  opts: { hasMore?: boolean; malformedRecordCount?: number } = {}
 ) {
   vi.mocked(useFeeLedger).mockReturnValue({
     cluster: "mainnet-beta",
@@ -55,6 +55,7 @@ function mockHook(
     feeWallet: FEE_WALLET,
     totalLamports: rows.reduce((sum, r) => sum + r.lamports, 0),
     unreadableCount,
+    malformedRecordCount: opts.malformedRecordCount ?? 0,
   });
 }
 
@@ -303,5 +304,32 @@ describe("fees page live-total labeling", () => {
     render(<FeesPage />);
     expect(screen.getByText(/SOL total/)).toBeTruthy();
     expect(screen.queryByText(/SOL in the fees shown/)).toBeNull();
+  });
+});
+
+describe("the malformed-record notice (whole-repo audit finding 3)", () => {
+  it("reports history entries the RPC returned in an unreadable form", () => {
+    mockHook(
+      [row({ signature: "sig-clean-11111111111111111111111111111111" })],
+      0,
+      { malformedRecordCount: 1 }
+    );
+    render(<FeesPage />);
+    expect(
+      screen.getByText(
+        /1 entry in this history came back from the RPC in a form this page could not read/
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/the list can be incomplete/)).toBeTruthy();
+  });
+
+  it("uses the plural wording for several malformed records", () => {
+    mockHook([], 0, { malformedRecordCount: 3 });
+    render(<FeesPage />);
+    expect(
+      screen.getByText(
+        /3 entries in this history came back from the RPC in a form this page could not read/
+      )
+    ).toBeTruthy();
   });
 });

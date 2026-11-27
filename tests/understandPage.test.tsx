@@ -275,12 +275,15 @@ describe("understand page outcomes", () => {
       disconnect: vi.fn(),
       publicKey: Keypair.generate().publicKey,
     };
-    mockedSignatureList.mockResolvedValue([
-      {
-        signature: VALID_SIGNATURE,
-        blockTime: 1789215763,
-      },
-    ]);
+    mockedSignatureList.mockResolvedValue({
+      records: [
+        {
+          signature: VALID_SIGNATURE,
+          blockTime: 1789215763,
+        },
+      ],
+      malformedRecordCount: 0,
+    });
     const { raw } = buildLegacyRaw([
       closeIx(),
       systemTransferIx(new PublicKey(FEE_WALLET), 20_392),
@@ -375,10 +378,13 @@ describe("understand page outcomes", () => {
       disconnect: vi.fn(),
       publicKey: Keypair.generate().publicKey,
     };
-    mockedSignatureList.mockResolvedValue([
-      { signature: SIGNATURE_A, blockTime: 1789215763 },
-      { signature: SIGNATURE_B, blockTime: 1789215700 },
-    ]);
+    mockedSignatureList.mockResolvedValue({
+      records: [
+        { signature: SIGNATURE_A, blockTime: 1789215763 },
+        { signature: SIGNATURE_B, blockTime: 1789215700 },
+      ],
+      malformedRecordCount: 0,
+    });
 
     let resolveSlow!: (value: ReturnType<typeof buildLegacyRaw>["raw"]) => void;
     mockedFetch

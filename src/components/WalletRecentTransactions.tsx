@@ -79,14 +79,19 @@ export function WalletRecentTransactions({
     if (!address) return;
     let cancelled = false;
     fetchFeeSignatures(endpoint, address)
-      .then((items) => {
+      .then(({ records, malformedRecordCount }) => {
         if (!cancelled) {
           setResult({
             address,
             state: {
               kind: "done",
-              items,
-              reachedEnd: items.length < FEE_LEDGER_PAGE_SIZE,
+              items: records,
+              // The end-of-list heuristic judges exactly what the RPC
+              // returned: a page shortened by malformed records is not
+              // the end of the wallet's history.
+              reachedEnd:
+                records.length + malformedRecordCount <
+                FEE_LEDGER_PAGE_SIZE,
             },
           });
         }
@@ -121,8 +126,10 @@ export function WalletRecentTransactions({
         address,
         state: {
           kind: "done",
-          items: [...currentList.items, ...next],
-          reachedEnd: next.length < FEE_LEDGER_PAGE_SIZE,
+          items: [...currentList.items, ...next.records],
+          reachedEnd:
+            next.records.length + next.malformedRecordCount <
+            FEE_LEDGER_PAGE_SIZE,
         },
       });
     } catch (error) {
