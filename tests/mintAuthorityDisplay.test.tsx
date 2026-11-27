@@ -19,7 +19,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { Keypair, type Connection, type PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
 import type { ReactNode } from "react";
 import type { ScanResult, SkippedAccount } from "@/lib/solana/tokenAccounts";
 
@@ -28,10 +28,64 @@ import { WalletStateSummary } from "@/components/WalletStateSummary";
 
 afterEach(cleanup);
 
-const MINT_AUTHORITY = Keypair.generate().publicKey.toBase58();
-const FREEZE_AUTHORITY = Keypair.generate().publicKey.toBase58();
-const MINT = Keypair.generate().publicKey.toBase58();
-const CLOSE_AUTHORITY = Keypair.generate().publicKey.toBase58();
+// Pinned display fixtures (owner order 2026-11-27, flaky-sweep fix).// The writing-rules sweeps below assert the banned-word regex against
+// rendered text that includes these addresses; Keypair.generate() made
+// the tests themselves flaky - a random base58 address occasionally
+// carries a banned substring (demonstrated mechanically: the regex
+// flagged "bUY" in a random candidate after 1,591 draws), and the
+// sweep then flags the test's own fixture. Every pinned address is a
+// real 32-byte public key, derived from a fixed seed and verified
+// clean against the sweeps' regex in full and short form; the
+// cleanliness pin is itself a test below, so fixture and sweep cannot
+// drift apart. Receipt: .verify-tmp/post-merge/gen-pinned-addresses.mjs
+const WRITING_RULES = /scam|risky|verdict|score|buy|sell/i;
+const MINT_AUTHORITY = "6sVrhQF9aQ8uKoRivSMgqH6q5wGM7KRkhWgrHDqtwYFu";
+const FREEZE_AUTHORITY = "D1hcSGfvvqVLG3oHHJxLSVs57i42mhzgW1xDktUmoLLd";
+const MINT = "5zErA4Nib6bjfUqJCvXWQRtS2rg1HAQY2ge3EMVnEcof";
+const CLOSE_AUTHORITY = "H7b3ths1gsh8j9wfno763upB78ov1RwqwyitmbNsdRBA";
+const WALLET_KEY = new PublicKey("EviwLTeA8grkzLM53xE1VPMaNXgXiVFsX1SBzCiWFUWs");
+const FROZEN_ROW_PUBKEY = "A4ApsW4dsYmZGiVbBKSgVe8b4zEK4fXjn9hH3utgScH5";
+const REDESIGNED_ROW_PUBKEY = "Zf8FxRKrq5wWLeDFFfn4RrafwiNYbr62Hjdrmo2RDee";
+
+describe("the pinned fixture addresses stay clean for the writing-rules sweeps", () => {
+  const pinned: Array<[string, string]> = [
+    ["MINT_AUTHORITY", MINT_AUTHORITY],
+    ["FREEZE_AUTHORITY", FREEZE_AUTHORITY],
+    ["MINT", MINT],
+    ["CLOSE_AUTHORITY", CLOSE_AUTHORITY],
+    ["FROZEN_ROW_PUBKEY", FROZEN_ROW_PUBKEY],
+    ["REDESIGNED_ROW_PUBKEY", REDESIGNED_ROW_PUBKEY],
+  ];
+
+  it("every pinned address is a real 32-byte public key", () => {
+    for (const [name, value] of pinned) {
+      const bytes = new PublicKey(value).toBytes();
+      expect(bytes, name).toHaveLength(32);
+      expect(new PublicKey(bytes).toBase58(), name).toBe(value);
+    }
+    expect(WALLET_KEY.toBytes()).toHaveLength(32);
+    expect(new PublicKey(WALLET_KEY.toBytes()).equals(WALLET_KEY)).toBe(true);
+  });
+
+  it("no pinned address carries a banned writing-rules substring", () => {
+    // A clean full address implies a clean short form: the short form is
+    // a substring window of the full one, and a banned match inside the
+    // window would be a match inside the full address too.
+    for (const [name, value] of pinned) {
+      expect(value, name).not.toMatch(WRITING_RULES);
+    }
+    expect(WALLET_KEY.toBase58()).not.toMatch(WRITING_RULES);
+  });
+
+  it("the sweeps and the pin use the same regex object", () => {
+    // Guard against drift: if the sweeps' banned-word list is ever
+    // widened, this file's fixtures must be re-verified against the
+    // widened list - which happens automatically because both read the
+    // same constant.
+    expect(WRITING_RULES.source).toBe("scam|risky|verdict|score|buy|sell");
+    expect(WRITING_RULES.flags).toContain("i");
+  });
+});
 
 const skip = (
   over: Partial<SkippedAccount> & { cause: SkippedAccount["cause"] }
@@ -119,7 +173,7 @@ describe("mint lines carry the authority states", () => {
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(text.includes("!")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
-    expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
+    expect(text).not.toMatch(WRITING_RULES);
   });
 });
 
@@ -193,7 +247,7 @@ vi.mock("@/components/WalletButton", () => ({
 const HOME = () => import("../src/app/page");
 
 async function renderHomeWithScan(result: ScanResult | null) {
-  mocks.wallet.publicKey = Keypair.generate().publicKey;
+  mocks.wallet.publicKey = WALLET_KEY;
   mocks.scan.result = result;
   mocks.scan.loading = false;
   mocks.scan.error = null;
@@ -210,7 +264,7 @@ function frozenFundedSkip(
     totalAccounts: 1,
     skippedAccounts: [
       skip({
-        pubkey: Keypair.generate().publicKey.toBase58(),
+        pubkey: FROZEN_ROW_PUBKEY,
         mint: MINT,
         cause: "funded",
         reason: "is frozen by the token's freeze authority",
@@ -306,7 +360,7 @@ describe("the frozen funded row (the approved redesign)", () => {
     const lead = screen.getByText("Frozen.");
     const row = lead.closest("div");
     const text = row?.textContent ?? "";
-    expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
+    expect(text).not.toMatch(WRITING_RULES);
   });
 });
 
@@ -361,7 +415,7 @@ describe("the redesigned scan rows carry labels and authority facts", () => {
         totalAccounts: 2,
         eligibleAccounts: [
           {
-            pubkey: Keypair.generate().publicKey.toBase58(),
+            pubkey: REDESIGNED_ROW_PUBKEY,
             mint: MINT,
             lamports: 2039280,
             program: "spl",
@@ -383,7 +437,7 @@ describe("the redesigned scan rows carry labels and authority facts", () => {
     expect(text.includes("\u2014") || text.includes("\u2013")).toBe(false);
     expect(text.includes("!")).toBe(false);
     expect(/\p{Extended_Pictographic}/u.test(text)).toBe(false);
-    expect(text).not.toMatch(/scam|risky|verdict|score|buy|sell/i);
+    expect(text).not.toMatch(WRITING_RULES);
   });
 });
 
